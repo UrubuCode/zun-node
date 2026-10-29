@@ -1,0 +1,21 @@
+// node:process — surface over the `zun:core` `host` native group.
+//
+// NOT the active library yet (fs is finished first). This stub records the
+// mapping so process can start immediately after fs: most of its core already
+// has backing natives in `host` (envGet/envHas/cwd/argCount/argAt/exitProcess/
+// isTty/stdoutWrite/stderrWrite/stdinLine). Still missing natives: `process.pid`,
+// `process.platform`, `process.hrtime`, signals, and the argv[] assembly.
+
+import { host as processHost } from "zun:core";
+
+export function cwd(): string {
+    return processHost.cwd();
+}
+
+export function exit(code?: number): void {
+    processHost.exitProcess(code === undefined ? 0 : code);
+}
+
+// `process.argv` assembly, `process.env` as a proxy object, `process.platform`,
+// `process.pid`, and the stdio streams are implemented when process becomes the
+// active library (after fs reaches 100% of its Node tests).

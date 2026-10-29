@@ -1,0 +1,103 @@
+// node:fs — synchronous surface over the `zun:core` `fs` native group.
+//
+// Node.js 25 compatibility. This is the thin Zun/TS wrapper; the real syscalls
+// live in the engine's `fs` native group (main `zun` repo, `crates/zun_natives`).
+// Scope of this slice: the synchronous, UTF-8/text path. Deferred until the
+// native boundary can return a managed Buffer: byte-exact `readFileSync` without
+// an encoding, file descriptors (`openSync`/`readSync`/`writeSync`), and the
+// callback/promise/stream surfaces.
+//
+// Errors already arrive from the natives with Node-accurate messages
+// (`<CODE>: <desc>, <syscall> '<path>'`); `codeOf` recovers the `err.code` Node
+// tests assert on.
+
+import { fs as fsHost } from "zun:core";
+
+// Recover the leading error code (`ENOENT`, `EEXIST`, …) from a Node-style
+// message, or `""` when the shape is unexpected.
+function codeOf(message: string): string {
+    const colon = message.indexOf(":");
+    return colon > 0 ? message.slice(0, colon) : "";
+}
+
+export function existsSync(path: string): boolean {
+    return fsHost.fsExistsSync(path);
+}
+
+// `readFileSync(path)` / `readFileSync(path, "utf8")`. Without an encoding Node
+// returns a Buffer; that path is deferred (needs a managed byte return), so the
+// text form is implemented and an explicit non-utf8 encoding is rejected.
+export function readFileSync(path: string, encoding?: string): string {
+    if (encoding !== undefined && encoding !== "utf8" && encoding !== "utf-8") {
+        throw new Error("zun-node: only 'utf8' readFileSync is implemented so far");
+    }
+    return fsHost.fsReadFileUtf8(path);
+}
+
+export function writeFileSync(path: string, data: string): void {
+    fsHost.fsWriteFileSync(path, data);
+}
+
+export function appendFileSync(path: string, data: string): void {
+    fsHost.fsAppendFileSync(path, data);
+}
+
+// `mkdirSync(path)` / `mkdirSync(path, { recursive: true })`.
+export function mkdirSync(path: string, recursive?: boolean): void {
+    fsHost.fsMkdirSync(path, recursive === true);
+}
+
+export function rmdirSync(path: string): void {
+    fsHost.fsRmdirSync(path);
+}
+
+export function unlinkSync(path: string): void {
+    fsHost.fsUnlinkSync(path);
+}
+
+// `rmSync(path, { recursive, force })`.
+export function rmSync(path: string, recursive?: boolean, force?: boolean): void {
+    fsHost.fsRmSync(path, recursive === true, force === true);
+}
+
+export function renameSync(from: string, to: string): void {
+    fsHost.fsRenameSync(from, to);
+}
+
+export function copyFileSync(src: string, dest: string): void {
+    fsHost.fsCopyFileSync(src, dest);
+}
+
+// `readdirSync(path)` — the native returns the entries NUL-joined; split them
+// back into the string[] Node hands callers. An empty directory joins to "".
+export function readdirSync(path: string): string[] {
+    const joined = fsHost.fsReaddirSync(path);
+    return joined === "" ? [] : joined.split("\u0000");
+}
+
+export function realpathSync(path: string): string {
+    return fsHost.fsRealpathSync(path);
+}
+
+// A `Stats`-shaped record. `.zun` classes have no constructor bodies, so this is
+// an object literal carrying the scalar metadata plus Node's predicate methods;
+// `statSync`/`lstatSync` fill it from the native getters.
+function statsFrom(kind: string, size: number, mtimeMs: number): any {
+    return {
+        size: size,
+        mtimeMs: mtimeMs,
+        isFile: () => kind === "file",
+        isDirectory: () => kind === "directory",
+        isSymbolicLink: () => kind === "symlink",
+    };
+}
+
+export function statSync(path: string): any {
+    const kind = fsHost.fsStatKind(path);
+    return statsFrom(kind, fsHost.fsStatSize(path), fsHost.fsStatMtimeMs(path));
+}
+
+export function lstatSync(path: string): any {
+    const kind = fsHost.fsLstatKind(path);
+    return statsFrom(kind, fsHost.fsStatSize(path), fsHost.fsStatMtimeMs(path));
+}
