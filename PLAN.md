@@ -30,11 +30,14 @@ that apply to it.**
 zun-node (this repo) ──[cdylib, zun_register_v1]──▶ zun_abi ◀──[loads + invokes]── Zun host
 ```
 
-- **`src/lib.rs`** — `zun_register_v1`, the ABI carrier helpers (`abi` module), and
-  the per-module registration tables.
-- **`src/<module>.rs`** — one file per Node module (`fs.rs`, later `process.rs`, …),
-  each function a `zun_abi::ZunInvoke` over `std`.
-- **`test/`** — the Node test corpus being ported (see `test/README.md`).
+- **`src/lib.rs`** — `zun_register_v1`, the ABI carrier helpers (`abi` module), the
+  shared `Descriptor` type, and shared error retrieval.
+- **`src/<module>/`** — one folder per Node module (Node's modules are large). Each
+  has a `mod.rs` with the module's `DESCRIPTORS` table and submodules by area; e.g.
+  `src/fs/{mod,rw,dirs,meta,links}.rs`. Each function is a `zun_abi::ZunInvoke` over
+  `std`.
+- **`test/<module>/`** — that module's Node test corpus and status (see
+  `test/fs/README.md` and `test/fs/NODE_TESTS.txt`).
 
 Built as a `cdylib`; the host loads it (by name or embedded in a `.zmlib`) and calls
 `zun_register_v1`. It is also an `rlib`, so every module is unit-tested as plain
@@ -58,14 +61,17 @@ host-agnostic convention until a richer ABI version lands:
 
 ## Status
 
-- **`node:fs` (sync core): implemented + tested through the ABI.** `existsSync`,
-  `readFileSync` (utf8), `writeFileSync`, `appendFileSync`, `mkdirSync`, `rmdirSync`,
-  `unlinkSync`, `rmSync`, `renameSync`, `copyFileSync`, `readdirSync`,
-  `statSync`/`lstatSync` kind+size+mtimeMs, `realpathSync`, plus `lastErrorCode`/
-  `lastErrorMessage`. 4 crate tests green (`cargo test`): register + round-trip +
-  Node ENOENT + mkdir/readdir/stat.
+- **`node:fs` (sync surface): in progress, split across `src/fs/`.** Implemented:
+  existsSync, accessSync, readFileSync (utf8), writeFileSync, appendFileSync,
+  truncateSync, mkdirSync, rmdirSync, unlinkSync, rmSync, readdirSync, mkdtempSync,
+  statSync/lstatSync (kind/size/mtimeMs/atimeMs/birthtimeMs), realpathSync,
+  renameSync, copyFileSync, linkSync, symlinkSync, readlinkSync, plus
+  lastErrorCode/lastErrorMessage. 8 crate tests green (`cargo test`). **Not done:**
+  the acceptance bar is 100% of Node 25's `test-fs-*` suite (227 files — see
+  `test/fs/`), which also needs Buffers, fds, callbacks/promises, streams, watch,
+  Dirent, and the full `Stats`; those land in their own `src/fs/` submodules.
 - **`process`: not started** — next after fs. Most of its core maps onto the
-  engine's existing `host` native state; the ABI surface lands here when it starts.
+  engine's existing `host` native state; its folder (`src/process/`) lands then.
 
 ### Module keys and host dispatch
 

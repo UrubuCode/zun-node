@@ -133,3 +133,68 @@ fn mkdir_readdir_and_stat_kind() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+fn i64_value(value: i64) -> ZunValue {
+    ZunValue { ty: ZunTyRepr::from(ZunTy::I64), reserved: 0, payload: value as u64 }
+}
+
+#[test]
+fn truncate_shrinks_a_file_to_the_requested_length() {
+    let reg = registry();
+    let dir = temp_dir();
+    let file = cstr(dir.join("t.txt").to_str().unwrap());
+
+    call(&reg, "writeFileSync", &[str_value(&file), str_value(&cstr("hello world"))]).unwrap();
+    call(&reg, "truncateSync", &[str_value(&file), i64_value(5)]).unwrap();
+
+    let size = call(&reg, "statSize", &[str_value(&file)]).unwrap().unwrap();
+    assert_eq!(size.payload as i64, 5);
+    let contents = read_str(call(&reg, "readFileUtf8", &[str_value(&file)]).unwrap().unwrap());
+    assert_eq!(contents, "hello");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn mkdtemp_creates_a_unique_directory_under_the_prefix() {
+    let reg = registry();
+    let dir = temp_dir();
+    let prefix = dir.join("run-").to_str().unwrap().to_owned();
+    let prefix_arg = cstr(&prefix);
+
+    let created = read_str(call(&reg, "mkdtempSync", &[str_value(&prefix_arg)]).unwrap().unwrap());
+    assert!(created.starts_with(&prefix), "`{created}` should start with `{prefix}`");
+    assert_eq!(created.len(), prefix.len() + 6, "six suffix characters");
+
+    let created_arg = cstr(&created);
+    let kind = read_str(call(&reg, "statKind", &[str_value(&created_arg)]).unwrap().unwrap());
+    assert_eq!(kind, "directory");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn hard_link_points_at_the_same_contents() {
+    let reg = registry();
+    let dir = temp_dir();
+    let original = cstr(dir.join("a.txt").to_str().unwrap());
+    let linked = cstr(dir.join("b.txt").to_str().unwrap());
+
+    call(&reg, "writeFileSync", &[str_value(&original), str_value(&cstr("shared"))]).unwrap();
+    call(&reg, "linkSync", &[str_value(&original), str_value(&linked)]).unwrap();
+
+    let contents = read_str(call(&reg, "readFileUtf8", &[str_value(&linked)]).unwrap().unwrap());
+    assert_eq!(contents, "shared");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn access_on_a_missing_path_fails_with_enoent() {
+    let reg = registry();
+    let missing = cstr("./definitely-absent-zun-node-access");
+    let status = call(&reg, "accessSync", &[str_value(&missing), i64_value(0)]).unwrap_err();
+    assert_ne!(status, 0);
+    let code = read_str(call(&reg, "lastErrorCode", &[]).unwrap().unwrap());
+    assert_eq!(code, "ENOENT");
+}

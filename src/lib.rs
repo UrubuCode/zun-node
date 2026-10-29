@@ -86,6 +86,17 @@ pub(crate) mod abi {
         unsafe { (*args.add(i)).payload != 0 }
     }
 
+    /// Read `i64` argument `i`; `0` when absent.
+    ///
+    /// # Safety
+    /// As [`arg_str`], for an `I64` argument.
+    pub(crate) unsafe fn arg_i64(args: *const ZunValue, n: usize, i: usize) -> i64 {
+        if i >= n {
+            return 0;
+        }
+        unsafe { (*args.add(i)).payload as i64 }
+    }
+
     /// Write a `Str` result through the per-thread scratch buffer.
     ///
     /// # Safety
@@ -157,50 +168,28 @@ pub(crate) mod abi {
     }
 }
 
-/// `node:fs.lastErrorCode()` — the most recent error's Node code on this thread.
-unsafe extern "C" fn last_error_code(_: *const ZunValue, _: usize, out: *mut ZunValue) -> i32 {
+/// `lastErrorCode()` — the most recent error's Node code on this thread. Shared
+/// by every module (the per-thread error slot is not fs-specific).
+pub(crate) unsafe extern "C" fn last_error_code(_: *const ZunValue, _: usize, out: *mut ZunValue) -> i32 {
     let code = ERR_CODE.with(|slot| slot.borrow().to_string_lossy().into_owned());
     unsafe { abi::ret_str(out, &code) }
 }
 
-/// `node:fs.lastErrorMessage()` — the most recent error's message on this thread.
-unsafe extern "C" fn last_error_message(_: *const ZunValue, _: usize, out: *mut ZunValue) -> i32 {
+/// `lastErrorMessage()` — the most recent error's message on this thread.
+pub(crate) unsafe extern "C" fn last_error_message(_: *const ZunValue, _: usize, out: *mut ZunValue) -> i32 {
     let message = ERR_MSG.with(|slot| slot.borrow().to_string_lossy().into_owned());
     unsafe { abi::ret_str(out, &message) }
 }
 
 /// One function descriptor: a NUL-terminated key, its parameter types, return
-/// type, and implementation.
-struct Descriptor {
-    key: &'static [u8],
-    params: &'static [ZunTy],
-    ret: ZunTy,
-    invoke: zun_abi::ZunInvoke,
+/// type, and implementation. Shared by each module's registration table (e.g.
+/// [`fs::DESCRIPTORS`]).
+pub(crate) struct Descriptor {
+    pub(crate) key: &'static [u8],
+    pub(crate) params: &'static [ZunTy],
+    pub(crate) ret: ZunTy,
+    pub(crate) invoke: zun_abi::ZunInvoke,
 }
-
-use ZunTy::{Bool, F64, I64, Str, Void};
-
-/// The `node:fs` surface published to the host.
-const FS_FUNCTIONS: &[Descriptor] = &[
-    Descriptor { key: b"existsSync\0", params: &[Str], ret: Bool, invoke: fs::exists_sync },
-    Descriptor { key: b"readFileUtf8\0", params: &[Str], ret: Str, invoke: fs::read_file_utf8 },
-    Descriptor { key: b"writeFileSync\0", params: &[Str, Str], ret: Void, invoke: fs::write_file_sync },
-    Descriptor { key: b"appendFileSync\0", params: &[Str, Str], ret: Void, invoke: fs::append_file_sync },
-    Descriptor { key: b"mkdirSync\0", params: &[Str, Bool], ret: Void, invoke: fs::mkdir_sync },
-    Descriptor { key: b"rmdirSync\0", params: &[Str], ret: Void, invoke: fs::rmdir_sync },
-    Descriptor { key: b"unlinkSync\0", params: &[Str], ret: Void, invoke: fs::unlink_sync },
-    Descriptor { key: b"rmSync\0", params: &[Str, Bool, Bool], ret: Void, invoke: fs::rm_sync },
-    Descriptor { key: b"renameSync\0", params: &[Str, Str], ret: Void, invoke: fs::rename_sync },
-    Descriptor { key: b"copyFileSync\0", params: &[Str, Str], ret: Void, invoke: fs::copy_file_sync },
-    Descriptor { key: b"readdirSync\0", params: &[Str], ret: Str, invoke: fs::readdir_sync },
-    Descriptor { key: b"statKind\0", params: &[Str], ret: Str, invoke: fs::stat_kind },
-    Descriptor { key: b"lstatKind\0", params: &[Str], ret: Str, invoke: fs::lstat_kind },
-    Descriptor { key: b"statSize\0", params: &[Str], ret: I64, invoke: fs::stat_size },
-    Descriptor { key: b"statMtimeMs\0", params: &[Str], ret: F64, invoke: fs::stat_mtime_ms },
-    Descriptor { key: b"realpathSync\0", params: &[Str], ret: Str, invoke: fs::realpath_sync },
-    Descriptor { key: b"lastErrorCode\0", params: &[], ret: Str, invoke: last_error_code },
-    Descriptor { key: b"lastErrorMessage\0", params: &[], ret: Str, invoke: last_error_message },
-];
 
 /// Publish every `Descriptor` in `functions` under `module` (a NUL-terminated
 /// module key) through the host registry. Returns a non-zero status on the
@@ -252,7 +241,7 @@ pub unsafe extern "C" fn zun_register_v1(registry: *mut ZunRegistry) -> i32 {
         return -1;
     }
     for module in FS_MODULE_KEYS {
-        let status = unsafe { register_module(registry, module, FS_FUNCTIONS) };
+        let status = unsafe { register_module(registry, module, fs::DESCRIPTORS) };
         if status != 0 {
             return status;
         }
