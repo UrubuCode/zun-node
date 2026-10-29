@@ -1,73 +1,83 @@
 # zun-node — Node.js compatibility library for Zun
 
 A Node.js-compatible standard library for the [Zun](https://github.com/UrubuCode/zun)
-platform, implemented as Zun/TypeScript (`.zun`) modules over the engine's native
-`zun:core` intrinsics.
+platform, implemented as a **native Zun extension**: a Rust `cdylib` that exports
+`zun_register_v1` and publishes each Node module's functions through the stable
+`zun_abi` contract. The Zun engine core holds only base logic; libraries like this
+one are reached **through the ABI**, not baked into the core.
 
-**Baseline: Node.js 25.** The target surface and semantics are Node 25; the oracle
-for "done" is Node's own test suite (`test/` in nodejs/node): **a library is not
-finished until it passes 100% of the Node tests that apply to it.**
+**Baseline: Node.js 25.** The oracle for "done" is Node's own test suite (`test/` in
+nodejs/node): **a library is not finished until it passes 100% of the Node tests
+that apply to it.**
 
 ## Principles
 
 1. **Library by library, finished before moving on.** Order: **`fs` → `process` →
    `path` → `os` → `events` → `stream` → `buffer` → …**. Do not start the next
    library until the current one passes 100% of its applicable Node tests.
-2. **Intrinsics first.** Lean on native `zun:core` groups (implemented in the Zun
-   engine's `zun_natives` crate) for anything the OS or the machine floor must do
-   (filesystem, process state, time, randomness). The `.zun` layer is a thin,
-   Node-shaped wrapper; real work lives in the Rust floor and JITs to native.
+2. **Native through the ABI.** Each module is Rust over `std`/the OS, exposed as
+   `zun_abi` functions under a `node:<name>` module key. The crate depends on
+   `zun_abi` alone — no VM, interpreter, or allocator dependency.
 3. **No module graph beyond the engine.** Implement the maximum API that does not
-   require pulling in the signed module-registry/distribution layer or third-party
-   packages. Each library is self-contained over `zun:core`.
-4. **Dependency rule.** If a library needs a capability another unfinished library
-   owns, implement *just that piece* of the other library to unblock — but never
-   leave a library before its own dependency within it is finished.
+   require a third-party package or the signed module registry. Self-contained.
+4. **Dependency rule.** If a module needs a capability another unfinished module
+   owns, implement *just that piece* to unblock — but never leave a module before
+   its own internal dependency is finished.
 
-## Two-repository split
-
-A Node library is two halves that land together:
-
-- **Engine side (main `zun` repo, `crates/zun_natives`):** new `zun:core` native
-  groups for syscalls the library needs (e.g. the `fs` group: `fsReadFileUtf8`,
-  `fsWriteFileSync`, …). These are Rust, unit-tested in-process, and append-only in
-  `MODULES` so dispatch ids stay stable.
-- **Library side (this repo, `lib/<name>/`):** the Node-shaped `.zun` surface that
-  composes those natives into the public API (`fs.readFileSync`, `fs.Stats`, …),
-  plus the vendored/adapted Node tests in `test/<name>/`.
-
-The engine-side natives are committed in the main repo; the `.zun` surface and tests
-are committed here (this submodule). A library is "done" only when both halves are in.
-
-## Layout
+## Architecture
 
 ```
-PLAN.md
-lib/
-  fs/        fs.zun        — node:fs surface over the zun:core `fs` native group
-  process/   process.zun   — node:process over the zun:core `host` group
-test/
-  fs/        adapted nodejs/node fs tests
-  process/
+zun-node (this repo) ──[cdylib, zun_register_v1]──▶ zun_abi ◀──[loads + invokes]── Zun host
 ```
+
+- **`src/lib.rs`** — `zun_register_v1`, the ABI carrier helpers (`abi` module), and
+  the per-module registration tables.
+- **`src/<module>.rs`** — one file per Node module (`fs.rs`, later `process.rs`, …),
+  each function a `zun_abi::ZunInvoke` over `std`.
+- **`test/`** — the Node test corpus being ported (see `test/README.md`).
+
+Built as a `cdylib`; the host loads it (by name or embedded in a `.zmlib`) and calls
+`zun_register_v1`. It is also an `rlib`, so every module is unit-tested as plain
+Rust against the real `zun_abi` registration + checked-invocation path.
+
+### ABI v1 carrier convention (fixed by this crate, see `src/lib.rs`)
+
+ABI v1's `ZunValue` is a single-word payload, so this crate fixes a simple,
+host-agnostic convention until a richer ABI version lands:
+
+- **`Str` argument:** `payload` is a `*const c_char` (host-owned, NUL-terminated
+  UTF-8, valid for the call).
+- **`Str` result:** stored in a per-thread scratch `CString`; `payload` is its
+  pointer, valid until the next call on that thread (the host copies it out first).
+- **Multi-value string results** (e.g. `readdirSync`) join on `/`, which cannot
+  occur in a path component and (unlike NUL) survives the NUL-terminated carrier.
+- **Errors:** a failing call stashes a Node-accurate `(code, message)` per thread
+  and returns a non-zero status; the host/wrapper reads them via the module's
+  `lastErrorCode` / `lastErrorMessage` functions to build a JS error whose
+  `code`/`message` match Node's.
 
 ## Status
 
-- **Engine `fs` native group: DONE** (main repo, `zun:core` `fs`). Sync core:
-  existsSync, readFileSync (utf8), writeFileSync, appendFileSync, mkdirSync,
-  rmdirSync, unlinkSync, rmSync, renameSync, copyFileSync, readdirSync,
-  statSync/lstatSync kind+size+mtimeMs, realpathSync. Rust-unit-tested; Node-accurate
-  error messages.
-- **`lib/fs/fs.zun`: in progress** — the Node surface over that group (sync path
-  first). Buffer-returning reads and the async/promise/stream surface follow once
-  (a) the native boundary can return a managed Buffer and (b) a local module-load
-  path lets a user program `import … from "node:fs"`.
-- **`process`: not started** — most of its surface already has backing natives in the
-  `zun:core` `host` group (`envGet`/`cwd`/`argAt`/`exitProcess`/`isTty`).
+- **`node:fs` (sync core): implemented + tested through the ABI.** `existsSync`,
+  `readFileSync` (utf8), `writeFileSync`, `appendFileSync`, `mkdirSync`, `rmdirSync`,
+  `unlinkSync`, `rmSync`, `renameSync`, `copyFileSync`, `readdirSync`,
+  `statSync`/`lstatSync` kind+size+mtimeMs, `realpathSync`, plus `lastErrorCode`/
+  `lastErrorMessage`. 4 crate tests green (`cargo test`): register + round-trip +
+  Node ENOENT + mkdir/readdir/stat.
+- **`process`: not started** — next after fs. Most of its core maps onto the
+  engine's existing `host` native state; the ABI surface lands here when it starts.
 
-### Immediate next integration step (blocks running the `.zun` surface + Node tests)
+### Enabling work on the host/core side (gates *running* these from a program)
 
-A **local module-load path** so a user program can resolve `node:fs` to this repo's
-compiled `lib/fs/fs.zun` without the signed registry. Until that exists, the engine
-natives are verified in Rust but the `.zun` wrapper and Node tests cannot execute.
-This is the gate before `fs` can be driven to 100%.
+The extension itself is verified in isolation, but a user program cannot yet call
+`node:fs` end to end until the Zun host provides:
+
+1. **`Str` (and later buffer) marshalling** across `zun_abi` matching the convention
+   above — the host copying C strings in/out and surfacing the extension's
+   `(code, message)` as a thrown JS error.
+2. **`import … from "node:fs"` → extension dispatch** — resolving the module import
+   to the loaded extension's registered `(module, key)` functions.
+
+Both are core changes in the main `zun` repo (the "do part of the dependency to
+unblock" rule). Until they exist, `cargo test` here is the verification path and the
+Node `.js` corpus in `test/` is being ported against this surface.

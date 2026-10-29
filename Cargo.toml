@@ -1,0 +1,19 @@
+[package]
+name = "zun_node"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/UrubuCode/zun-node"
+description = "Node.js-compatible library for the Zun platform, as a native zun_abi extension"
+
+# A native Zun extension is a dynamic library the host loads and whose
+# `zun_register_v1` entry point it calls. `rlib` is kept so the modules can also
+# be unit-tested as plain Rust.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The stable, host-facing extension ABI. Only this — an extension carries no VM,
+# interpreter, or allocator dependency. Path dependency while developed inside
+# the Zun workspace checkout; a release pins a published/git `zun_abi`.
+zun_abi = { path = "../crates/zun_abi" }
