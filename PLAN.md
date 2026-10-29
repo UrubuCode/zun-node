@@ -59,6 +59,27 @@ host-agnostic convention until a richer ABI version lands:
   `lastErrorCode` / `lastErrorMessage` functions to build a JS error whose
   `code`/`message` match Node's.
 
+## Compatibility tracker
+
+`tools/run_node_tests.sh` + `.github/workflows/node-compat.yml` download Node 25's
+`test-<module>-*.js` at a pinned tag, run each through `zun` with this extension
+loaded, and render the pass share into the README (a progress bar + percentage) and
+`test/<module>/RESULTS.md`. A test passes when `zun run` exits 0. The baseline is
+**0% for `fs`** (227 tests): Node's tests need a compatibility harness that does not
+exist yet. The path to raise the number, in order:
+
+1. **CommonJS `require` + module resolution** (Node tests are `require('fs')`,
+   `require('../common')`, `require('assert')`), including `node:` specifier
+   normalization so bare `fs` resolves.
+2. **A `common` + `assert` harness** (the `test/common` helpers and `assert` the
+   suite leans on), and `node:test` where newer tests use it.
+3. **Node-API shaping** over the low-level extension natives: `readFileSync`
+   options/Buffer, a `Stats` object with `isFile()`/`size`/…, callback and promise
+   forms, file descriptors.
+
+Each lands in its own `src/<module>/` area (or a shared harness module) and is
+ticked off by the percentage climbing, never by self-written tests.
+
 ## Status
 
 - **`node:fs` (sync surface): in progress, split across `src/fs/`.** Implemented:

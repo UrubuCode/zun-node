@@ -1,0 +1,79 @@
+# Measure zun-node against Node.js 25's own test suite.
+#
+# The job builds the Zun engine and this extension, downloads the Node
+# `test-<module>-*.js` files at a pinned tag, runs each through `zun` with the
+# extension loaded, and renders the pass percentage into the README and
+# test/<module>/RESULTS.md. The tests are never vendored — they are fetched at
+# run time by tools/run_node_tests.sh.
+#
+# zun-node is a submodule of the engine, and its Cargo path dependency on
+# `../crates/zun_abi` assumes it sits inside the engine checkout at
+# `zun/zun-node`. The workflow reproduces that layout: it checks out the engine,
+# then checks this repo out into `engine/zun-node`.
+name: node-compat
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: Node module to measure (fs, process, …)
+        default: fs
+      limit:
+        description: Only the first N tests (0 = all)
+        default: "0"
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  push:
+    branches: [main]
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Zun engine
+        uses: actions/checkout@v4
+        with:
+          repository: UrubuCode/zun
+          path: engine
+
+      - name: Checkout zun-node into the engine layout
+        uses: actions/checkout@v4
+        with:
+          path: engine/zun-node
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            engine
+            engine/zun-node
+
+      - name: Build the zun binary
+        working-directory: engine
+        run: cargo build -p zun_cli
+
+      - name: Build the zun-node extension
+        working-directory: engine/zun-node
+        run: cargo build
+
+      - name: Run the Node test tracker
+        working-directory: engine
+        run: |
+          MODULE="${{ github.event.inputs.module || 'fs' }}"
+          LIMIT="${{ github.event.inputs.limit || '0' }}"
+          bash zun-node/tools/run_node_tests.sh \
+            --zun "$PWD/target/debug/zun" \
+            --ext "$PWD/zun-node/target/debug/libzun_node.so" \
+            --module "$MODULE" \
+            --limit "$LIMIT" | tee "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-compat-results
+          path: |
+            engine/zun-node/README.md
+            engine/zun-node/test/**/RESULTS.md
