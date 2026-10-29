@@ -58,10 +58,15 @@ fn temp_dir() -> std::path::PathBuf {
 }
 
 #[test]
-fn registers_the_fs_surface_under_node_fs() {
+fn registers_the_fs_surface_under_both_module_keys() {
     let reg = registry();
-    for key in ["existsSync", "readFileUtf8", "writeFileSync", "readdirSync", "statKind"] {
-        assert!(reg.module("node:fs").func(key).is_some(), "missing `{key}`");
+    for module in ["node:fs", "fs"] {
+        for key in ["existsSync", "readFileUtf8", "writeFileSync", "readdirSync", "statKind"] {
+            assert!(
+                reg.module(module).func(key).is_some(),
+                "missing `{module}.{key}`"
+            );
+        }
     }
 }
 

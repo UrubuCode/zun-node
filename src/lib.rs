@@ -233,6 +233,11 @@ unsafe fn register_module(
     0
 }
 
+/// Module keys the `fs` surface is published under. Node resolves both the
+/// prefixed (`node:fs`) and bare (`fs`) specifiers to the same builtin, so the
+/// surface is registered under each — whichever an `import` uses resolves.
+const FS_MODULE_KEYS: &[&[u8]] = &[b"node:fs\0", b"fs\0"];
+
 /// ABI v1 registration entry point. The host calls this once after loading the
 /// library, passing a validated [`ZunRegistry`]; it publishes every module.
 ///
@@ -246,7 +251,13 @@ pub unsafe extern "C" fn zun_register_v1(registry: *mut ZunRegistry) -> i32 {
     if registry.abi_version != ZUN_ABI_V1 {
         return -1;
     }
-    unsafe { register_module(registry, b"node:fs\0", FS_FUNCTIONS) }
+    for module in FS_MODULE_KEYS {
+        let status = unsafe { register_module(registry, module, FS_FUNCTIONS) };
+        if status != 0 {
+            return status;
+        }
+    }
+    0
 }
 
 #[cfg(test)]

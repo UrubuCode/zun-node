@@ -67,17 +67,15 @@ host-agnostic convention until a richer ABI version lands:
 - **`process`: not started** — next after fs. Most of its core maps onto the
   engine's existing `host` native state; the ABI surface lands here when it starts.
 
-### Enabling work on the host/core side (gates *running* these from a program)
+### Module keys and host dispatch
 
-The extension itself is verified in isolation, but a user program cannot yet call
-`node:fs` end to end until the Zun host provides:
+The surface is registered under both `node:fs` and `fs`, so either import specifier
+resolves. The engine already dispatches external module calls at runtime through
+`CallHook::try_call_external(module, name, args)` (with string marshalling), and
+loads native extensions through `zun_abi` — **no `zun:core` core change is needed**.
+Wiring is a matter of loading this extension and routing `node:fs`/`fs` external
+calls to its registered functions, in the engine's existing format.
 
-1. **`Str` (and later buffer) marshalling** across `zun_abi` matching the convention
-   above — the host copying C strings in/out and surfacing the extension's
-   `(code, message)` as a thrown JS error.
-2. **`import … from "node:fs"` → extension dispatch** — resolving the module import
-   to the loaded extension's registered `(module, key)` functions.
-
-Both are core changes in the main `zun` repo (the "do part of the dependency to
-unblock" rule). Until they exist, `cargo test` here is the verification path and the
-Node `.js` corpus in `test/` is being ported against this surface.
+Until that routing is exercised from a user program, `cargo test` here is the
+verification path (it drives the real `zun_abi` registration + checked-invocation
+path), and the Node `.js` corpus in `test/` is ported against this surface.
