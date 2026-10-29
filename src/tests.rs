@@ -58,16 +58,14 @@ fn temp_dir() -> std::path::PathBuf {
 }
 
 #[test]
-fn registers_the_fs_surface_under_both_module_keys() {
+fn registers_the_fs_surface_under_node_fs() {
     let reg = registry();
-    for module in ["node:fs", "fs"] {
-        for key in ["existsSync", "readFileUtf8", "writeFileSync", "readdirSync", "statKind"] {
-            assert!(
-                reg.module(module).func(key).is_some(),
-                "missing `{module}.{key}`"
-            );
-        }
+    for key in ["existsSync", "readFileUtf8", "writeFileSync", "readdirSync", "statKind"] {
+        assert!(reg.module("node:fs").func(key).is_some(), "missing `node:fs.{key}`");
     }
+    // Not double-registered under bare `fs` (that would make names ambiguous at
+    // compile time); bare `fs` resolves via `node:` normalization instead.
+    assert!(reg.module("fs").func("existsSync").is_none());
 }
 
 #[test]

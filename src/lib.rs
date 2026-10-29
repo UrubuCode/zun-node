@@ -222,10 +222,13 @@ unsafe fn register_module(
     0
 }
 
-/// Module keys the `fs` surface is published under. Node resolves both the
-/// prefixed (`node:fs`) and bare (`fs`) specifiers to the same builtin, so the
-/// surface is registered under each — whichever an `import` uses resolves.
-const FS_MODULE_KEYS: &[&[u8]] = &[b"node:fs\0", b"fs\0"];
+/// Module key the `fs` surface is published under. The canonical Node 25
+/// specifier is the prefixed `node:fs`. The bare `fs` alias is intentionally
+/// NOT a second registration: giving the compiler the same export under two
+/// module names makes every name ambiguous. Bare `fs` will resolve by
+/// normalizing a leading `node:` at import resolution, a single rule, rather
+/// than duplicating the surface here.
+const FS_MODULE_KEYS: &[&[u8]] = &[b"node:fs\0"];
 
 /// ABI v1 registration entry point. The host calls this once after loading the
 /// library, passing a validated [`ZunRegistry`]; it publishes every module.
