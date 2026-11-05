@@ -1101,9 +1101,10 @@ function __eventsGetEventListeners(emitterOrTarget: any, type: any): any[] {
 
 // Side tables keyed by object identity.
 //
-// A `WeakMap` would be the right structure, but its methods do not resolve in
-// this engine (`new WeakMap().get(k)` fails with "call did not resolve to a
-// method", and a `Map` read through an `any` binding throws), so these are two
+// A `WeakMap` would be the right structure, but it accepts only object values
+// here (`wm.set(key, 5)` fails with "call did not resolve to a method",
+// https://github.com/UrubuCode/zun/issues/28), and a `Map` read through an `any`
+// binding throws (https://github.com/UrubuCode/zun/issues/7), so these are two
 // parallel arrays with a linear scan. Object identity survives array storage —
 // only *functions* and *symbols* are re-boxed — so the scan is exact. The
 // tables are small (one entry per EventTarget a program touches) and, unlike a
