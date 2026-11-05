@@ -1,10 +1,17 @@
 # Measure zun-node against Node.js 25's own test suite.
 #
-# The job builds the Zun engine and this extension, downloads the Node
-# `test-<module>-*.js` files at a pinned tag, runs each through `zun` with the
-# extension loaded, and renders the pass percentage into the README and
+# The job builds the Zun engine (and, for extension modules, this repo's
+# cdylib), downloads the Node `test-<module>*.js` files at a pinned tag, runs
+# each through `zun`, and renders the pass percentage into the README and
 # test/<module>/RESULTS.md. The tests are never vendored — they are fetched at
 # run time by tools/run_node_tests.sh.
+#
+# Both module kinds are measured (see ../../PLAN.md):
+#   * `path` is Zun TypeScript, so it needs only the `zun` binary: each test is
+#     bundled by tools/bundle_node_test.sh and run as `zun run <bundle.ts>`,
+#     with no --ext.
+#   * `fs` is a Rust zun_abi cdylib, so it also needs this repo built and is run
+#     as `zun run --ext <lib> <test.js>`.
 #
 # zun-node is a submodule of the engine, and its Cargo path dependency on
 # `../crates/zun_abi` assumes it sits inside the engine checkout at
@@ -16,8 +23,8 @@ on:
   workflow_dispatch:
     inputs:
       module:
-        description: Node module to measure (fs, process, …)
-        default: fs
+        description: Node module to measure (path, fs, … or "all")
+        default: all
       limit:
         description: Only the first N tests (0 = all)
         default: "0"
@@ -62,13 +69,27 @@ jobs:
       - name: Run the Node test tracker
         working-directory: engine
         run: |
-          MODULE="${{ github.event.inputs.module || 'fs' }}"
+          set -eu
+          MODULE="${{ github.event.inputs.module || 'all' }}"
           LIMIT="${{ github.event.inputs.limit || '0' }}"
-          bash zun-node/tools/run_node_tests.sh \
-            --zun "$PWD/target/debug/zun" \
-            --ext "$PWD/zun-node/target/debug/libzun_node.so" \
-            --module "$MODULE" \
-            --limit "$LIMIT" | tee "$GITHUB_STEP_SUMMARY"
+          ZUN="$PWD/target/debug/zun"
+          EXT="$PWD/zun-node/target/debug/libzun_node.so"
+          case "$MODULE" in
+            all) MODULES="path fs";;
+            *)   MODULES="$MODULE";;
+          esac
+          for m in $MODULES; do
+            # A Zun TypeScript module takes no --ext; an extension module does.
+            case "$m" in
+              path) EXT_ARGS="";;
+              *)    EXT_ARGS="--ext $EXT";;
+            esac
+            bash zun-node/tools/run_node_tests.sh \
+              --zun "$ZUN" \
+              $EXT_ARGS \
+              --module "$m" \
+              --limit "$LIMIT" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: Upload results
         uses: actions/upload-artifact@v4

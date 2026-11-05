@@ -3,17 +3,33 @@
 #
 # The Node.js test suite is the compatibility oracle for zun-node (see
 # ../PLAN.md). This runner never vendors the tests: it downloads each from the
-# nodejs/node repository at a pinned tag, runs it through the built `zun` binary
-# with the zun-node extension loaded, tallies pass/fail, and renders a progress
-# bar + percentage into the README and a results file.
+# nodejs/node repository at a pinned tag, runs it through the built `zun`
+# binary, tallies pass/fail, and renders a progress bar + percentage into the
+# README and a results file.
 #
-# A test "passes" when `zun run` exits 0. Most tests fail until the Node harness
-# (common/assert, CommonJS require), the Node-API shaping, and node:test exist —
-# the percentage is precisely the progress signal for that work.
+# zun-node has two kinds of module, and this runner handles both:
+#
+#   * extension modules (`fs`) are a Rust `zun_abi` cdylib, because they need
+#     syscalls. The downloaded test is run as `zun run --ext <lib> <test.js>`,
+#     so `--ext` is required for them.
+#   * Zun-TypeScript modules (`path`) are pure computation written in the
+#     language the platform compiles (`src/path/path.ts`). The engine has no
+#     CommonJS `require` (https://github.com/UrubuCode/zun/issues/4), so each
+#     downloaded test is first passed through `tools/bundle_node_test.sh`, which
+#     inlines the process/assert/path/common shims and rewrites the test's
+#     `require` lines; the bundle then runs as `zun run <bundle.ts>`, with no
+#     `--ext`.
+#
+# Tests are downloaded into `$WORK/test/parallel/<name>` because several of them
+# assert their own location through `__dirname`.
+#
+# A test "passes" when the `zun run` invocation exits 0. For each failing test
+# the results file records the first line of stderr, so a reader can see why
+# without re-running anything.
 #
 # Usage:
-#   tools/run_node_tests.sh --zun <path> --ext <lib> [--tag v25.0.0]
-#       [--module fs] [--limit N] [--timeout 20]
+#   tools/run_node_tests.sh --zun <path> [--ext <lib>] [--tag v25.0.0]
+#       [--module fs|path] [--limit N] [--timeout 20]
 set -u
 
 ZUN=""; EXT=""; TAG="v25.0.0"; MODULE="fs"; LIMIT=0; TIMEOUT=20
@@ -29,76 +45,139 @@ while [ $# -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
-[ -n "$ZUN" ] && [ -n "$EXT" ] || { echo "usage: --zun <path> --ext <lib>" >&2; exit 2; }
+
+# How this module is implemented, and the Node file-name prefix that selects its
+# tests. `path`'s corpus includes `test-path.js` itself, which does not match a
+# `test-path-` prefix, so the pattern is per module rather than derived.
+case "$MODULE" in
+  path) KIND="zun-ts"; PATTERN="test-path";;
+  *)    KIND="extension"; PATTERN="test-$MODULE-";;
+esac
+
+[ -n "$ZUN" ] || { echo "usage: --zun <path> [--ext <lib>] [--module fs|path]" >&2; exit 2; }
+if [ "$KIND" = "extension" ] && [ -z "$EXT" ]; then
+  echo "module '$MODULE' is a zun_abi extension: --ext <lib> is required" >&2
+  exit 2
+fi
 
 LIST="$ROOT/test/$MODULE/NODE_TESTS.txt"
 RESULTS="$ROOT/test/$MODULE/RESULTS.md"
 README="$ROOT/README.md"
+BUNDLER="$ROOT/tools/bundle_node_test.sh"
 RAW="https://raw.githubusercontent.com/nodejs/node/$TAG/test/parallel"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+mkdir -p "$WORK/test/parallel" "$WORK/bundles"
+# The engine reports the native form of the path it was given, so the scratch
+# directory is stripped from failure notes in both spellings.
+WORK_NATIVE="$WORK"
+if command -v cygpath >/dev/null 2>&1; then WORK_NATIVE="$(cygpath -m "$WORK")"; fi
 
 # `timeout` guards a hung test where available (Linux CI, git-bash); otherwise
 # run directly.
 runner() { if command -v timeout >/dev/null 2>&1; then timeout "$TIMEOUT" "$@"; else "$@"; fi; }
 
-mapfile -t NAMES < <(grep "test-$MODULE-" "$LIST" | sed 's/[[:space:]]//g' | grep .)
-[ "$LIMIT" -gt 0 ] && NAMES=("${NAMES[@]:0:$LIMIT}")
+# Reduce one stderr blob to a single short, table-safe markdown cell: the scratch
+# directory and the compiler's diagnostic wrapper carry no information, so they
+# are dropped before truncating.
+note_of() {
+  printf '%s\n' "$1" \
+    | tr -d '\r' \
+    | grep -m1 . \
+    | sed -e "s|$WORK_NATIVE/||g" -e "s|$WORK/||g" \
+          -e 's/OxcDiagnostic *{ *inner: *OxcDiagnosticInner *{ *message: /parse error: /' \
+          -e 's/|/\\|/g' -e 's/`/'"'"'/g' \
+    | cut -c1-110
+}
+
+NAMES=()
+while IFS= read -r line; do
+  line="$(printf '%s' "$line" | tr -d '[:space:]')"
+  case "$line" in "") continue;; *"$PATTERN"*) NAMES+=("$line");; esac
+done < "$LIST"
+if [ "$LIMIT" -gt 0 ] && [ "${#NAMES[@]}" -gt "$LIMIT" ]; then
+  NAMES=("${NAMES[@]:0:$LIMIT}")
+fi
 TOTAL=${#NAMES[@]}
-[ "$TOTAL" -gt 0 ] || { echo "no tests matching test-$MODULE- in $LIST" >&2; exit 2; }
+[ "$TOTAL" -gt 0 ] || { echo "no tests matching $PATTERN in $LIST" >&2; exit 2; }
 
 PASS=0
 ROWS=""
 i=0
 for name in "${NAMES[@]}"; do
   i=$((i + 1))
-  src="$WORK/$name"
+  src="$WORK/test/parallel/$name"
   if ! curl -fsSL --max-time "$TIMEOUT" "$RAW/$name" -o "$src" 2>/dev/null; then
-    ROWS+="| \`$name\` | ⚠️ download failed |"$'\n'
+    ROWS+="| \`$name\` | ⚠️ download failed | $RAW/$name |"$'\n'
     echo "[$i/$TOTAL] $name: download failed" >&2
     continue
   fi
-  err="$(runner "$ZUN" run --ext "$EXT" "$src" 2>&1 >/dev/null)"; code=$?
+
+  if [ "$KIND" = "zun-ts" ]; then
+    bundle="$WORK/bundles/${name%.js}.ts"
+    if ! bundle_err="$(bash "$BUNDLER" "$src" "$bundle" 2>&1 >/dev/null)"; then
+      ROWS+="| \`$name\` | ❌ bundle failed | $(note_of "$bundle_err") |"$'\n'
+      echo "[$i/$TOTAL] $name: bundle failed" >&2
+      continue
+    fi
+    err="$(runner "$ZUN" run "$bundle" 2>&1 >/dev/null)"; code=$?
+  else
+    err="$(runner "$ZUN" run --ext "$EXT" "$src" 2>&1 >/dev/null)"; code=$?
+  fi
+
   if [ "$code" -eq 0 ]; then
-    PASS=$((PASS + 1)); note="✅ pass"; short="pass"
+    PASS=$((PASS + 1)); short="pass"
+    ROWS+="| \`$name\` | ✅ pass | |"$'\n'
   else
     low="$(printf '%s' "$err" | tr '[:upper:]' '[:lower:]')"
     case "$low" in
+      *panic*) short="engine panic";;
+      *assertionerror*|*"assertion failed"*) short="assertion";;
       *syn*|*expected*) short="parse";;
       *require*|*import*|*"not found"*|*external*) short="unsupported import/require";;
       *sem*) short="type error";;
       *) short="runtime";;
     esac
-    note="❌ $short"
+    [ "$code" -eq 124 ] && short="timeout"
+    ROWS+="| \`$name\` | ❌ $short | $(note_of "$err") |"$'\n'
   fi
-  ROWS+="| \`$name\` | $note |"$'\n'
   echo "[$i/$TOTAL] $name: $short" >&2
 done
 
 # Percentage to one decimal and a 24-cell bar, with integer arithmetic.
 PCT10=$((PASS * 1000 / TOTAL)); WHOLE=$((PCT10 / 10)); FRAC=$((PCT10 % 10))
 FILLED=$((PASS * 24 / TOTAL)); EMPTY=$((24 - FILLED))
-bar=""; for ((c = 0; c < FILLED; c++)); do bar+="█"; done
-for ((c = 0; c < EMPTY; c++)); do bar+="░"; done
+bar=""; c=0
+while [ "$c" -lt "$FILLED" ]; do bar+="█"; c=$((c + 1)); done
+c=0
+while [ "$c" -lt "$EMPTY" ]; do bar+="░"; c=$((c + 1)); done
 
 read -r -d '' BLOCK <<EOF
 <!-- node-$MODULE:start -->
 ### Node.js v25 \`$MODULE\` compatibility
 
-\`$bar\` **$WHOLE.$FRAC%** — $PASS / $TOTAL Node \`test-$MODULE-*\` tests passing
+\`$bar\` **$WHOLE.$FRAC%** — $PASS / $TOTAL Node \`$PATTERN*\` tests passing
 <!-- node-$MODULE:end -->
 EOF
+
+case "$KIND" in
+  zun-ts) HOW="\`tools/bundle_node_test.sh\` + \`zun run <bundle.ts>\`";;
+  *)      HOW="\`zun run --ext <lib> <test.js>\`";;
+esac
 
 mkdir -p "$(dirname "$RESULTS")"
 {
   echo "# Node.js v25 \`$MODULE\` test results"
   echo
-  echo "Oracle: \`nodejs/node@$TAG\` \`test/parallel/test-$MODULE-*.js\`. Generated by \`tools/run_node_tests.sh\`."
+  echo "Oracle: \`nodejs/node@$TAG\` \`test/parallel/$PATTERN*.js\`. Generated by"
+  echo "\`tools/run_node_tests.sh --module $MODULE\`, which runs each test through $HOW."
   echo
   echo "$BLOCK"
   echo
-  echo "| Test | Result |"
-  echo "|---|---|"
+  echo "The \"Why\" column is the first line of the failing run's stderr, truncated."
+  echo
+  echo "| Test | Result | Why |"
+  echo "|---|---|---|"
   printf '%s' "$ROWS"
 } > "$RESULTS"
 
