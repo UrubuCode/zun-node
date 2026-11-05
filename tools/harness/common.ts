@@ -89,8 +89,10 @@ const fixtures: any = {
   },
 };
 
-// `child_process` is required by one path test behind an `isWindows` guard that
-// the harness does not reach; the stub keeps the require rewrite total.
+// `child_process` is required by `test-path-resolve.js`, whose Windows-only tail
+// spawns the runtime on a fixture. A real `spawnSync` belongs to the
+// `child_process` module's own work; until then the stub throws, so that block
+// fails on Windows (on Linux the test takes the other branch).
 const __nodeChildProcess: any = {
   execSync(): string {
     throw new Error("child_process is not available in the zun harness");

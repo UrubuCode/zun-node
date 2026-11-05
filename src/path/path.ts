@@ -2,11 +2,13 @@
 //
 // Behavior is defined by Node.js 25: this module is finished when it passes 100%
 // of Node's own `test/parallel/test-path*.js` files (see ../../test/path/).
-// Root parsing, normalize, join, resolve and the Windows hardening passes are
-// written against that corpus; the character-scanning routines for relative,
-// dirname, basename, extname, parse and format follow Node's `lib/path.js`
-// (MIT, Copyright Joyent, Inc. and other Node contributors) because their edge
-// cases are defined by that code.
+// Root matching, normalize, join, resolve, the Windows hardening passes and the
+// character-scanning routines for relative, dirname, basename, extname, parse
+// and format all follow Node's `lib/path.js` (MIT, Copyright Joyent, Inc. and
+// other Node contributors), because their observable edge cases — which colon
+// makes a root, when a reserved device name suppresses normalization,
+// `dirname("//a") === "//"`, `extname("...") === "."` — are defined by that
+// code and pinned by those tests rather than by any general rule.
 //
 // Unlike `src/fs/` (a Rust `zun_abi` extension, because it needs syscalls), `path`
 // is pure string computation, so it is written in the language the platform
@@ -20,6 +22,18 @@
 //     returning NaN (https://github.com/UrubuCode/zun/issues/2).
 //   * a RegExp is built and used inside one function, never passed through `any`
 //     (https://github.com/UrubuCode/zun/issues/7).
+//   * `truthy()` instead of `!value` / `Boolean(value)` on an `any` — the unary
+//     negation of a boxed value reports the empty string as truthy, while `if`,
+//     `?:` and `||` get it right (https://github.com/UrubuCode/zun/issues/13).
+//   * `indexOfChar()` — `indexOf` answers an i32 that cannot mix with Number
+//     arithmetic (same family as issue #3).
+//
+// Security note: the `.\` prefix that keeps traversal from changing the root
+// (CVE-2025-23084 — Node's comments call it CVE-2024-36139 — and the reserved
+// device names of CVE-2025-27210) is applied by `normalize` and `join` only. As in
+// Node, `resolve`, `relative`, `dirname`, `basename`, `extname`, `parse`,
+// `isAbsolute` and `toNamespacedPath` are not guards; that is intended parity, not
+// a bug to "fix".
 
 // ---------------------------------------------------------------------------
 // Character codes and small helpers
@@ -46,6 +60,18 @@ function alen(value: any[]): number {
 function cc(value: string, index: number): number {
   if (index < 0 || index >= slen(value)) return -1;
   return value.charCodeAt(index);
+}
+
+// JavaScript truthiness of a value whose static type is `any`. Written as a
+// conditional expression because `!value` and `Boolean(value)` mis-report a
+// boxed empty string as truthy.
+function truthy(value: any): boolean {
+  return value ? true : false;
+}
+
+// `indexOf` answers an i32, which cannot mix with Number arithmetic. See issue #3.
+function indexOfChar(value: string, needle: string, from: number): number {
+  return Number(value.indexOf(needle, from));
 }
 
 function isPosixSep(code: number): boolean {
@@ -138,93 +164,6 @@ function validateString(value: any, name: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Root parsing
-//
-// A path splits into a prefix (never ending in a separator), a flag saying
-// whether what follows the prefix is rooted, and the remainder:
-//
-//   posix  "/a/b"                 -> prefix ""                 absolute rest "a/b"
-//   win32  "C:\\a"                -> prefix "C:"               absolute rest "a"
-//   win32  "C:a"                  -> prefix "C:"      relative rest "a"
-//   win32  "\\a"                  -> prefix ""                 absolute rest "a"
-//   win32  "\\\\srv\\shr\\a"      -> prefix "\\\\srv\\shr"     absolute rest "a"
-//   win32  "\\\\?\\a"             -> prefix "\\\\?"            absolute rest "a"
-// ---------------------------------------------------------------------------
-
-class PathRoot {
-  prefix: string;
-  absolute: boolean;
-  rest: string;
-
-  constructor(prefix: string, absolute: boolean, rest: string) {
-    this.prefix = prefix;
-    this.absolute = absolute;
-    this.rest = rest;
-  }
-}
-
-function parseRootPosix(path: string): PathRoot {
-  if (isPosixSep(cc(path, 0))) return new PathRoot("", true, path.slice(1));
-  return new PathRoot("", false, path);
-}
-
-function parseRootWin32(path: string): PathRoot {
-  const n = slen(path);
-  const first = cc(path, 0);
-
-  if (n >= 2 && isWin32Sep(first) && isWin32Sep(cc(path, 1))) {
-    const third = cc(path, 2);
-    // `\\?\` and `\\.\` device namespaces.
-    if ((third === CODE_QUESTION || third === CODE_DOT) && isWin32Sep(cc(path, 3))) {
-      const marker = third === CODE_QUESTION ? "?" : ".";
-      return new PathRoot("\\\\" + marker, true, path.slice(4));
-    }
-    // UNC: `\\server\share\...`. The server and the share are whatever the
-    // first two components are, even when a component is `..`.
-    let i = 2;
-    while (i < n && !isWin32Sep(cc(path, i))) i++;
-    const server = path.slice(2, i);
-    if (server.length === 0) {
-      // Three or more leading separators: not UNC, just a rooted path.
-      let j = 0;
-      while (j < n && isWin32Sep(cc(path, j))) j++;
-      return new PathRoot("", true, path.slice(j));
-    }
-    while (i < n && isWin32Sep(cc(path, i))) i++;
-    const shareStart = i;
-    while (i < n && !isWin32Sep(cc(path, i))) i++;
-    const share = path.slice(shareStart, i);
-    if (share.length === 0) {
-      return new PathRoot("\\\\" + server, true, "");
-    }
-    while (i < n && isWin32Sep(cc(path, i))) i++;
-    return new PathRoot("\\\\" + server + "\\" + share, true, path.slice(i));
-  }
-
-  if (isDriveLetter(first) && cc(path, 1) === CODE_COLON) {
-    const drive = path.slice(0, 2);
-    if (isWin32Sep(cc(path, 2))) {
-      let i = 2;
-      while (i < n && isWin32Sep(cc(path, i))) i++;
-      return new PathRoot(drive, true, path.slice(i));
-    }
-    return new PathRoot(drive, false, path.slice(2));
-  }
-
-  if (isWin32Sep(first)) {
-    let i = 0;
-    while (i < n && isWin32Sep(cc(path, i))) i++;
-    return new PathRoot("", true, path.slice(i));
-  }
-
-  return new PathRoot("", false, path);
-}
-
-function parseRoot(path: string, win: boolean): PathRoot {
-  return win ? parseRootWin32(path) : parseRootPosix(path);
-}
-
-// ---------------------------------------------------------------------------
 // Segment normalization
 // ---------------------------------------------------------------------------
 
@@ -258,26 +197,14 @@ function normalizeSegments(
   return out;
 }
 
-function hasTrailingSep(path: string, win: boolean): boolean {
-  const n = slen(path);
-  return n > 0 && isSep(cc(path, n - 1), win);
-}
-
 // ---------------------------------------------------------------------------
 // Windows safety passes
 // ---------------------------------------------------------------------------
 
-// A relative result whose first segment would be read as a root (a drive
-// specifier, or the `?`/`??` device escapes) is prefixed with `.\` so that path
-// traversal cannot change the root. Refs CVE-2024-36139.
-function looksLikeRoot(segment: string): boolean {
-  if (segment === "?" || segment === "??") return true;
-  return isDriveLetter(cc(segment, 0)) && cc(segment, 1) === CODE_COLON;
-}
-
-// The reserved DOS device names. A first component naming one of these followed
-// by a colon is neutralized (`CON:` becomes `.\CON:`), because Windows would
-// otherwise open the device rather than a file.
+// The reserved DOS device names. A component naming one of these would make
+// Windows open the device rather than a file, so normalize neutralizes a
+// leading one with `.\` (`CON:` becomes `.\CON:.`) and join refuses to
+// normalize a path that contains one at all.
 const RESERVED_DEVICE_NAMES: string[] = [
   "CON",
   "PRN",
@@ -309,84 +236,166 @@ const RESERVED_DEVICE_NAMES: string[] = [
   "LPT\u00b3",
 ];
 
-function isReservedDeviceName(name: string): boolean {
-  const upper = name.toUpperCase();
+// Whether what precedes `colonIndex` in `value` names a reserved device.
+// `colonIndex` is the index of the first colon, so a path with no colon at all
+// passes -1, and the check then runs on everything but the last character:
+// that is what makes `COM9.` (a trailing dot Windows strips) reserved while
+// `CON` and `CON.TXT` are not. The negative index is spelled out because it
+// comes from `indexOf`, exactly as in Node's `lib/path.js`.
+function isWindowsReservedName(value: string, colonIndex: number): boolean {
+  const n = slen(value);
+  let end = colonIndex < 0 ? n + colonIndex : colonIndex;
+  if (end < 0) end = 0;
+  if (end > n) end = n;
+  const upper = value.slice(0, end).toUpperCase();
   for (const reserved of RESERVED_DEVICE_NAMES) {
-    if (upper === reserved.toUpperCase()) return true;
+    if (upper === reserved) return true;
   }
   return false;
-}
-
-// `CON:rest` splits into the device name and whatever follows the colon.
-function deviceNameLength(path: string): number {
-  const n = slen(path);
-  let i = 0;
-  while (i < n && cc(path, i) !== CODE_COLON && !isWin32Sep(cc(path, i))) i++;
-  if (i >= n || cc(path, i) !== CODE_COLON) return -1;
-  if (!isReservedDeviceName(path.slice(0, i))) return -1;
-  return i;
 }
 
 // ---------------------------------------------------------------------------
 // normalize
 // ---------------------------------------------------------------------------
 
-function normalizeImpl(path: string, win: boolean): string {
-  validateString(path, "path");
-  if (slen(path) === 0) return ".";
+function normalizePosix(path: string): string {
+  const n = slen(path);
+  if (n === 0) return ".";
+  const absolute = isPosixSep(cc(path, 0));
+  const trailing = isPosixSep(cc(path, n - 1));
 
-  const sep = win ? "\\" : "/";
-  const root = parseRoot(path, win);
+  const body = normalizeSegments(path, absolute, false).join("/");
+  if (body.length === 0) {
+    if (absolute) return "/";
+    return trailing ? "./" : ".";
+  }
+  const tail = trailing ? body + "/" : body;
+  return absolute ? "/" + tail : tail;
+}
 
-  // Windows reserved device names: keep the `NAME:` head verbatim, normalize
-  // what follows it as a relative path, and mark the whole thing relative with
-  // a leading `.\` so it cannot be read as a device.
-  if (win && root.prefix.length === 0 && !root.absolute) {
-    const deviceLen = deviceNameLength(path);
-    if (deviceLen >= 0) {
-      const head = path.slice(0, deviceLen + 1); // includes the colon
-      const tail = path.slice(deviceLen + 1);
-      const segments = normalizeSegments(tail, false, true);
-      let body = segments.join("\\");
-      if (body.length === 0 && slen(tail) > 0 && !hasTrailingSep(tail, true)) {
-        body = ".";
+// A port of Node's `win32.normalize`. The root match has to happen here rather
+// than in a shared root matcher because normalize recognizes two roots resolve
+// does not: a reserved device name used as a drive (`CON:`) and the same name
+// inside the `\\?\` namespace (`\\?\COM1:`). The hardening at the end — the
+// `.\` prefix for a relative result that could be read as a root or as a
+// device — is CVE-2024-36139 and its follow-ups.
+function normalizeWin32(path: string): string {
+  const n = slen(path);
+  if (n === 0) return ".";
+
+  let rootEnd = 0;
+  let device = "";
+  let hasDevice = false;
+  let absolute = false;
+  const first = cc(path, 0);
+
+  if (n === 1) {
+    // One character: a forward slash becomes the root, anything else (a
+    // backslash included) is returned as it stands.
+    return isPosixSep(first) ? "\\" : path;
+  }
+
+  if (isWin32Sep(first)) {
+    // A leading separator always means some kind of absolute path.
+    absolute = true;
+    if (isWin32Sep(cc(path, 1))) {
+      // Two leading separators: a UNC or device root may follow.
+      let j = 2;
+      let anchor = j;
+      while (j < n && !isWin32Sep(cc(path, j))) j++;
+      if (j < n && j !== anchor) {
+        const firstPart = path.slice(anchor, j);
+        anchor = j;
+        while (j < n && isWin32Sep(cc(path, j))) j++;
+        if (j < n && j !== anchor) {
+          anchor = j;
+          while (j < n && !isWin32Sep(cc(path, j))) j++;
+          if (j === n || j !== anchor) {
+            if (firstPart === "." || firstPart === "?") {
+              // A device namespace, e.g. `\\.\PHYSICALDRIVE0`.
+              device = "\\\\" + firstPart;
+              hasDevice = true;
+              rootEnd = 4;
+              const colonIndex = indexOfChar(path, ":", 0);
+              // `\\?\COM1:` and friends: the reserved name belongs to the root.
+              const possibleDevice = path.slice(4, colonIndex + 1);
+              if (isWindowsReservedName(possibleDevice, slen(possibleDevice) - 1)) {
+                device = "\\\\?\\" + possibleDevice;
+                rootEnd = 4 + slen(possibleDevice);
+              }
+            } else if (j === n) {
+              // A UNC root and nothing else: it is already normalized.
+              return "\\\\" + firstPart + "\\" + path.slice(anchor) + "\\";
+            } else {
+              device = "\\\\" + firstPart + "\\" + path.slice(anchor, j);
+              hasDevice = true;
+              rootEnd = j;
+            }
+          }
+        }
       }
-      if (slen(tail) === 0) body = ".";
-      if (hasTrailingSep(tail, true) && slen(tail) > 0) body = body + "\\";
-      return ".\\" + head + body;
+    } else {
+      rootEnd = 1;
+    }
+  } else {
+    const colonIndex = indexOfChar(path, ":", 0);
+    if (colonIndex > 0) {
+      if (isDriveLetter(first) && colonIndex === 1) {
+        device = path.slice(0, 2);
+        hasDevice = true;
+        rootEnd = 2;
+        if (n > 2 && isWin32Sep(cc(path, 2))) {
+          absolute = true;
+          rootEnd = 3;
+        }
+      } else if (isWindowsReservedName(path, colonIndex)) {
+        // A reserved device name stands in for a drive: `CON:a\..\b` keeps
+        // `CON:` as its root, so `..` can never climb past it.
+        device = path.slice(0, colonIndex + 1);
+        hasDevice = true;
+        rootEnd = colonIndex + 1;
+      }
     }
   }
 
-  const segments = normalizeSegments(root.rest, root.absolute, win);
-  const trailing = hasTrailingSep(path, win) && alen(segments) > 0;
+  let tail =
+    rootEnd < n
+      ? normalizeSegments(path.slice(rootEnd), absolute, true).join("\\")
+      : "";
+  if (slen(tail) === 0 && !absolute) tail = ".";
+  if (slen(tail) > 0 && isWin32Sep(cc(path, n - 1))) tail = tail + "\\";
 
-  // `test/../C:/Windows` must not normalize to a drive-rooted path.
-  if (
-    win &&
-    !root.absolute &&
-    root.prefix.length === 0 &&
-    alen(segments) > 0 &&
-    looksLikeRoot(segments[0]) &&
-    !looksLikeRoot(path.slice(0, slen(path) < 2 ? slen(path) : 2))
-  ) {
-    const body = segments.join(sep);
-    return ".\\" + body + (trailing ? sep : "");
+  if (!absolute && !hasDevice && indexOfChar(path, ":", 0) >= 0) {
+    // The path was relative and no root was matched, so `tail` must not end up
+    // looking absolute to Windows. See CVE-2024-36139.
+    if (slen(tail) >= 2 && isDriveLetter(cc(tail, 0)) && cc(tail, 1) === CODE_COLON) {
+      return ".\\" + tail;
+    }
+    // A colon that ends the path or precedes a separator would be read as a
+    // drive or stream specifier.
+    let index = indexOfChar(path, ":", 0);
+    while (index !== -1) {
+      if (index === n - 1 || isWin32Sep(cc(path, index + 1))) {
+        return ".\\" + tail;
+      }
+      index = indexOfChar(path, ":", index + 1);
+    }
   }
 
-  let body = segments.join(sep);
-  if (trailing) body = body + sep;
+  // A path that starts with a reserved device name is marked relative, whatever
+  // root was matched: `CON:` is `.\CON:.`, `\\?\COM1:...` keeps its namespace.
+  if (isWindowsReservedName(path, indexOfChar(path, ":", 0))) {
+    return ".\\" + device + tail;
+  }
+  if (!hasDevice) {
+    return absolute ? "\\" + tail : tail;
+  }
+  return absolute ? device + "\\" + tail : device + tail;
+}
 
-  if (root.absolute) {
-    if (body.length === 0) return root.prefix + sep;
-    return root.prefix + sep + body;
-  }
-  if (root.prefix.length > 0) {
-    // Drive-relative: `C:` with nothing left is `C:.`
-    if (body.length === 0) return root.prefix + ".";
-    return root.prefix + body;
-  }
-  if (body.length === 0) return hasTrailingSep(path, win) ? "." + sep : ".";
-  return body;
+function normalizeImpl(path: string, win: boolean): string {
+  validateString(path, "path");
+  return win ? normalizeWin32(path) : normalizePosix(path);
 }
 
 // ---------------------------------------------------------------------------
@@ -465,14 +474,58 @@ function joinWin32(parts: any[]): string {
     }
     if (slashCount >= 2) joined = "\\" + joined.slice(slashCount);
   }
+
+  // A reserved device name anywhere in the joined path suppresses
+  // normalization: `join("\\server\\share", "COM1:")` keeps the `COM1:`
+  // component and the `..` segments that follow it, so that normalize's `.\`
+  // hardening cannot turn a share-relative path into a device path. Only
+  // backslashes split components here, exactly as in Node's `lib/path.js`.
+  const total = slen(joined);
+  let component = "";
+  let reserved = false;
+  for (let i = 0; i < total && !reserved; i++) {
+    if (cc(joined, i) === CODE_BACKSLASH) {
+      reserved = isReservedComponent(component);
+      component = "";
+      while (i + 1 < total && cc(joined, i + 1) === CODE_BACKSLASH) i++;
+    } else {
+      component = component + joined.slice(i, i + 1);
+    }
+  }
+  if (!reserved) reserved = isReservedComponent(component);
+  // Only the separators are canonicalized.
+  if (reserved) return toBackslashes(joined);
+
   return normalizeImpl(joined, true);
+}
+
+// One joined component names a reserved device when it holds a colon and what
+// precedes the first colon is a reserved name.
+function isReservedComponent(component: string): boolean {
+  const colonIndex = indexOfChar(component, ":", 0);
+  return colonIndex !== -1 && isWindowsReservedName(component, colonIndex);
 }
 
 // ---------------------------------------------------------------------------
 // resolve
 // ---------------------------------------------------------------------------
 
+// `resolve()`, `resolve("")` and `resolve(".")` are the current directory, and
+// an absolute cwd is already its own answer — returned verbatim, so a cwd
+// Node would not have produced is not silently rewritten.
+function resolvesToCwd(parts: any[]): boolean {
+  const n = alen(parts);
+  if (n === 0) return true;
+  if (n !== 1) return false;
+  const only = parts[0];
+  return only === "" || only === ".";
+}
+
 function resolvePosix(parts: any[]): string {
+  if (resolvesToCwd(parts)) {
+    const cwd = processCwdPosix();
+    if (isPosixSep(cc(cwd, 0))) return cwd;
+  }
   let resolved = "";
   let absolute = false;
   for (let i = alen(parts) - 1; i >= 0 && !absolute; i--) {
@@ -493,17 +546,32 @@ function resolvePosix(parts: any[]): string {
   return body.length > 0 ? body : ".";
 }
 
-// The per-drive current directory Windows keeps for each drive letter, falling
-// back to the drive root.
+// Windows keeps a current directory per drive letter, exported into the
+// environment as `=C:`. With none recorded, the process cwd stands in, unless
+// it names a different drive, in which case the drive's root does.
 function driveCwd(drive: string): string {
   const fromEnv = processEnvGet("=" + drive);
-  if (typeof fromEnv === "string" && slen(fromEnv) > 0) {
-    const head = fromEnv.slice(0, 2).toLowerCase();
-    if (head === drive.toLowerCase()) return fromEnv;
+  let path =
+    typeof fromEnv === "string" && slen(fromEnv) > 0
+      ? fromEnv
+      : processCwdWin32();
+  if (
+    path.slice(0, 2).toLowerCase() !== drive.toLowerCase() &&
+    cc(path, 2) === CODE_BACKSLASH
+  ) {
+    path = drive + "\\";
   }
-  const cwd = processCwdWin32();
-  if (cwd.slice(0, 2).toLowerCase() === drive.toLowerCase()) return cwd;
-  return drive + "\\";
+  return path;
+}
+
+// `path.replace(/\//g, "\\")` without a RegExp. See issue #7.
+function toBackslashes(path: string): string {
+  let out = "";
+  const n = slen(path);
+  for (let i = 0; i < n; i++) {
+    out = out + (cc(path, i) === CODE_SLASH ? "\\" : path.slice(i, i + 1));
+  }
+  return out;
 }
 
 function resolveWin32(parts: any[]): string {
@@ -520,14 +588,76 @@ function resolveWin32(parts: any[]): string {
       path = part;
     } else if (resolvedDevice.length === 0) {
       path = processCwdWin32();
+      // A cwd that is already the answer is handed back untouched.
+      if (
+        alen(parts) === 0 ||
+        (resolvesToCwd(parts) && isWin32Sep(cc(path, 0)))
+      ) {
+        return pathPlatformIsWindows() ? path : toBackslashes(path);
+      }
     } else {
+      // The device is known to be a drive, never a UNC share, because a UNC
+      // path is always absolute and would have ended the loop already.
       path = driveCwd(resolvedDevice);
     }
 
-    const root = parseRootWin32(path);
-    const device = root.prefix;
+    // Root matching. This is normalize's matcher minus the two roots only
+    // normalize knows (a reserved device name, and one inside `\\?\`), because
+    // resolve has to leave those in the tail for the `..` pass to see.
+    const n = slen(path);
+    let rootEnd = 0;
+    let device = "";
+    let pathAbsolute = false;
+    const first = cc(path, 0);
+
+    if (n === 1) {
+      if (isWin32Sep(first)) {
+        rootEnd = 1;
+        pathAbsolute = true;
+      }
+    } else if (isWin32Sep(first)) {
+      pathAbsolute = true;
+      if (isWin32Sep(cc(path, 1))) {
+        let j = 2;
+        let anchor = j;
+        while (j < n && !isWin32Sep(cc(path, j))) j++;
+        if (j < n && j !== anchor) {
+          const firstPart = path.slice(anchor, j);
+          anchor = j;
+          while (j < n && isWin32Sep(cc(path, j))) j++;
+          if (j < n && j !== anchor) {
+            anchor = j;
+            while (j < n && !isWin32Sep(cc(path, j))) j++;
+            if (j === n || j !== anchor) {
+              if (firstPart !== "." && firstPart !== "?") {
+                device = "\\\\" + firstPart + "\\" + path.slice(anchor, j);
+                rootEnd = j;
+              } else {
+                // A device root, e.g. `\\.\PHYSICALDRIVE0`.
+                device = "\\\\" + firstPart;
+                rootEnd = 4;
+              }
+            }
+          }
+        }
+        // `\\dir` (no share) matched nothing: the leading separators stay in
+        // the tail, where the segment pass drops them.
+      } else {
+        rootEnd = 1;
+      }
+    } else if (isDriveLetter(first) && cc(path, 1) === CODE_COLON) {
+      device = path.slice(0, 2);
+      rootEnd = 2;
+      if (n > 2 && isWin32Sep(cc(path, 2))) {
+        // A separator after the drive makes the path absolute.
+        pathAbsolute = true;
+        rootEnd = 3;
+      }
+    }
+
     if (device.length > 0) {
       if (resolvedDevice.length > 0) {
+        // Another device: this argument does not apply.
         if (device.toLowerCase() !== resolvedDevice.toLowerCase()) continue;
       } else {
         resolvedDevice = device;
@@ -537,8 +667,8 @@ function resolveWin32(parts: any[]): string {
     if (absolute) {
       if (resolvedDevice.length > 0) break;
     } else {
-      resolvedTail = root.rest + "\\" + resolvedTail;
-      absolute = root.absolute;
+      resolvedTail = path.slice(rootEnd) + "\\" + resolvedTail;
+      absolute = pathAbsolute;
       if (absolute && resolvedDevice.length > 0) break;
     }
   }
@@ -552,12 +682,6 @@ function resolveWin32(parts: any[]): string {
 
 // ---------------------------------------------------------------------------
 // relative
-//
-// The scanning algorithms from here through `format` follow Node.js
-// `lib/path.js` (MIT, Copyright Joyent, Inc. and other Node contributors),
-// because their observable edge cases (`dirname("//a") === "//"`,
-// `extname("...") === "."`, UNC-aware `relative`) are defined by that code and
-// pinned by Node's tests.
 // ---------------------------------------------------------------------------
 
 function relativePosix(from: any, to: any): string {
@@ -1098,7 +1222,7 @@ function parseImpl(path: any, win: boolean): any {
 }
 
 function formatExt(ext: any): string {
-  if (!ext) return "";
+  if (!truthy(ext)) return "";
   const text = String(ext);
   return cc(text, 0) === CODE_DOT ? text : "." + text;
 }
@@ -1116,7 +1240,7 @@ function formatImpl(parsed: any, win: boolean): string {
   const dir: any = parsed.dir || parsed.root;
   const base: any =
     parsed.base || String(parsed.name || "") + formatExt(parsed.ext);
-  if (!dir) return String(base);
+  if (!truthy(dir)) return String(base);
   return dir === parsed.root
     ? String(dir) + String(base)
     : String(dir) + sep + String(base);
