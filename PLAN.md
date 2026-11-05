@@ -21,6 +21,12 @@ that apply to it.**
    whereas `fs`'s tests additionally need Buffers, file descriptors,
    callbacks/promises and the `test/fixtures/` tree. The order above still
    governs which library's *API surface* is owed next.
+   *Second exception, by dependency:* **`events` was taken before `os`.** Node's
+   `process` **is** an `EventEmitter`, and the test harness cannot verify a
+   single `common.mustCall` count without `process.on('exit')`,
+   `process.on('warning')` and `process.nextTick` — all of which need `events`
+   to exist first. Taking `events` early is therefore what makes the *harness*
+   real for every later library; `os` is still owed ahead of `stream`.
 2. **The implementation form follows the capability.**
    - A module that needs the operating system is **native through the ABI**: Rust
      over `std`, exposed as `zun_abi` functions under a `node:<name>` module key,
@@ -44,9 +50,15 @@ that apply to it.**
 ```
 src/fs/      ──[cdylib, zun_register_v1]──▶ zun_abi ◀──[loads + invokes]── Zun host
 src/path/    ──[path.ts]──────────────────▶ compiled by the Zun compiler, run by the VM
-src/assert/  ──[assert.ts]───────────────┐  harness slices (principle 4), same route
+src/events/  ──[events.ts]────────────────▶ same route
+src/util/    ──[util.ts]─────────────────┐  harness slices (principle 4), same route
+src/assert/  ──[assert.ts]               │
 src/process/ ──[process.ts, zun:core]────┘
 ```
+
+Bundle order is dependency order: `util` (no dependencies) → `events`
+(`util.inspect` for its messages) → `process` (an `EventEmitter`) → `assert` →
+`path` → `tools/harness/common.ts`.
 
 - **`src/lib.rs`** — `zun_register_v1`, the ABI carrier helpers (`abi` module), the
   shared `Descriptor` type, and shared error retrieval. Extension modules only.
@@ -91,7 +103,8 @@ and objects, because it is compiled, not marshalled.
 ## Compatibility tracker
 
 `tools/run_node_tests.sh` + `.github/workflows/node-compat.yml` download Node 25's
-`test-<module>*.js` at a pinned tag, run each through `zun`, and render the pass
+`test-<module>*.js` at a pinned tag (a module's corpus may span several prefixes —
+`events` is `test-event-emitter-*` plus `test-events-*`), run each through `zun`, and render the pass
 share into the README (a progress bar + percentage) and `test/<module>/RESULTS.md`,
 with the first line of stderr recorded for every failure. A test passes when the
 `zun run` invocation exits 0. Tests are downloaded into `<work>/test/parallel/`,
@@ -111,13 +124,30 @@ The engine has no CommonJS `require` and no file-based module resolution
 with `require('assert')` / `require('path')` / `require('../common')`. Rather than
 block the measurement on module resolution,
 `tools/bundle_node_test.sh <node-test.js> <out.ts>` turns one test into one Zun
-program: it concatenates `src/process/process.ts`, `src/assert/assert.ts`,
-`src/path/path.ts` and `tools/harness/common.ts` ahead of the test body, injects
-`__filename`/`__dirname`, and rewrites the test's `require` lines — a whole-line
-`const path = require('path');` is deleted, because the inlined module already
-binds that name, and inline forms (`require('path/win32')`, `require('assert')`)
-are rewritten to the corresponding binding. Any surviving `require(` is reported,
-so a missing harness module is never mistaken for an engine bug.
+program: it concatenates the modules in bundle order ahead of the test body,
+injects `__filename`/`__dirname`, rewrites the test's `require` lines, and
+appends the one statement that settles the event loop and verifies the
+`common.mustCall` counts.
+
+The `require` convention is generic: **each inlined module exposes exactly one
+object**, named `__node_<module>` (`__node_events`, `__node_assert`, ...), and
+`require('x')` / `require('node:x')` both become that object. One refinement sits
+on top: a module that is *already bound* under the name the tests use has that
+whole-line declaration deleted instead (`const path = require('path');`), and for
+`events` the canonical binding is the **class** `EventEmitter` rather than an
+object, because `new <identifier>()` only compiles for a statically known class
+— so `EventEmitter` is also removed from a destructuring pattern and left bound
+to the class, while the other destructured names come from `__node_events`. An
+unknown module makes the bundle fail with a named diagnostic, so a missing
+harness module is never mistaken for an engine bug.
+
+Exit verification is the harness's other job. The VM drains its unified event
+loop after the main script returns but exposes no "about to exit" hook, so the
+bundler's epilogue (`__zunHarnessFinish()`) runs a *settle loop*: a chain of
+`setTimeout` turns that yields to the VM's timer and microtask queues until
+`process.nextTick` has been quiet for a fixed number of turns, then emits
+`process` 'exit' and exits non-zero if a `common.mustCall` count was not met.
+See the header of `tools/harness/common.ts`.
 
 When CommonJS resolution does land in the engine, the bundler is the thing that
 gets deleted; nothing else in the tracker changes.
@@ -158,15 +188,46 @@ gets deleted; nothing else in the tracker changes.
   Dirent, and the full `Stats`; those land in their own `src/fs/` submodules. Its
   tracker number stays near 0% until the Node-API shaping and the
   `test/fixtures/` tree exist.
+- **`node:events`: implemented in `src/events/events.ts`, measured against the
+  full Node corpus.** The whole `EventEmitter` surface is there —
+  `on`/`addListener`, `prependListener`, `once`, `prependOnceListener`,
+  `off`/`removeListener`, `removeAllListeners`, `emit` with the
+  `error`/`errorMonitor`/`ERR_UNHANDLED_ERROR` semantics, `listeners`,
+  `rawListeners`, `listenerCount` (with the listener argument), `eventNames`
+  (strings and symbols), `setMaxListeners`/`getMaxListeners`, the
+  `newListener`/`removeListener` meta-events, the MaxListenersExceededWarning
+  through `process.emitWarning`, and `captureRejections` — plus the module
+  statics `once`, `on`, `getEventListeners`, `getMaxListeners`,
+  `setMaxListeners`, `listenerCount`, `addAbortListener`, `errorMonitor`,
+  `captureRejectionSymbol`, `defaultMaxListeners`, `usingDomains`. Listener
+  storage is null-prototype-safe, so a `__proto__` event name works. A
+  differential self-test over every method, both meta-events, the error paths,
+  the warning text and the storage shapes passes clean; **every remaining test
+  failure is an engine gap**, catalogued test by test in `test/events/README.md`
+  (member `new`, class statics, no receiver threading, symbol identity, class
+  bases, `internal/` modules). **Not done:** `EventEmitterAsyncResource`, which
+  needs `async_hooks` — there is nothing to build it on, so it is absent rather
+  than faked.
+- **`node:util` (harness slice): `src/util/util.ts`.** `inspect` (with
+  `inspect.custom`, `depth`, and the `[Constructor]` form `depth: -1` produces),
+  `format`, `inherits`, `types.isPromise`, `isDeepStrictEqual`. It exists because
+  `events` formats `ERR_UNHANDLED_ERROR` and the MaxListenersExceededWarning with
+  `util.inspect`, and Node's `test-event-emitter-errors.js` reads
+  `util.inspect.custom`. Not the finished module.
 - **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
   `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
   `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,
   `fail`, `AssertionError` with Node's `code`/`actual`/`expected`/`operator`.
   Not the finished module: it is what the corpus asserts with.
 - **`node:process` (harness slice): `src/process/process.ts`.** `cwd()`, `env`,
-  `platform`, `argv`, `exit()`, over `zun:core`'s `host`. `platform` is derived
-  from the shape of `cwd()` because no host native reports the OS yet. Not the
-  finished module; the full `process` is still owed in the order above.
+  `platform`, `argv`, `exit()`, `stdout`/`stderr`, over `zun:core`'s `host`, plus
+  the **EventEmitter surface** Node's `process` has
+  (`on`/`once`/`off`/`emit`/`listeners`/`listenerCount`/`eventNames`/`setMaxListeners`,
+  delegated to one `EventEmitter` instance), `nextTick` (a FIFO queue over
+  `queueMicrotask`), `emitWarning` (which the events module's warning route is
+  wired to), and `exitCode`. `platform` is derived from the shape of `cwd()`
+  because no host native reports the OS yet. Not the finished module; the full
+  `process` is still owed in the order above.
 
 ### Module keys and host dispatch
 

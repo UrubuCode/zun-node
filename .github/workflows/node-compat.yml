@@ -7,9 +7,9 @@
 # run time by tools/run_node_tests.sh.
 #
 # Both module kinds are measured (see ../../PLAN.md):
-#   * `path` is Zun TypeScript, so it needs only the `zun` binary: each test is
-#     bundled by tools/bundle_node_test.sh and run as `zun run <bundle.ts>`,
-#     with no --ext.
+#   * `path` and `events` are Zun TypeScript, so they need only the `zun`
+#     binary: each test is bundled by tools/bundle_node_test.sh and run as
+#     `zun run <bundle.ts>`, with no --ext.
 #   * `fs` is a Rust zun_abi cdylib, so it also needs this repo built and is run
 #     as `zun run --ext <lib> <test.js>`.
 #
@@ -23,7 +23,7 @@ on:
   workflow_dispatch:
     inputs:
       module:
-        description: Node module to measure (path, fs, … or "all")
+        description: Node module to measure (path, events, fs, … or "all")
         default: all
       limit:
         description: Only the first N tests (0 = all)
@@ -75,14 +75,14 @@ jobs:
           ZUN="$PWD/target/debug/zun"
           EXT="$PWD/zun-node/target/debug/libzun_node.so"
           case "$MODULE" in
-            all) MODULES="path fs";;
+            all) MODULES="path events fs";;
             *)   MODULES="$MODULE";;
           esac
           for m in $MODULES; do
             # A Zun TypeScript module takes no --ext; an extension module does.
             case "$m" in
-              path) EXT_ARGS="";;
-              *)    EXT_ARGS="--ext $EXT";;
+              path|events) EXT_ARGS="";;
+              *)           EXT_ARGS="--ext $EXT";;
             esac
             bash zun-node/tools/run_node_tests.sh \
               --zun "$ZUN" \

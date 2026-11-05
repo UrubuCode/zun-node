@@ -1482,3 +1482,6 @@ win32.win32 = win32;
 
 // `path` is the namespace for the host platform, exactly as Node exposes it.
 const path: any = pathPlatformIsWindows() ? win32 : posix;
+
+// `node:path` module object for the bundler's `require` rewriting.
+const __node_path: any = path;

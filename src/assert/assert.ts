@@ -6,9 +6,18 @@
 // of implementing any other module, per PLAN.md principle 4.
 //
 // Surface: ok, equal, notEqual, strictEqual, notStrictEqual, deepStrictEqual,
-// notDeepStrictEqual, throws, doesNotThrow, match, doesNotMatch, fail,
-// AssertionError. Errors carry Node's `code`, `actual`, `expected` and
-// `operator` fields.
+// notDeepStrictEqual, throws, doesNotThrow, rejects, doesNotReject, ifError,
+// match, doesNotMatch, fail, AssertionError. Errors carry Node's `code`,
+// `actual`, `expected` and `operator` fields.
+//
+// Engine note: every identity comparison goes through `__sameValue`, because a
+// function stored in an array arrives as a `functionBox` record rather than the
+// callable (https://github.com/UrubuCode/zun/issues/17) — `[fn][0] === fn` is
+// `false`, and `typeof [fn][0]` is `"object"`. The record's `__boxedFn` slot
+// reads the original function back with its identity intact, so unwrapping both
+// sides restores JavaScript's `===` for functions. Without it every
+// `deepStrictEqual(ee.listeners('x'), [listener])` in Node's events corpus
+// would fail for a reason that has nothing to do with the module under test.
 
 class AssertionError extends Error {
   code: string;
@@ -114,8 +123,23 @@ function __regexTest(value: any, subject: string): boolean {
   return re.test(subject);
 }
 
-function __isDeepStrictEqual(a: any, b: any): boolean {
+// Unwrap a `functionBox` record back to its callable. See the header note.
+function __unboxFn(value: any): any {
+  if (value !== null && value !== undefined && typeof value === "object") {
+    const inner: any = value["__boxedFn"];
+    if (inner !== undefined) return inner;
+  }
+  return value;
+}
+
+// `===` that sees through function boxing.
+function __sameValue(a: any, b: any): boolean {
   if (a === b) return true;
+  return __unboxFn(a) === __unboxFn(b);
+}
+
+function __isDeepStrictEqual(a: any, b: any): boolean {
+  if (__sameValue(a, b)) return true;
   // -0 / +0 are distinct under deepStrictEqual, NaN equals NaN.
   const ta = typeof a;
   const tb = typeof b;
@@ -126,6 +150,10 @@ function __isDeepStrictEqual(a: any, b: any): boolean {
   }
   if (a === null || b === null) return false;
   if (ta !== "object") return false;
+  // One side may be a boxed function and the other the bare callable.
+  if (typeof __unboxFn(a) === "function" || typeof __unboxFn(b) === "function") {
+    return __unboxFn(a) === __unboxFn(b);
+  }
   const aIsArray = Array.isArray(a);
   const bIsArray = Array.isArray(b);
   if (aIsArray !== bIsArray) return false;
@@ -151,7 +179,10 @@ function __isDeepStrictEqual(a: any, b: any): boolean {
 
 // `assert.throws(fn, expected?, message?)`: `expected` may be a RegExp, a
 // constructor, a validation object (`{ code, name, message }`) or a predicate.
-function __expectationMatches(error: any, expected: any): boolean {
+function __expectationMatches(error: any, boxedExpected: any): boolean {
+  // A predicate produced by `common.expectsError` arrives as a `functionBox`
+  // record, which reports `typeof === "object"`; unwrap before dispatching.
+  const expected: any = __unboxFn(boxedExpected);
   if (expected === undefined) return true;
   if (expected instanceof RegExp) {
     return __regexTest(
@@ -162,8 +193,18 @@ function __expectationMatches(error: any, expected: any): boolean {
   const kind = typeof expected;
   if (kind === "function") {
     // A constructor (checked with instanceof) or a predicate returning true.
-    const asPredicate = expected(error);
-    return asPredicate === true;
+    // A class cannot be applied as a predicate, so the instanceof form is tried
+    // first and a throw from the call is reported as "did not match".
+    try {
+      const asPredicate = expected(error);
+      return asPredicate === true;
+    } catch (ignored) {
+      return false;
+    }
+  }
+  if (expected instanceof Error) {
+    // `assert.throws(fn, theError)` — the very error object is expected.
+    return __sameValue(error, expected);
   }
   if (kind === "object" && expected !== null) {
     for (const key of Object.keys(expected)) {
@@ -196,7 +237,7 @@ const assert: any = {
   },
 
   strictEqual(actual: any, expected: any, message?: any): void {
-    if (actual !== expected) {
+    if (!__sameValue(actual, expected)) {
       if (
         typeof actual === "number" &&
         typeof expected === "number" &&
@@ -210,7 +251,15 @@ const assert: any = {
   },
 
   notStrictEqual(actual: any, expected: any, message?: any): void {
-    if (actual === expected) __fail(actual, expected, message, "notStrictEqual");
+    if (__sameValue(actual, expected)) {
+      __fail(actual, expected, message, "notStrictEqual");
+    }
+  },
+
+  // `assert.ifError(value)` — anything but `null`/`undefined` is a failure.
+  ifError(value: any): void {
+    if (value === null || value === undefined) return;
+    __fail(value, null, "ifError got unwanted exception: " + __inspect(value), "ifError");
   },
 
   deepStrictEqual(actual: any, expected: any, message?: any): void {
@@ -255,6 +304,100 @@ const assert: any = {
         __inspect(expected);
       __fail(error, expected, message === undefined ? detail : message, "throws");
     }
+  },
+
+  // `assert.rejects(promiseOrFn, expected?, message?)` -> a Promise that settles
+  // once the rejection has been checked. The awaited value is produced by
+  // calling `fn()` when a function is passed, exactly as in Node.
+  //
+  // Every callback below is declared `: any` and ends in an explicit
+  // `return undefined`: a `void` closure that calls an `any`-typed callback
+  // leaves the call result on the stack and the bytecode verifier rejects the
+  // method (`BadReturnHeight`).
+  rejects(promiseOrFn: any, expected?: any, message?: any): any {
+    return new Promise(function (resolve: any, reject: any): any {
+      let subject: any = promiseOrFn;
+      if (typeof promiseOrFn === "function") {
+        try {
+          subject = promiseOrFn();
+        } catch (caught) {
+          reject(caught);
+          return undefined;
+        }
+      }
+      const onFulfilled: any = function (): any {
+        try {
+          __fail(
+            undefined,
+            expected,
+            message === undefined ? "Missing expected rejection." : message,
+            "rejects",
+          );
+        } catch (failure) {
+          reject(failure);
+        }
+        return undefined;
+      };
+      const onRejected: any = function (error: any): any {
+        if (__expectationMatches(error, expected)) {
+          resolve(undefined);
+          return undefined;
+        }
+        try {
+          __fail(
+            error,
+            expected,
+            message === undefined ? "The rejection does not match the expectation." : message,
+            "rejects",
+          );
+        } catch (failure) {
+          reject(failure);
+        }
+        return undefined;
+      };
+      if (subject instanceof Promise) {
+        subject.then(onFulfilled, onRejected);
+        return undefined;
+      }
+      try {
+        __fail(subject, expected, message, "rejects");
+      } catch (failure) {
+        reject(failure);
+      }
+      return undefined;
+    });
+  },
+
+  doesNotReject(promiseOrFn: any, message?: any): any {
+    return new Promise(function (resolve: any, reject: any): any {
+      let subject: any = promiseOrFn;
+      if (typeof promiseOrFn === "function") {
+        try {
+          subject = promiseOrFn();
+        } catch (caught) {
+          reject(caught);
+          return undefined;
+        }
+      }
+      if (subject instanceof Promise) {
+        const onOk: any = function (): any {
+          resolve(undefined);
+          return undefined;
+        };
+        const onBad: any = function (error: any): any {
+          try {
+            __fail(error, undefined, message, "doesNotReject");
+          } catch (failure) {
+            reject(failure);
+          }
+          return undefined;
+        };
+        subject.then(onOk, onBad);
+        return undefined;
+      }
+      resolve(undefined);
+      return undefined;
+    });
   },
 
   doesNotThrow(fn: any, message?: any): void {
@@ -309,3 +452,8 @@ const assert: any = {
 assert.strict = assert;
 assert.deepEqual = assert.deepStrictEqual;
 assert.notDeepEqual = assert.notDeepStrictEqual;
+assert.ok = assert.ok;
+assert.equal = assert.equal;
+
+// `node:assert` module object for the bundler's `require` rewriting.
+const __node_assert: any = assert;

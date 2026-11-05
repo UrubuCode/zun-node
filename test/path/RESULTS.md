@@ -19,14 +19,14 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-path-extname.js` | ✅ pass | |
 | `test-path-glob.js` | ✅ pass | |
 | `test-path-isabsolute.js` | ✅ pass | |
-| `test-path-join.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x1bf613c30a0)) |
+| `test-path-join.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x1ea36ea1628)) |
 | `test-path-makelong.js` | ✅ pass | |
 | `test-path-normalize.js` | ✅ pass | |
-| `test-path-parse-format.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x295d6f827e0)) |
+| `test-path-parse-format.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x26f5c2fce08)) |
 | `test-path-posix-exists.js` | ✅ pass | |
 | `test-path-posix-relative-on-windows.js` | ✅ pass | |
 | `test-path-relative.js` | ✅ pass | |
-| `test-path-resolve.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x15ab1a667d0)) |
+| `test-path-resolve.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x16bdb9db448)) |
 | `test-path-win32-exists.js` | ✅ pass | |
 | `test-path-win32-normalize-device-names.js` | ✅ pass | |
 | `test-path-zero-length-strings.js` | ✅ pass | |

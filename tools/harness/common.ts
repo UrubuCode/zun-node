@@ -1,16 +1,184 @@
 // The `test/common` harness Node's own test files require, reduced to what the
-// corpus actually uses. Bundled ahead of each test by tools/bundle_node_test.sh.
+// corpus actually uses — but with the call-count verification real, not stubbed.
 //
 // `common` and `fixtures` keep Node's names so the bundler can simply delete the
 // `require` lines and let these bindings take over.
+//
+// ---------------------------------------------------------------------------
+// How the counts are verified: the exit mechanism
+// ---------------------------------------------------------------------------
+//
+// Node's `test/common/index.js` registers `process.on('exit', runCallChecks)` at
+// load time, so every `mustCall` wrapper is checked once the event loop has
+// drained. Reproducing that needs three things this harness now has:
+//
+//   1. `process` is an EventEmitter (../../src/process/process.ts), so
+//      `process.on('exit')` and `process.emit('exit')` exist at all.
+//   2. The harness registers its own 'exit' listener here, at load time — ahead
+//      of any listener the test body adds, exactly as in Node.
+//   3. Something has to decide that the loop is empty and emit 'exit'. The VM
+//      drains its unified loop (timers + microtasks) after the main script
+//      returns, but exposes no "about to exit" hook, so the bundler appends one
+//      statement — `__zunHarnessFinish();` — as the last line of the program.
+//      That starts a *settle loop*: a chain of `setTimeout(step, 1)` turns, each
+//      of which yields to the VM's timer and microtask queues. A turn counts as
+//      idle when `process.nextTick` has nothing pending; after
+//      `__IDLE_ROUNDS` consecutive idle turns (or `__MAX_ROUNDS` turns in all,
+//      the guard against a test that never settles) the chain emits 'exit' and,
+//      if a check failed, exits non-zero.
+//
+// The settle loop is a heuristic in one respect only: work scheduled through the
+// host's own `setTimeout`/`setInterval` is invisible to it, so a test whose
+// pending timers outlast `__IDLE_ROUNDS` turns would be judged finished early.
+// Every such test in the events corpus is blocked for another reason, and the
+// round budget is generous (hundreds of turns), so this has not bitten yet; the
+// honest fix is a `beforeExit` hook in the VM.
+
+// ---------------------------------------------------------------------------
+// Why every helper here hands back a *boxed* function
+// ---------------------------------------------------------------------------
+//
+// A function value cannot be returned out of an object-literal method or a
+// class method in this engine: the caller receives `null` (object literal) or
+// `undefined` (class method). `common.mustCall(fn)` is exactly that shape, so
+// the wrapper is handed back through `__evBox` (../../src/events/events.ts),
+// which routes it through a one-element array and yields the `functionBox`
+// record the engine itself uses on that lane. The record is an object, so it
+// returns intact; it stays callable with the exact argument count; it keeps one
+// identity even inside another array; and `events`, `assert` and `process` all
+// unwrap it, so `ee.on('x', common.mustCall())` and
+// `assert.strictEqual(listener, hello)` behave as written.
+
+const __IDLE_ROUNDS: number = 24;
+const __MAX_ROUNDS: number = 1024;
+
+// Registered wrappers, checked when 'exit' fires.
+const __mustCallChecks: any[] = [];
+const __harnessState: any = { skipped: false, warningExpectations: [], failures: [] };
+
+function __harnessFail(message: string): void {
+  __harnessState.failures.push(message);
+  host.stderrWrite("Mismatched function call: " + message + "\n");
+  process.exitCode = 1;
+}
+
+// `common.mustCall` / `common.mustCallAtLeast` share this wrapper.
+function __mustCallInner(fn: any, criteria: any, field: string): any {
+  let target: any = fn;
+  let expected: any = criteria;
+  if (typeof fn === "number") {
+    expected = fn;
+    target = undefined;
+  }
+  if (expected === undefined) expected = 1;
+  if (typeof expected !== "number") {
+    throw new TypeError('Invalid ' + field + ' value: ' + String(expected));
+  }
+
+  const record: any = { actual: 0, expected: expected, field: field, name: "<anonymous>" };
+  if (target !== undefined && target !== null) {
+    const named: any = target.name;
+    if (typeof named === "string" && named !== "") record.name = named;
+  }
+  __mustCallChecks.push(record);
+
+  // A function expression (not a declaration) with no declared parameters, so
+  // `arguments` is available and the forwarded arity is exact.
+  const wrapper: any = function (): any {
+    record.actual = Number(record.actual) + 1;
+    if (target === undefined || target === null) return undefined;
+    const passed: any[] = [];
+    const count = Number(arguments.length);
+    for (let i = 0; i < count; i++) passed.push(arguments[i]);
+    return __evCall(target, passed);
+  };
+  return __evBox(wrapper);
+}
+
+function __runCallChecks(): void {
+  if (__harnessState.skipped) return;
+  for (const record of __mustCallChecks) {
+    const actual = Number(record.actual);
+    const expected = Number(record.expected);
+    const ok =
+      record.field === "minimum" ? actual >= expected : actual === expected;
+    if (!ok) {
+      __harnessFail(
+        record.name +
+          " called " +
+          String(actual) +
+          " times, expected " +
+          (record.field === "minimum" ? "at least " : "exactly ") +
+          String(expected),
+      );
+    }
+  }
+  for (const expectation of __harnessState.warningExpectations) {
+    if (!expectation.seen) {
+      __harnessFail("expected warning " + String(expectation.name) + " was never emitted");
+    }
+  }
+}
+
+// Registered at load time, so it runs ahead of any 'exit' listener the test adds
+// — the same ordering Node's `test/common` gets from being required first.
+process.on("exit", __runCallChecks);
+
+// Started by the single statement the bundler appends after the test body.
+//
+// `__zunHarnessStep` is a top-level function declaration rather than a closure,
+// because the checker only accepts a statically known function as a
+// `setTimeout` callback — an `any`-typed binding holding a function is rejected
+// with "`setTimeout` expects a function callback", so the loop state lives in a
+// module-level object instead of being captured.
+const __harnessLoop: any = { idle: 0, rounds: 0 };
+
+function __zunHarnessStep(): void {
+  __harnessLoop.rounds = Number(__harnessLoop.rounds) + 1;
+  if (__processPendingTicks() > 0) {
+    __harnessLoop.idle = 0;
+  } else {
+    __harnessLoop.idle = Number(__harnessLoop.idle) + 1;
+  }
+  if (
+    Number(__harnessLoop.idle) >= __IDLE_ROUNDS ||
+    Number(__harnessLoop.rounds) >= __MAX_ROUNDS
+  ) {
+    __zunHarnessExit();
+    return;
+  }
+  setTimeout(__zunHarnessStep, 1);
+}
+
+function __zunHarnessFinish(): void {
+  setTimeout(__zunHarnessStep, 1);
+}
+
+function __zunHarnessExit(): void {
+  __processRunExit(undefined);
+  const code: any = process.exitCode;
+  if (code !== undefined && code !== null && Number(code) !== 0) {
+    host.exitProcess(Number(code));
+  }
+}
 
 const common: any = {
   isWindows: process.platform === "win32",
   isLinux: process.platform === "linux",
   isMacOS: process.platform === "darwin",
+  isAIX: false,
+  isIBMi: false,
+  isSunOS: false,
+  isFreeBSD: false,
+  isOpenBSD: false,
+  hasCrypto: false,
+  hasIntl: false,
+  isDumbTerminal: true,
 
   // A skipped test is a pass in Node's TAP output; exit 0 so the runner agrees.
+  // The pending call counts are abandoned, because the test never ran.
   skip(message: string): void {
+    __harnessState.skipped = true;
     console.log("1..0 # Skipped: " + message);
     process.exit(0);
   },
@@ -30,7 +198,12 @@ const common: any = {
     }
     if (typeof input === "object") {
       if (Array.isArray(input)) return " Received an instance of Array";
-      return " Received an instance of Object";
+      const ctor: any = input.constructor;
+      const name: any = ctor === undefined || ctor === null ? undefined : ctor.name;
+      return (
+        " Received an instance of " +
+        (typeof name === "string" && name !== "" ? name : "Object")
+      );
     }
     let inspected =
       typeof input === "string" ? JSON.stringify(input) : String(input);
@@ -40,31 +213,137 @@ const common: any = {
     return " Received type " + typeof input + " (" + inspected + ")";
   },
 
-  // No exit hook is available, so the call count is not enforced; the wrapper
-  // keeps the tests that use it running.
-  mustCall(fn?: any, exact?: number): any {
-    if (fn === undefined) {
-      return function (): void {};
-    }
-    return fn;
+  // `common.mustCall(fn?, exact = 1)` — verified when 'exit' fires.
+  mustCall(fn?: any, exact?: any): any {
+    return __mustCallInner(fn, exact, "exact");
   },
 
-  mustNotCall(message?: string): any {
-    return function (): void {
-      throw new Error(
-        message === undefined ? "function should not have been called" : message,
-      );
+  // `common.mustCallAtLeast(fn?, minimum = 1)`.
+  mustCallAtLeast(fn?: any, minimum?: any): any {
+    return __mustCallInner(fn, minimum, "minimum");
+  },
+
+  mustNotCall(message?: any): any {
+    const label: string =
+      message === undefined || message === null
+        ? "function should not have been called"
+        : String(message);
+    const wrapper: any = function (): any {
+      __harnessFail(label);
+      throw new Error(label);
     };
+    return __evBox(wrapper);
   },
 
-  mustSucceed(fn?: any): any {
-    return fn === undefined ? function (): void {} : fn;
+  mustNotMutateObjectDeep(value: any): any {
+    return value;
+  },
+
+  // `common.mustSucceed(fn?, exact?)` — a callback that asserts `err` is falsy
+  // and then forwards the remaining arguments.
+  mustSucceed(fn?: any, exact?: any): any {
+    const inner: any = function (): any {
+      const err: any = arguments[0];
+      if (err !== undefined && err !== null) {
+        __harnessFail("mustSucceed received an error: " + String(err.message));
+        throw err;
+      }
+      if (fn === undefined || fn === null) return undefined;
+      const passed: any[] = [];
+      const count = Number(arguments.length);
+      for (let i = 1; i < count; i++) passed.push(arguments[i]);
+      return __evCall(fn, passed);
+    };
+    return __mustCallInner(inner, exact, "exact");
+  },
+
+  // `common.expectsError(validator)` — a predicate for `assert.throws`, which
+  // checks the fields of the thrown error and answers `true`.
+  expectsError(validator: any, exact?: any): any {
+    const predicate: any = function (error: any): any {
+      if (validator === undefined || validator === null) return true;
+      if (typeof validator === "function") {
+        return __evCall(validator, [error]) === true;
+      }
+      for (const key of Object.keys(validator)) {
+        const want: any = validator[key];
+        const got: any = error === null || error === undefined ? undefined : error[key];
+        if (want instanceof RegExp) {
+          if (!__regexTest(want, String(got))) return false;
+        } else if (!__isDeepStrictEqual(got, want)) {
+          return false;
+        }
+      }
+      return true;
+    };
+    return __evBox(predicate);
+  },
+
+  // `common.expectWarning(name, expected, code?)`. Accepts Node's three shapes:
+  // a single (name, message), a map of name -> message, and an array of
+  // messages for one name.
+  expectWarning(name: any, expected?: any, code?: any): void {
+    const wanted: any[] = [];
+    if (typeof name === "object" && name !== null) {
+      for (const key of Object.keys(name)) {
+        const value: any = name[key];
+        if (Array.isArray(value)) {
+          for (const entry of value) wanted.push({ name: key, message: entry });
+        } else {
+          wanted.push({ name: key, message: value });
+        }
+      }
+    } else if (Array.isArray(expected)) {
+      for (const entry of expected) {
+        if (Array.isArray(entry)) {
+          wanted.push({ name: name, message: entry[0], code: entry[1] });
+        } else {
+          wanted.push({ name: name, message: entry });
+        }
+      }
+    } else {
+      wanted.push({ name: name, message: expected, code: code });
+    }
+    for (const entry of wanted) {
+      entry.seen = false;
+      __harnessState.warningExpectations.push(entry);
+    }
+    if (Number(__harnessState.warningExpectations.length) === Number(wanted.length)) {
+      process.on("warning", __checkWarning);
+    }
   },
 
   platformTimeout(ms: number): number {
     return ms;
   },
+
+  allowGlobals(): void {},
+
+  // `common.hasFipsCrypto` and friends are read as plain flags by a few tests.
+  hasFipsCrypto: false,
+  hasOpenSSL3: false,
+  rootDir: process.platform === "win32" ? "C:\\" : "/",
 };
+
+function __checkWarning(warning: any): void {
+  const warningName: any = warning.name;
+  const warningMessage: any = warning.message;
+  for (const expectation of __harnessState.warningExpectations) {
+    if (expectation.seen === true) continue;
+    if (String(expectation.name) !== String(warningName)) continue;
+    if (
+      expectation.message !== undefined &&
+      String(expectation.message) !== String(warningMessage)
+    ) {
+      continue;
+    }
+    expectation.seen = true;
+    return;
+  }
+  __harnessFail(
+    "unexpected warning " + String(warningName) + ": " + String(warningMessage),
+  );
+}
 
 // `test/common/fixtures`. The path tests only compute over the returned string,
 // never open it, so the directory is synthesized from the current working
@@ -93,11 +372,26 @@ const fixtures: any = {
 // spawns the runtime on a fixture. A real `spawnSync` belongs to the
 // `child_process` module's own work; until then the stub throws, so that block
 // fails on Windows (on Linux the test takes the other branch).
-const __nodeChildProcess: any = {
+const __node_child_process: any = {
   execSync(): string {
     throw new Error("child_process is not available in the zun harness");
   },
   spawnSync(): any {
     throw new Error("child_process is not available in the zun harness");
   },
+};
+
+// `node:domain` is required by `test-event-emitter-no-error-provided-to-error-event.js`.
+// Domains are a deprecated, async-hooks-backed facility; there is nothing here to
+// implement them on, so the stub throws rather than silently passing a test.
+const __node_domain: any = {
+  create(): any {
+    throw new Error("domain is not available in the zun harness");
+  },
+};
+
+// `node:stream` is required by `test-event-emitter-prepend.js`. `stream` is its
+// own library in the roadmap (PLAN.md), so this is a declared gap, not a shim.
+const __node_stream: any = {
+  Stream: undefined,
 };

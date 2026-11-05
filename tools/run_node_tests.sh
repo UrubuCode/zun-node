@@ -29,7 +29,7 @@
 #
 # Usage:
 #   tools/run_node_tests.sh --zun <path> [--ext <lib>] [--tag v25.0.0]
-#       [--module fs|path] [--limit N] [--timeout 20]
+#       [--module fs|path|events] [--limit N] [--timeout 20]
 set -u
 
 ZUN=""; EXT=""; TAG="v25.0.0"; MODULE="fs"; LIMIT=0; TIMEOUT=20
@@ -46,15 +46,19 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# How this module is implemented, and the Node file-name prefix that selects its
-# tests. `path`'s corpus includes `test-path.js` itself, which does not match a
-# `test-path-` prefix, so the pattern is per module rather than derived.
+# How this module is implemented, and the Node file-name prefix(es) that select
+# its tests. A corpus is not always one prefix: `path`'s includes `test-path.js`
+# itself, which does not match `test-path-`, and `events`' is split between
+# `test-event-emitter-*` (the EventEmitter surface) and `test-events-*` (the
+# module statics). PATTERNS is therefore a space-separated list, and PATTERN is
+# the human-readable form used in the README block and the results header.
 case "$MODULE" in
-  path) KIND="zun-ts"; PATTERN="test-path";;
-  *)    KIND="extension"; PATTERN="test-$MODULE-";;
+  path)   KIND="zun-ts";    PATTERNS="test-path";                        PATTERN="test-path";;
+  events) KIND="zun-ts";    PATTERNS="test-event-emitter- test-events-"; PATTERN="test-event-emitter-*|test-events-";;
+  *)      KIND="extension"; PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 
-[ -n "$ZUN" ] || { echo "usage: --zun <path> [--ext <lib>] [--module fs|path]" >&2; exit 2; }
+[ -n "$ZUN" ] || { echo "usage: --zun <path> [--ext <lib>] [--module fs|path|events]" >&2; exit 2; }
 if [ "$KIND" = "extension" ] && [ -z "$EXT" ]; then
   echo "module '$MODULE' is a zun_abi extension: --ext <lib> is required" >&2
   exit 2
@@ -93,7 +97,10 @@ note_of() {
 NAMES=()
 while IFS= read -r line; do
   line="$(printf '%s' "$line" | tr -d '[:space:]')"
-  case "$line" in "") continue;; *"$PATTERN"*) NAMES+=("$line");; esac
+  [ -n "$line" ] || continue
+  for prefix in $PATTERNS; do
+    case "$line" in *"$prefix"*) NAMES+=("$line"); break;; esac
+  done
 done < "$LIST"
 if [ "$LIMIT" -gt 0 ] && [ "${#NAMES[@]}" -gt "$LIMIT" ]; then
   NAMES=("${NAMES[@]:0:$LIMIT}")
@@ -114,7 +121,7 @@ for name in "${NAMES[@]}"; do
   fi
 
   if [ "$KIND" = "zun-ts" ]; then
-    bundle="$WORK/bundles/${name%.js}.ts"
+    bundle="$WORK/bundles/${name%.*}.ts"
     if ! bundle_err="$(bash "$BUNDLER" "$src" "$bundle" 2>&1 >/dev/null)"; then
       ROWS+="| \`$name\` | ❌ bundle failed | $(note_of "$bundle_err") |"$'\n'
       echo "[$i/$TOTAL] $name: bundle failed" >&2

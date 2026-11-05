@@ -16,9 +16,12 @@ A Node module lands here in whichever form fits what it actually does:
   computation: `path` (`src/path/path.ts`) is string manipulation end to end, so
   there is nothing to gain from crossing the ABI, and no `--ext` is involved.
 
-Two support slices exist only to run Node's own tests, and are Zun TypeScript for
-the same reason: `src/assert/assert.ts` (the strict-mode `assert` surface the
-tests assert with) and `src/process/process.ts` (`cwd()`, `env`, `platform`).
+Support slices exist to run Node's own tests, and are Zun TypeScript for the
+same reason: `src/assert/assert.ts` (the strict-mode `assert` surface the tests
+assert with), `src/process/process.ts` (`cwd()`, `env`, `platform`, and — because
+Node's `process` is an EventEmitter — `on`/`emit`/`nextTick`/`emitWarning`), and
+`src/util/util.ts` (`inspect`, which `events` formats its error and warning
+messages with).
 
 ## Compatibility
 
@@ -34,9 +37,12 @@ Because the engine has no CommonJS `require` or module resolution
 ([zun#4](https://github.com/UrubuCode/zun/issues/4)), a Zun TypeScript module's
 tests are first passed through
 [`tools/bundle_node_test.sh`](tools/bundle_node_test.sh), which inlines the
-process/assert/path/common shims ahead of the test body and rewrites its
-`require` lines; the resulting single file runs as `zun run <bundle.ts>`.
-Extension modules keep the direct `zun run --ext <lib> <test.js>` path.
+util/events/process/assert/path/common modules ahead of the test body, rewrites
+its `require` lines to the one object each inlined module exposes
+(`__node_events`, `__node_assert`, …), and appends the statement that settles the
+event loop and verifies the `common.mustCall` counts; the resulting single file
+runs as `zun run <bundle.ts>`. Extension modules keep the direct
+`zun run --ext <lib> <test.js>` path.
 
 <!-- node-fs:start -->
 ### Node.js v25 `fs` compatibility
@@ -61,6 +67,24 @@ Extension modules keep the direct `zun run --ext <lib> <test.js>` path.
 > blocking table is in [`test/path/README.md`](test/path/README.md), the per-test
 > breakdown with a failure note for each in
 > [`test/path/RESULTS.md`](test/path/RESULTS.md).
+
+<!-- node-events:start -->
+### Node.js v25 `events` compatibility
+
+`███░░░░░░░░░░░░░░░░░░░░░` **14.2%** — 5 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+<!-- node-events:end -->
+
+> `events` is implemented end to end — the whole `EventEmitter` surface plus every
+> module static — and the number is low because the *tests* reach for engine
+> features that do not exist yet, not because the module is thin. Nine of the
+> thirty-five files open with `new events.EventEmitter()`, which cannot compile:
+> `new` accepts a class identifier or a `Proxy`-typed expression, never a member
+> expression. Three more need class statics (`EventEmitter.defaultMaxListeners`,
+> `EventEmitter.once`), five need a bound `this` inside a listener
+> ([zun#1](https://github.com/UrubuCode/zun/issues/1) — `apply`/`call` thread no
+> receiver), and three require Node's `internal/event_target`. The full
+> blocker-by-blocker table is in [`test/events/README.md`](test/events/README.md),
+> the per-test breakdown in [`test/events/RESULTS.md`](test/events/RESULTS.md).
 
 ## Running the tracker locally
 
