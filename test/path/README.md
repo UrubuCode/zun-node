@@ -79,8 +79,8 @@ on Windows:
 
 | Test | Blocked by | What happens |
 |---|---|---|
-| `test-path-join.js` | [zun#1](https://github.com/UrubuCode/zun/issues/1), [zun#15](https://github.com/UrubuCode/zun/issues/15), [zun#16](https://github.com/UrubuCode/zun/issues/16), [zun#17](https://github.com/UrubuCode/zun/issues/17) | `join.apply(null, test[0])` shifts the arguments (#1) and the spread spelling `join(...test[0])` does not compile in that position (#15). The Windows table is built with `concat` on an `any` receiver, which flattens one level too deep (#16). `join === path.win32.join` is always `false` for a function stored in an array, and the failure message uses `test[0].map(JSON.stringify)`, a built-in read as a value (#17). |
-| `test-path-resolve.js` | [zun#1](https://github.com/UrubuCode/zun/issues/1), [zun#15](https://github.com/UrubuCode/zun/issues/15), [zun#17](https://github.com/UrubuCode/zun/issues/17); harness: `child_process` | the same driver shape as `join`. Its Windows-only tail spawns `process.argv[0]` on `test/fixtures/path-resolve.js` through `child_process.spawnSync`, which the harness only stubs — it needs a real `child_process`, which belongs to that module's own work. On Linux the other branch (`process.cwd = () => ''`) runs instead. |
+| `test-path-join.js` | [zun#16](https://github.com/UrubuCode/zun/issues/16), [zun#17](https://github.com/UrubuCode/zun/issues/17) | the Windows table is built as `joinTests[0][1].slice(0).concat([…])` — `concat` on an `any` receiver flattens its array argument one level too deep, so a 3-row table comes back with 4 rows and row 2 is `["//foo/bar"]` instead of `[["//foo/bar"], "…"]` (#16). The failure message then uses `test[0].map(JSON.stringify)`, a built-in read as a value (#17). Three of the four blockers this test used to have are gone: `join.apply(null, test[0])` passes its arguments correctly now and the spread spelling compiles (#1's shifting half, #15), and `join === path.win32.join` holds for a function stored in an array (#17's identity half). |
+| `test-path-resolve.js` | [zun#17](https://github.com/UrubuCode/zun/issues/17); harness: `child_process` | the same driver shape as `join`, minus the `concat`. Its Windows-only tail spawns `process.argv[0]` on `test/fixtures/path-resolve.js` through `child_process.spawnSync`, which the harness only stubs — it needs a real `child_process`, which belongs to that module's own work. On Linux the other branch (`process.cwd = () => ''`) runs instead. |
 | `test-path-parse-format.js` | [zun#14](https://github.com/UrubuCode/zun/issues/14) | Node's `assert` is a function *with* properties, and `checkParseFormat` uses the bare form `assert(output.dir.startsWith(output.root))`. A property stored on a function cannot be called as a method from inside a nested function, so `assert` cannot be both callable and carry `strictEqual` & co. Every other expectation in the file was checked individually and passes. |
 
 Uncaught errors are printed as `Object(Obj(0x…))`
@@ -90,13 +90,33 @@ throwing to compensate.
 
 Other engine issues that `path.ts` works around (no test is blocked by them):
 [#2](https://github.com/UrubuCode/zun/issues/2) `charCodeAt` out of range,
-[#3](https://github.com/UrubuCode/zun/issues/3) `.length` is u64,
+[#3](https://github.com/UrubuCode/zun/issues/3) `.length` is still typed `u64` by
+the checker (its *arithmetic* was widened, so `len - 1` and the descending
+`for` loop are correct now, but `.length` can be neither assigned to nor passed
+as a `number` — which is why `slen()`/`alen()`/`indexOfChar()` stay),
 [#7](https://github.com/UrubuCode/zun/issues/7) RegExp through `any`,
 [#13](https://github.com/UrubuCode/zun/issues/13) `!x` on an `any` empty string.
-Two more limit what callers can do: [#10](https://github.com/UrubuCode/zun/issues/10)
-(`path.join` with 7+ arguments does not compile, because the namespaces are object
-literals) and [#12](https://github.com/UrubuCode/zun/issues/12) (`charCodeAt`/`slice`
-are O(n), so every path API is O(n²) on long inputs).
+
+A note on probing #13, because it is easy to call fixed and is not:
+`const x: any = ""` is constant-folded to a static string, so `!x` answers
+correctly there. The bug shows as soon as the empty string arrives from a
+property read, a parameter or another `any` binding — `!value` is `false` and
+`Boolean(value)` is `true` while `?:` is right — which is every use site in
+`path.ts`, so `truthy()` stays.
+
+[#37](https://github.com/UrubuCode/zun/issues/37) is not worked around — it is
+designed out. `path.ts` raises `ERR_INVALID_ARG_TYPE` as a `NodeTypeError`, a
+real `TypeError` subclass with `code` as a **declared** field, because the
+expando spelling (`const e: any = new TypeError(m); e.code = '…'`) poisons the
+instance and makes every later statically typed read of its own members throw,
+`e.name` included. `test-path.js` reads exactly that field, in
+`assert.throws(fn, { code, name })`, for all 160 of its expectations.
+
+Two further issues limit what callers can do:
+[#10](https://github.com/UrubuCode/zun/issues/10) (`path.join` with 7+ arguments
+does not compile, because the namespaces are object literals) and
+[#12](https://github.com/UrubuCode/zun/issues/12) (`charCodeAt`/`slice` are
+O(n), so every path API is O(n²) on long inputs).
 
 ### Platform note
 

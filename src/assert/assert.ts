@@ -169,12 +169,35 @@ function __isDeepStrictEqual(a: any, b: any): boolean {
   const bKeys = Object.keys(b);
   if (Number(aKeys.length) !== Number(bKeys.length)) return false;
   for (const key of aKeys) {
-    // `Object.prototype.hasOwnProperty.call` is unavailable
-    // (https://github.com/UrubuCode/zun/issues/5); the instance method works.
+    // `Object.prototype.hasOwnProperty.call(b, key)` works again
+    // (https://github.com/UrubuCode/zun/issues/5 is fixed apart from
+    // `Object.hasOwn`, which is still missing); the instance method is kept
+    // because it is the shorter spelling of the same check and `b` is always a
+    // plain object here.
     if (!b.hasOwnProperty(key)) return false;
     if (!__isDeepStrictEqual(a[key], b[key])) return false;
   }
   return true;
+}
+
+// Is `error` an instance of `expected`, when `expected` is one of the standard
+// error constructors? `undefined` means "`expected` is not one of them", which
+// is what tells `__expectationMatches` to fall through to the predicate form.
+//
+// Every `instanceof` below names its class literally, because that is the only
+// spelling the engine resolves; the identity test in front of it is what makes
+// the dispatch work at all. `AssertionError` is this module's own class and is
+// included so `assert.throws(fn, assert.AssertionError)` behaves.
+function __matchesErrorConstructor(error: any, expected: any): any {
+  if (expected === Error) return error instanceof Error;
+  if (expected === TypeError) return error instanceof TypeError;
+  if (expected === RangeError) return error instanceof RangeError;
+  if (expected === SyntaxError) return error instanceof SyntaxError;
+  if (expected === ReferenceError) return error instanceof ReferenceError;
+  if (expected === EvalError) return error instanceof EvalError;
+  if (expected === URIError) return error instanceof URIError;
+  if (expected === AssertionError) return error instanceof AssertionError;
+  return undefined;
 }
 
 // `assert.throws(fn, expected?, message?)`: `expected` may be a RegExp, a
@@ -192,9 +215,22 @@ function __expectationMatches(error: any, boxedExpected: any): boolean {
   }
   const kind = typeof expected;
   if (kind === "function") {
-    // A constructor (checked with instanceof) or a predicate returning true.
-    // A class cannot be applied as a predicate, so the instanceof form is tried
-    // first and a throw from the call is reported as "did not match".
+    // `assert.throws(fn, Ctor)` — Node checks `error instanceof Ctor`.
+    //
+    // A constructor cannot be told apart from a predicate by inspection here:
+    // `.name` on a function value reads back `undefined`, and
+    // `error instanceof ctorValue` aborts with "call did not resolve to a
+    // method" whenever the right-hand side is an `any`-typed value rather than
+    // a class the checker can see
+    // (https://github.com/UrubuCode/zun/issues/17). What *does* work now is
+    // identity: `expected === TypeError` is true for the real constructor
+    // (https://github.com/UrubuCode/zun/issues/23's cousin — builtin
+    // constructors read as values keep their identity), and the right-hand side
+    // of the `instanceof` is then a literal the checker resolves. So the eight
+    // standard error constructors are matched by identity and the `instanceof`
+    // is spelled statically; anything else is applied as a predicate.
+    const byCtor = __matchesErrorConstructor(error, expected);
+    if (byCtor !== undefined) return byCtor === true;
     try {
       const asPredicate = expected(error);
       return asPredicate === true;

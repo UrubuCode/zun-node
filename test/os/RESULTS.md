@@ -13,10 +13,10 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-os.js` | ❌ runtime | zun: runtime error: call did not resolve to a method at <closure@193015> [193066..193092] |
+| `test-os.js` | ❌ runtime | zun: runtime error: call did not resolve to a method at <closure@202759> [202810..202836] |
 | `test-os-checked-function.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-os-checked-function.js: |
-| `test-os-eol.js` | ❌ runtime | zun: runtime error: call did not resolve to a method at __expectationMatches [89232..89237] |
+| `test-os-eol.js` | ✅ pass | |
 | `test-os-fast.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-os-fast.js: |
-| `test-os-homedir-no-envvar.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x7f3358100118)) |
-| `test-os-process-priority.js` | ✅ pass | |
-| `test-os-userinfo-handles-getter-errors.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x7f55040de9e8)) |
+| `test-os-homedir-no-envvar.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x2b4243fbfc0)) |
+| `test-os-process-priority.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x2e2043509b0)) |
+| `test-os-userinfo-handles-getter-errors.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x223c506bb00)) |

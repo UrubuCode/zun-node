@@ -85,17 +85,30 @@ caught the two real bugs this module had — a `%scope` suffix on IPv6 addresses
 that `uv_ip6_name` does not add, and `/proc/stat`'s aggregate `cpu` row being
 counted as a seventeenth processor.
 
-The numbers are measured on **ubuntu-latest**, the CI platform; the only test
-whose result differs between platforms is noted in the table.
+`RESULTS.md` was last regenerated on **Windows**; CI measures on
+**ubuntu-latest**. The only test whose result differs between the two is
+`test-os-process-priority.js`, noted in the table — so this corpus reads 1/7 on
+Windows and should read 2/7 on Linux.
 
-**Every remaining test failure is blocked outside this module**, in one of six
+`test-os-eol.js` **passes now.** It was the one failure in this list that the
+library could fix: it asserts `assert.throws(() => { os.EOL = 123; }, TypeError)`,
+the `TypeError` constructor as a *value*, and `assert.ts` had no way to tell a
+constructor from a predicate — `.name` on a function value still reads back
+`undefined`, and `error instanceof expectedValue` still aborts with `call did not
+resolve to a method` when the right-hand side is an `any`
+([zun#17](https://github.com/UrubuCode/zun/issues/17)). What works now is
+*identity*: `expected === TypeError` is `true` for the real constructor, so
+`assert.ts` matches the eight standard error constructors by identity and spells
+the `instanceof` against the literal class, which the checker resolves. That is
+`__matchesErrorConstructor` in `../../src/assert/assert.ts`.
+
+**Every remaining test failure is blocked outside this module**, in one of five
 ways:
 
 | Test | Blocked by | What happens |
 |---|---|---|
 | `test-os.js` | **callable `assert`** — [zun#14](https://github.com/UrubuCode/zun/issues/14) | The file's own `is` helper is built on the bare `assert(value, message)` form (`is.number` is `assert(!Number.isNaN(value), …)`), and it uses `assert(…)` directly a dozen more times. A value that is callable *and* carries `strictEqual` & co. cannot exist in this engine, so the first `is.number(priority)` fails with `call did not resolve to a method`. The same blocker stops `test-path-parse-format.js`. Behind it sits a second one: the file's last third asserts `` `${os.hostname}` === os.hostname() `` for ten getters and `+os.totalmem === os.totalmem()`, which needs ToPrimitive to consult a *function's* own `Symbol.toPrimitive` ([zun#36](https://github.com/UrubuCode/zun/issues/36)) — see the note below. |
 | `test-os-process-priority.js` *(Windows only)* | **destructured top-level bindings are invisible to functions** — [zun#34](https://github.com/UrubuCode/zun/issues/34) | **This test passes on Linux**, which is what the measurement above reports. On Windows it reaches line 110 of 145 — every priority constant, all four validation paths and the whole `PRIORITY_HIGHEST..PRIORITY_LOW` set/get sweep, including the Windows range mapping — and then `checkPriority()` throws `ReferenceError: PRIORITY_HIGH is not defined`. A top-level `const { PRIORITY_HIGH } = os.constants.priority;` never becomes a module global, so no function body can read it; only the Windows branch of `checkPriority` reads one, which is why Linux never hits it. |
-| `test-os-eol.js` | **builtins as values** — [zun#17](https://github.com/UrubuCode/zun/issues/17) | `os.EOL` and the `Object.defineProperties` replacement both work. The file fails on its middle line, `assert.throws(function() { os.EOL = 123; }, TypeError)`: the expectation is the `TypeError` constructor as a *value*, and both `expected(error)` and `error instanceof expected` abort with `call did not resolve to a method`. `assert.ts` cannot even discriminate a constructor from a predicate, because `.name` on a function reads back `undefined`. |
 | `test-os-checked-function.js`, `test-os-fast.js` | **`internal/` modules** | Both require `internal/test/binding` to monkey-patch or instrument the `os` binding — a Node-internal binding, not a public module, so the bundler reports an unresolved require and fails the bundle rather than guessing. `test-os-fast.js` additionally needs V8 natives syntax (`eval('%OptimizeFunctionOnNextCall(…)')`). |
 | `test-os-homedir-no-envvar.js`, `test-os-userinfo-handles-getter-errors.js` | **`node:child_process`** | Both re-run the test body in a child process (`cp.spawnSync(process.execPath, …)`, `execFile(node, ['-e', script])`) to observe `os` with `HOME`/`USERPROFILE` deleted from the *real* environment, or a getter throwing in a fresh process. `child_process` is its own library and needs process spawning, which no native here provides; the harness reports `child_process is not available in the zun harness`. The behavior each one checks is covered by the differential run: `homedir()` falls back to the passwd entry / `GetUserProfileDirectoryW`, and a throwing `encoding` getter propagates out of `userInfo()`. |
 
@@ -103,26 +116,37 @@ ways:
 
 Node makes every zero-argument getter coercible — `` `${os.hostname}` `` is
 `os.hostname()`, `+os.totalmem` is `os.totalmem()` — by assigning
-`fn[Symbol.toPrimitive]`. `os.ts` contains exactly that code and it is, today, a
-no-op here, in two independent ways: a symbol-keyed assignment onto a function
-value is silently dropped, and ToPrimitive on a function consults none of its
-own properties (`${fn}` is `[function]` even with an own `toString`) — [zun#36](https://github.com/UrubuCode/zun/issues/36). It is kept
-because it is the correct code, costs nothing, and starts working the day the
-engine threads ToPrimitive through a function value.
+`fn[Symbol.toPrimitive]`. `os.ts` contains exactly that code and it is still a
+no-op here, but for one reason now rather than two: the symbol-keyed assignment
+onto a function value **does** land (`fn[sym] = v; fn[sym] === v` holds), while
+ToPrimitive on a function still consults none of its own properties (`${fn}` is
+`[function]` even with an own `toString`) —
+[zun#36](https://github.com/UrubuCode/zun/issues/36). It is kept because it is
+the correct code, costs nothing, and starts working the day the engine threads
+ToPrimitive through a function value.
 
 ### Engine workarounds carried by `os.ts`
 
 None of these block a test; each is marked at its use site and listed in the
 file header.
 
-* `Number(x.length)` throughout, because `.length` is a u64
-  ([zun#3](https://github.com/UrubuCode/zun/issues/3)).
+* `Number(x.length)` throughout, because the checker still types `.length` as
+  `u64` ([zun#3](https://github.com/UrubuCode/zun/issues/3)) — its *arithmetic*
+  was widened, so `len - 1` and descending loops are correct now, but `.length`
+  can be neither assigned to nor passed as a `number`.
 * `charAt(i)` rather than `s[i]` in the CIDR scanner, and no `charCodeAt` past
   the end ([zun#2](https://github.com/UrubuCode/zun/issues/2)).
-* no `Map`/`Set`: a `Map` read through an `any` loses every method, so the
-  netmask→suffix lookup Node's own test writes as a `Map` is arithmetic here
-  (same family as [zun#6](https://github.com/UrubuCode/zun/issues/6) /
-  [zun#7](https://github.com/UrubuCode/zun/issues/7)).
+* the netmask→suffix lookup Node's own test writes as a `Map` is still
+  arithmetic here, but no longer because it has to be: a `Map` keeps its methods
+  through an `any` binding again
+  ([zun#7](https://github.com/UrubuCode/zun/issues/7) is fixed for `Map`/`Set`,
+  and so is [zun#6](https://github.com/UrubuCode/zun/issues/6) for the `get` and
+  `set` Proxy traps). The arithmetic is exact over all 33 netmasks and a table
+  would only re-state it, so it stays.
+* `ERR_SYSTEM_ERROR` carries `code` as a **declared** field, on a `NodeError`
+  base from `events.ts`, because the expando spelling poisons the instance and
+  makes every later statically typed read of its own members throw
+  ([zun#37](https://github.com/UrubuCode/zun/issues/37)).
 * the module's entries are object-literal **methods** delegating to top-level
   `__os*` functions, because a method survives being read, destructured and
   called through an `any` where a bare function value does not

@@ -22,30 +22,62 @@
 // Engine workarounds in this file, each tied to an open zun issue
 // (https://github.com/UrubuCode/zun/issues)
 // ---------------------------------------------------------------------------
-//   * `__evUnbox` / `__evSame` / `__evIsFn` — a function stored in an array
-//     arrives as a `functionBox` record, so `arr[0] === fn` is false and
-//     `typeof arr[0]` is `"object"` (zun#17). The record's `__boxedFn` slot is
-//     readable, so every identity test and every callability test in this file
-//     goes through those three helpers.
+//   * `__evUnbox` / `__evIsFn` — a function stored in an array still arrives as
+//     a `functionBox` record, so `typeof arr[0]` is `"object"` and
+//     `arr.indexOf(fn)` answers -1 (zun#17). Identity itself was fixed —
+//     `arr[0] === fn` is `true` again — but a callability test and an `indexOf`
+//     still have to go through the record's readable `__boxedFn` slot, so every
+//     one in this file does. (`__evSame` is now plain `===` under the hood and
+//     is kept as the one place that would change if boxing came back.)
 //   * `__evCall` — a listener is invoked as `fn(...args)` and never as
-//     `fn.apply(this, args)`: `apply`/`call` do not thread a receiver at all in
-//     this engine, so `this` inside a listener is always `undefined` (the
-//     `functionApply` intrinsic prepends `thisArg` as a positional argument
-//     instead; zun#1). That is the single biggest gap of this module — see
+//     `fn.apply(this, args)`: `apply`/`call` still thread no receiver, so `this`
+//     inside a listener is always `undefined` (zun#1; the argument-shifting half
+//     of that issue *is* fixed — `f.apply(null, [a, b])` now passes `a, b`).
+//     That is the single biggest gap of this module — see
 //     ../../test/events/README.md.
 //   * symbol-keyed slots hold an **array** even for a single listener: assigning
 //     a function value under a symbol key on a dynamic object silently stores
 //     nothing (`o[sym] = fn; o[sym] === undefined`), while an array value
-//     round-trips. String-keyed slots keep Node's exact shape.
-//   * `__evTypes` — a function-valued property is invisible to `Object.keys`
-//     and `Object.hasOwn`, so `eventNames()` cannot read the key set back out of
-//     `_events`; the insertion order is tracked alongside it.
-//   * `__kRejection` / `errorMonitor` are module-level symbol constants:
-//     `Symbol.for(key)` does not return the same symbol twice in this engine, so
-//     a registry round-trip cannot be used to recover them.
-//   * `Number(x.length)` throughout, because `.length` is a u64 (zun#3).
-//   * numeric class fields carry an explicit initializer: a `number`-typed field
-//     declared without one panics the interpreter when the instance is built.
+//     round-trips (zun#32). String-keyed slots keep Node's exact shape.
+//   * `__evTypes` — a function-valued property is still invisible to
+//     `Object.keys`, `Object.getOwnPropertyNames`, `Reflect.ownKeys` and
+//     `hasOwnProperty` (zun#32), so `eventNames()` cannot read the key set back
+//     out of `_events`; the insertion order is tracked alongside it. Only the
+//     `in` operator sees such a property now.
+//   * `__evRawDelete` — `delete` does not clear a function-valued property and
+//     `delete o[sym]` throws "Cannot convert a Symbol value to a string"
+//     (zun#32). Writing `undefined` is the only clear that works for both. The
+//     third part of that issue is fixed: a function written over a slot that
+//     holds `undefined` is no longer shadowed by it.
+//   * `splice`'s start index must be an integer, which only an `any`-typed array
+//     receiver accepts; array-held flags such as `warned` likewise need an `any`
+//     receiver.
+//   * the EventTarget side tables keep their keys alive, because `WeakMap` loses
+//     its methods through an `any` binding and rejects a non-object value
+//     (zun#28). They are real `Map`s again, now that a `Map` survives an `any`
+//     binding (zun#7).
+//   * `errorMonitor` is a module-level `Symbol` constant, as in Node;
+//     `captureRejectionSymbol` is `Symbol.for('nodejs.rejection')`, also as in
+//     Node, now that the registry round-trips (zun#23).
+//   * `EventEmitter` declares `__zunEventsCapture` rather than attaching it:
+//     an undeclared key written onto a typed instance through an `any` alias
+//     poisons every later statically typed read of that instance (zun#37).
+//   * `Number(x.length)` throughout: the *arithmetic* on `.length` was widened,
+//     so `len - 1` and descending loops are correct now, but the checker still
+//     types `.length` as `u64`, so it can be neither assigned to nor passed as a
+//     `number` (zun#3).
+//
+// Four workarounds this file used to carry are gone, because the engine fixed
+// what forced them: `emit` is spelled `emit(type, ...args)` again rather than
+// ten optional slots (a class method's rest parameter is a real array — the
+// `any`-binding half of zun#11 is still open); `prependListener` uses
+// `Array.prototype.unshift`, which accepts a function argument again (zun#17);
+// `EventEmitter.defaultMaxListeners`, `.errorMonitor` and
+// `.captureRejectionSymbol` are real class statics (zun#20, partly); the
+// event-name bookkeeping compares symbols by identity instead of by description
+// (zun#23); and a class field may be declared without an initializer again
+// (zun#27) — the explicit initializers stay because they are what the code
+// means, not because the engine demands them.
 
 // ---------------------------------------------------------------------------
 // Well-known symbols
@@ -55,11 +87,26 @@
 // event without consuming it.
 const errorMonitor: any = Symbol("events.errorMonitor");
 
-// `events.captureRejectionSymbol` — Node spells it `Symbol.for('nodejs.rejection')`.
-const captureRejectionSymbol: any = Symbol("nodejs.rejection");
+// `events.captureRejectionSymbol`, spelled as Node spells it. The registry
+// round-trip works again (https://github.com/UrubuCode/zun/issues/23), so a
+// caller that writes `Symbol.for('nodejs.rejection')` gets *this* symbol; it
+// used to be a plain `Symbol`, because `Symbol.for` handed back a fresh symbol
+// every time and the two could never meet.
+const captureRejectionSymbol: any = Symbol.for("nodejs.rejection");
 
 // Internal flags Node keeps on the instance behind symbols. They are plain
 // string keys here, prefixed so they cannot collide with an event name.
+//
+// `EventEmitter` **declares** a field of this exact name. That is not
+// decoration: writing a key a class did not declare onto one of its instances
+// through an `any` alias poisons the instance, and every later statically typed
+// read of any of its fields throws `Cannot read private member from an object
+// whose class did not declare it`
+// (https://github.com/UrubuCode/zun/issues/37). `new EventEmitter()` used to do
+// exactly that for the rejection flag, which made `ee._events` unreadable from
+// a test. Declaring the field keeps the write off the expando path; the dynamic
+// spelling `target[__kCaptureKey]` still works, and is what the EventTarget-like
+// and plain-object receivers below use.
 const __kCaptureKey: string = "__zunEventsCapture";
 
 // ---------------------------------------------------------------------------
@@ -129,17 +176,16 @@ function __evIsSymbol(value: any): boolean {
   return typeof value === "symbol";
 }
 
-// The identity of an event name, for the bookkeeping in `__evTypes`.
-//
-// A symbol never compares equal to itself in this engine (`s === s` is `false`,
-// and so is `Symbol.for(k) === Symbol.for(k)`), while a dynamic object keys a
-// symbol-valued property by its description — so a description-derived id is
-// both the only workable key and exactly consistent with how `_events[sym]`
-// already behaves here.
-function __evKeyId(type: any): string {
-  if (__evIsSymbol(type)) return "@@sym:" + String(type);
-  return "str:" + String(type);
-}
+// `__evTypes` used to be keyed by a *description-derived* id, because a symbol
+// never compared equal to itself (`s === s` was `false`) and a dynamic object
+// keyed a symbol-valued property by its description. Both are fixed
+// (https://github.com/UrubuCode/zun/issues/23): `s === s` holds, two symbols
+// with the same description stay distinct, `Symbol.for(k) === Symbol.for(k)`,
+// and `_events[sym]` is keyed by identity. A symbol also survives array
+// storage with its identity intact, so `indexOf` locates it. The event-name
+// bookkeeping below is therefore plain identity, which is both simpler and
+// correct for two listeners registered under `Symbol('x')` and `Symbol('x')` —
+// the description-derived id merged those two.
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -170,10 +216,58 @@ function __evReceived(value: any): string {
   return " Received type " + kind + " (" + shown + ")";
 }
 
-class ERR_INVALID_ARG_TYPE extends Error {
-  code: string;
+// ---------------------------------------------------------------------------
+// The library's Node error base classes
+// ---------------------------------------------------------------------------
+//
+// Node's coded errors are real `Error` subclasses: `ERR_INVALID_ARG_TYPE` is a
+// `TypeError` (so `err instanceof TypeError` holds and `err.name` is
+// `"TypeError"`) that additionally carries a `code`. These three bases say that
+// in the engine's own terms, and every coded error in this library — here, in
+// `path.ts` and in `os.ts` — is built from one of them.
+//
+// The `code` is a **declared field**, which is the whole point. The spelling the
+// library used before — `const e: any = new TypeError(msg); e.code = 'ERR_X';`
+// — writes a key the class never declared onto a typed instance through an
+// `any` alias, and that poisons the instance: every later statically typed read
+// of one of its own members throws `Cannot read private member from an object
+// whose class did not declare it`
+// (https://github.com/UrubuCode/zun/issues/37). `err.name` is exactly such a
+// read, and `assert.throws(fn, { code, name })` — which Node's `test-path.js`
+// uses for all 160 of its expectations — performs it. Declaring the field keeps
+// the construction off the expando path entirely, so there is no workaround to
+// carry: this is simply the correct shape.
+//
+// `name` is not overridden: a subclass of `TypeError` already reports
+// `"TypeError"`, and `toString()` / `${err}` compose it correctly.
+class NodeTypeError extends TypeError {
+  code: string = "";
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+class NodeRangeError extends RangeError {
+  code: string = "";
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+class NodeError extends Error {
+  code: string = "";
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+class ERR_INVALID_ARG_TYPE extends NodeTypeError {
   constructor(name: string, expected: any, actual: any) {
     super(
+      "ERR_INVALID_ARG_TYPE",
       'The "' +
         name +
         '" argument must be ' +
@@ -183,54 +277,43 @@ class ERR_INVALID_ARG_TYPE extends Error {
         "." +
         __evReceived(actual),
     );
-    this.code = "ERR_INVALID_ARG_TYPE";
-  }
-  get name(): string {
-    return "TypeError";
   }
 }
 
-class ERR_INVALID_ARG_VALUE extends Error {
-  code: string;
+class ERR_INVALID_ARG_VALUE extends NodeTypeError {
   constructor(name: string, value: any, reason: string) {
-    super('The ' + name + " argument " + reason + ". Received " + __evInspect(value));
-    this.code = "ERR_INVALID_ARG_VALUE";
-  }
-  get name(): string {
-    return "TypeError";
+    super(
+      "ERR_INVALID_ARG_VALUE",
+      "The " + name + " argument " + reason + ". Received " + __evInspect(value),
+    );
   }
 }
 
-class ERR_OUT_OF_RANGE extends Error {
-  code: string;
+class ERR_OUT_OF_RANGE extends NodeRangeError {
   constructor(name: string, range: string, actual: any) {
     super(
+      "ERR_OUT_OF_RANGE",
       'The value of "' + name + '" is out of range. It must be ' + range + ". Received " +
         __evInspect(actual),
     );
-    this.code = "ERR_OUT_OF_RANGE";
-  }
-  get name(): string {
-    return "RangeError";
   }
 }
 
-class ERR_UNHANDLED_ERROR extends Error {
-  code: string;
+class ERR_UNHANDLED_ERROR extends NodeError {
   context: any;
   constructor(detail: any) {
-    super(detail === undefined ? "Unhandled error." : "Unhandled error. (" + String(detail) + ")");
-    this.code = "ERR_UNHANDLED_ERROR";
+    super(
+      "ERR_UNHANDLED_ERROR",
+      detail === undefined ? "Unhandled error." : "Unhandled error. (" + String(detail) + ")",
+    );
     this.context = undefined;
   }
 }
 
-class AbortError extends Error {
-  code: string;
+class AbortError extends NodeError {
   cause: any;
   constructor(message?: string, options?: any) {
-    super(message === undefined ? "This operation was aborted" : message);
-    this.code = "ABORT_ERR";
+    super("ABORT_ERR", message === undefined ? "This operation was aborted" : message);
     this.cause = options === undefined || options === null ? undefined : options.cause;
   }
   get name(): string {
@@ -311,15 +394,19 @@ function __evCheckListener(listener: any): void {
 // defaultMaxListeners
 // ---------------------------------------------------------------------------
 
-let __evDefaultMaxListeners: number = 10;
-
+// The value lives in `EventEmitter.defaultMaxListeners`, the static field, so
+// that Node's two spellings — `EventEmitter.defaultMaxListeners` and
+// `events.defaultMaxListeners` — are one storage location rather than two that
+// can drift. Static fields read back and can be assigned since
+// https://github.com/UrubuCode/zun/issues/20 was partly fixed; before that this
+// was a module-level `let` and the class spelling was simply unreachable.
 function __evGetDefaultMaxListeners(): number {
-  return __evDefaultMaxListeners;
+  return EventEmitter.defaultMaxListeners;
 }
 
 function __evSetDefaultMaxListeners(value: any): void {
   __evValidateNumber(value, "defaultMaxListeners", 0);
-  __evDefaultMaxListeners = value;
+  EventEmitter.defaultMaxListeners = value;
 }
 
 // `process.emitWarning` lives in src/process/process.ts, which the bundle places
@@ -370,9 +457,16 @@ class MaxListenersExceededWarning extends Error {
 // Write a slot, clearing whatever was there first.
 //
 // A dynamic object keeps function values in a slot of their own, so assigning a
-// function over a key that currently holds an object can leave the old object
-// value shadowing the new function. Deleting the key first makes the write
-// unconditional.
+// function over a key that currently holds an object leaves the old object
+// value shadowing the new function — `o.k = fn` after `o.k = [1]` is *swallowed*
+// and `o.k` is still the array (https://github.com/UrubuCode/zun/issues/32).
+// `_events[type]` goes function → array → function on every
+// add-second-then-remove-back-to-one cycle, so this is on the hot path, not an
+// edge case. Deleting the key first makes the write unconditional.
+//
+// The `undefined` form of the same bug is fixed: `o.k = undefined; o.k = fn`
+// now stores the function. The object form is not, which is why this helper
+// stays.
 function __evRawSet(events: any, type: any, value: any): void {
   // `delete obj[sym]` throws in this engine, and a symbol slot only ever holds
   // an array here, so the shadowing it guards against cannot arise for one.
@@ -422,14 +516,8 @@ function __evSlotDelete(target: any, type: any): void {
   __evRawDelete(events, type);
   const types: any = target.__evTypes;
   if (types === undefined) return;
-  const wanted = __evKeyId(type);
-  const n = __evLen(types);
-  for (let i = 0; i < n; i++) {
-    if (__evKeyId(types[i]) === wanted) {
-      types.splice(i, 1);
-      return;
-    }
-  }
+  const at = Number(types.indexOf(type));
+  if (at >= 0) types.splice(at, 1);
 }
 
 function __evTrackType(target: any, type: any): void {
@@ -438,11 +526,7 @@ function __evTrackType(target: any, type: any): void {
     types = [];
     target.__evTypes = types;
   }
-  const wanted = __evKeyId(type);
-  const n = __evLen(types);
-  for (let i = 0; i < n; i++) {
-    if (__evKeyId(types[i]) === wanted) return;
-  }
+  if (Number(types.indexOf(type)) >= 0) return;
   types.push(type);
 }
 
@@ -484,7 +568,7 @@ function __evSingleFor(type: any, listener: any): any {
 // `events.defaultMaxListeners` resolution for a target.
 function __evMaxListenersOf(target: any): number {
   const own: any = target._maxListeners;
-  if (own === undefined) return __evDefaultMaxListeners;
+  if (own === undefined) return __evGetDefaultMaxListeners();
   return own;
 }
 
@@ -543,15 +627,11 @@ function __evAddListener(target: any, type: any, listener: any, prepend: boolean
   } else {
     list = existing;
     if (prepend) {
-      // `Array.prototype.unshift` rejects a function argument in this engine,
-      // so a prepend rebuilds the list; the `warned` flag rides along.
-      const next: any = [listener];
-      const existingCount = __evLen(list);
-      for (let i = 0; i < existingCount; i++) next.push(list[i]);
-      if (list.warned === true) next.warned = true;
-      const store: any = target._events;
-      __evRawSet(store, type, next);
-      list = next;
+      // `Array.prototype.unshift` accepts a function argument again, so a
+      // prepend mutates the list in place as in Node. It used to rebuild the
+      // list and copy the `warned` flag across
+      // (https://github.com/UrubuCode/zun/issues/17).
+      (list as any).unshift(listener);
     } else {
       list.push(listener);
     }
@@ -894,6 +974,9 @@ class EventEmitter {
   _eventsCount: number = 0;
   _maxListeners: any;
   __evTypes: any[] = [];
+  // The `captureRejections` flag, declared rather than attached: see
+  // `__kCaptureKey` above and https://github.com/UrubuCode/zun/issues/37.
+  __zunEventsCapture: boolean = false;
 
   constructor(options?: any) {
     this._events = Object.create(null);
@@ -958,32 +1041,16 @@ class EventEmitter {
     return __evRemoveAllListeners(this, type, type !== undefined);
   }
 
-  // `emit(type, ...args)` is spelled with explicit optional slots, because a
-  // class method's rest parameter is not materialised as an array in this
-  // engine (with no rest arguments it is `undefined`, with one it is the bare
-  // value, and `.length` then panics the interpreter) and `arguments` is not
-  // available inside a class method either. The trailing `undefined` slots are
-  // trimmed, so `emit('x', undefined)` is reported as a zero-argument emit —
-  // the one observable deviation this costs.
-  emit(
-    type: any,
-    a0?: any,
-    a1?: any,
-    a2?: any,
-    a3?: any,
-    a4?: any,
-    a5?: any,
-    a6?: any,
-    a7?: any,
-    a8?: any,
-    a9?: any,
-  ): boolean {
-    const slots: any[] = [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9];
-    let count = 10;
-    while (count > 0 && slots[count - 1] === undefined) count = count - 1;
-    const passed: any[] = [];
-    for (let i = 0; i < count; i++) passed.push(slots[i]);
-    return __evEmit(this, type, passed);
+  // A class method's rest parameter is a real array again, so `emit` is spelled
+  // the way Node spells it. It used to be ten explicit optional slots with the
+  // trailing `undefined`s trimmed, because the rest parameter was `undefined`
+  // with no rest arguments and the bare value with one
+  // (https://github.com/UrubuCode/zun/issues/11, whose `any`-binding half is
+  // still open). That cost two observable deviations which are now gone:
+  // `emit('x', undefined)` is a one-argument emit again, and an emit may carry
+  // more than ten arguments.
+  emit(type: any, ...args: any[]): boolean {
+    return __evEmit(this, type, args);
   }
 
   listeners(type?: any): any[] {
@@ -1029,14 +1096,28 @@ class EventEmitter {
     return __evMaxListenersOf(this);
   }
 
-  // ---- module statics, reachable as `EventEmitter.<name>(...)` --------------
+  // ---- module statics, reachable as `EventEmitter.<name>` ------------------
   //
-  // A class static *field* reads back as `undefined` in this engine and
-  // assigning a property to a class panics the interpreter, so the value-shaped
-  // statics (`EventEmitter.defaultMaxListeners`, `EventEmitter.errorMonitor`,
-  // `EventEmitter.captureRejectionSymbol`, `EventEmitter.prototype`) are only
-  // available through the module object. Static *methods* work, so the callable
-  // statics live here as well as there.
+  // A class static *field* now reads back and can be assigned
+  // (https://github.com/UrubuCode/zun/issues/20), so the three value-shaped
+  // statics Node's corpus reaches for are here, as Node has them.
+  // `defaultMaxListeners` is the single source of truth: the emitter resolves a
+  // target's limit through `__evGetDefaultMaxListeners`, which reads *this*
+  // field, and the module object's accessor pair writes it. So
+  // `EventEmitter.defaultMaxListeners = 3` and `events.defaultMaxListeners = 3`
+  // are the same assignment, exactly as in Node. The direct field write skips
+  // `validateNumber`, which the accessor on the module object still applies.
+  //
+  // Two parts of #20 are still open and shape what can live here: a static may
+  // not share a name with an instance method ("duplicate method"), which keeps
+  // `EventEmitter.once`, `EventEmitter.listenerCount`, `EventEmitter.on`,
+  // `EventEmitter.getMaxListeners` and `EventEmitter.setMaxListeners` on the
+  // module object alone; and reading a static through an `any`-typed *class
+  // value* panics the interpreter, so nothing here may be reached that way.
+  static defaultMaxListeners: number = 10;
+  static errorMonitor: any = errorMonitor;
+  static captureRejectionSymbol: any = captureRejectionSymbol;
+  static usingDomains: boolean = false;
 
   static addAbortListener(signal: any, listener: any): any {
     return __eventsAddAbortListener(signal, listener);
@@ -1105,42 +1186,28 @@ function __eventsGetEventListeners(emitterOrTarget: any, type: any): any[] {
 
 // Side tables keyed by object identity.
 //
-// A `WeakMap` would be the right structure, but it accepts only object values
-// here (`wm.set(key, 5)` fails with "call did not resolve to a method",
-// https://github.com/UrubuCode/zun/issues/28), and a `Map` read through an `any`
-// binding throws (https://github.com/UrubuCode/zun/issues/7), so these are two
-// parallel arrays with a linear scan. Object identity survives array storage —
-// only *functions* and *symbols* are re-boxed — so the scan is exact. The
-// tables are small (one entry per EventTarget a program touches) and, unlike a
-// WeakMap, they keep their keys alive; that is a leak this trades for working
-// lookups.
+// A `Map` again, now that a `Map` read through an `any` binding keeps its
+// methods (https://github.com/UrubuCode/zun/issues/7). These used to be two
+// parallel arrays with a linear scan, which is what the `__evTable*` shape is
+// left over from; the three accessors stay so the call sites read the same
+// either way.
+//
+// A `WeakMap` is still the structurally right answer and is still unusable: it
+// loses its methods through an `any` binding and rejects a non-object value
+// (`wm.set(key, 5)` fails with "set is not a function",
+// https://github.com/UrubuCode/zun/issues/28). So these tables keep their keys
+// alive, which is a leak traded for working lookups — one entry per EventTarget
+// a program touches.
 function __evTableNew(): any {
-  return { keys: [], values: [] };
-}
-
-function __evTableIndex(table: any, key: any): number {
-  const keys: any = table.keys;
-  const count = __evLen(keys);
-  for (let i = 0; i < count; i++) {
-    if (keys[i] === key) return i;
-  }
-  return -1;
+  return new Map();
 }
 
 function __evTableGet(table: any, key: any): any {
-  const at = __evTableIndex(table, key);
-  if (at < 0) return undefined;
-  return table.values[at];
+  return table.get(key);
 }
 
 function __evTableSet(table: any, key: any, value: any): void {
-  const at = __evTableIndex(table, key);
-  if (at < 0) {
-    table.keys.push(key);
-    table.values.push(value);
-    return;
-  }
-  table.values[at] = value;
+  table.set(key, value);
 }
 
 // EventTarget listeners added through this module are tracked so
@@ -1185,16 +1252,16 @@ function __eventsGetMaxListeners(emitterOrTarget: any): number {
     // An AbortSignal opts out of the max-listeners warning entirely, so Node
     // reports 0 (unlimited) for one that has not been given a limit.
     if (emitterOrTarget instanceof AbortSignal) return 0;
-    if (__eventsIsEventTargetLike(emitterOrTarget)) return __evDefaultMaxListeners;
+    if (__eventsIsEventTargetLike(emitterOrTarget)) return __evGetDefaultMaxListeners();
   }
   throw new ERR_INVALID_ARG_TYPE("emitter", ["EventEmitter", "EventTarget"], emitterOrTarget);
 }
 
 function __eventsSetMaxListeners(n: any, targets: any[]): void {
-  const value = n === undefined ? __evDefaultMaxListeners : n;
+  const value = n === undefined ? __evGetDefaultMaxListeners() : n;
   __evValidateNumber(value, "setMaxListeners", 0);
   if (targets === undefined || __evLen(targets) === 0) {
-    __evDefaultMaxListeners = value;
+    EventEmitter.defaultMaxListeners = value;
     return;
   }
   for (const target of targets) {

@@ -15,18 +15,24 @@
 // compiles. See ../../PLAN.md.
 //
 // Engine workarounds in this file, each tied to an open zun issue:
-//   * `slen()` instead of `.length` in arithmetic — `.length` is u64, so
-//     `len - 1` underflows and `i >= 0` compares unsigned
-//     (https://github.com/UrubuCode/zun/issues/3).
+//   * `slen()` instead of `.length` — the engine has since widened the
+//     *arithmetic*, so `len - 1` no longer underflows and the descending
+//     `for (let i = len - 1; i >= 0; i--)` loop terminates, but the checker
+//     still types `.length` as `u64`, so it can be neither assigned to nor
+//     passed as a `number` (https://github.com/UrubuCode/zun/issues/3).
 //   * `cc()` instead of `.charCodeAt()` — an out-of-range index throws instead of
 //     returning NaN (https://github.com/UrubuCode/zun/issues/2).
 //   * a RegExp is built and used inside one function, never passed through `any`
 //     (https://github.com/UrubuCode/zun/issues/7).
+//   * `indexOfChar()` — `indexOf` answers an i32 that cannot mix with Number
+//     arithmetic (same family as issue #3).
 //   * `truthy()` instead of `!value` / `Boolean(value)` on an `any` — the unary
 //     negation of a boxed value reports the empty string as truthy, while `if`,
 //     `?:` and `||` get it right (https://github.com/UrubuCode/zun/issues/13).
-//   * `indexOfChar()` — `indexOf` answers an i32 that cannot mix with Number
-//     arithmetic (same family as issue #3).
+//     Beware of probing this one with `const x: any = ""`: that initializer is
+//     constant-folded to a static string and `!x` then answers correctly. The
+//     bug shows as soon as the value arrives from a property read, a parameter
+//     or another `any` binding — which is every use site in this file.
 //
 // Security note: the `.\` prefix that keeps traversal from changing the root
 // (CVE-2025-23084 — Node's comments call it CVE-2024-36139 — and the reserved
@@ -64,7 +70,7 @@ function cc(value: string, index: number): number {
 
 // JavaScript truthiness of a value whose static type is `any`. Written as a
 // conditional expression because `!value` and `Boolean(value)` mis-report a
-// boxed empty string as truthy.
+// boxed empty string as truthy. See issue #13.
 function truthy(value: any): boolean {
   return value ? true : false;
 }
@@ -148,15 +154,30 @@ function describeReceived(value: any): string {
   return " Received type " + kind + " (" + text + ")";
 }
 
+// `ERR_INVALID_ARG_TYPE` as Node raises it: a real `TypeError` (so
+// `instanceof TypeError` holds and `name` is `"TypeError"`) carrying the Node
+// error `code` as a **declared** field. `NodeTypeError` comes from
+// ../events/events.ts, which the bundle places ahead of this file; the message
+// text stays here because `describeReceived` is `path`'s own wording, pinned by
+// its differential run against Node.
+//
+// The declared field is not decoration. The spelling this used before —
+// `const e: any = new TypeError(msg); e.code = 'ERR_INVALID_ARG_TYPE';` — writes
+// a key the class never declared onto a typed instance through an `any` alias,
+// which poisons the instance: every later statically typed read of one of its
+// own members, `e.name` included, throws `Cannot read private member from an
+// object whose class did not declare it`
+// (https://github.com/UrubuCode/zun/issues/37). `test-path.js` asserts
+// `assert.throws(fn, { code: 'ERR_INVALID_ARG_TYPE', name: 'TypeError' })` for
+// all 160 of its expectations, so it performs exactly that read.
 function invalidArgType(name: string, value: any): any {
-  const error: any = new TypeError(
+  return new NodeTypeError(
+    "ERR_INVALID_ARG_TYPE",
     'The "' +
       name +
       '" argument must be of type string.' +
       describeReceived(value),
   );
-  error.code = "ERR_INVALID_ARG_TYPE";
-  return error;
 }
 
 function validateString(value: any, name: string): void {
@@ -1229,12 +1250,11 @@ function formatExt(ext: any): string {
 
 function formatImpl(parsed: any, win: boolean): string {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    const error: any = new TypeError(
+    throw new NodeTypeError(
+      "ERR_INVALID_ARG_TYPE",
       'The "pathObject" argument must be of type object.' +
         describeReceived(parsed),
     );
-    error.code = "ERR_INVALID_ARG_TYPE";
-    throw error;
   }
   const sep = win ? "\\" : "/";
   const dir: any = parsed.dir || parsed.root;

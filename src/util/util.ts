@@ -19,12 +19,21 @@
 //   * `inspect` is declared as a top-level function and only then placed on the
 //     `util` object, so `util.inspect.custom` stays readable: a method defined
 //     inline in an object literal cannot carry properties (zun#14).
-//   * `Number(x.length)` everywhere, because `.length` is a u64 (zun#3).
+//   * `Number(x.length)` everywhere: the arithmetic on `.length` was widened,
+//     but the checker still types it `u64`, so it can be neither assigned to
+//     nor passed as a `number` (zun#3).
+//   * `__utilUnbox` — a function stored in an array still reports
+//     `typeof === "object"` (zun#17), so `[Function: name]` would otherwise be
+//     printed as an object.
 
-// `Symbol.for` does not return the same symbol for the same key in this engine,
-// so the well-known inspect symbol is a single module-level constant: every
-// reader goes through `util.inspect.custom`, which is this value.
-const __inspectCustomSymbol: any = Symbol("nodejs.util.inspect.custom");
+// `util.inspect.custom`, spelled as Node spells it. The symbol registry
+// round-trips again (https://github.com/UrubuCode/zun/issues/23), so a caller
+// that writes `Symbol.for('nodejs.util.inspect.custom')` — which is how Node's
+// own docs tell you to reach it without importing `util` — gets *this* symbol.
+// It used to be a plain `Symbol` and reachable only through
+// `util.inspect.custom`, because `Symbol.for` handed back a fresh symbol on
+// every call.
+const __inspectCustomSymbol: any = Symbol.for("nodejs.util.inspect.custom");
 
 const __INSPECT_DEFAULT_DEPTH: number = 2;
 

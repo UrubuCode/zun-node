@@ -44,23 +44,31 @@
 // Engine workarounds in this file, each tied to an open zun issue
 // (https://github.com/UrubuCode/zun/issues)
 // ---------------------------------------------------------------------------
-//   * `Number(x.length)` throughout, because `.length` is a u64 (zun#3).
+//   * `Number(x.length)` throughout: the *arithmetic* on `.length` was widened,
+//     so `len - 1` and descending loops are correct now, but the checker still
+//     types `.length` as `u64`, so it can be neither assigned to nor passed as
+//     a `number` (zun#3).
 //   * `charAt(i)` instead of `s[i]` in `__osGetCIDR`, and no `charCodeAt` past
 //     the end (zun#2).
-//   * no `Map`/`Set` anywhere: a `Map` stored in an `any` loses every method,
-//     so `new Map(...)` through this module's dynamic objects is unusable
-//     (same family as zun#6/#7 — a builtin loses its behavior through `any`).
 //   * the module's functions are **object-literal methods** delegating to
 //     top-level `__os*` functions, because a bare function value does not
 //     survive every path through `any` (zun#17), while a method does.
 //   * the `Symbol.toPrimitive` block near the bottom is written exactly as
-//     Node writes it and is, today, a **no-op in this engine**: a symbol-keyed
-//     assignment onto a function value is silently dropped, and `${fn}` /
-//     `+fn` ignore a function's own `Symbol.toPrimitive`, `toString` and
-//     `valueOf` regardless. It is kept because it is the correct code, it
-//     costs nothing, and `${os.hostname}` starts working the day the engine
-//     threads ToPrimitive through a function (https://github.com/UrubuCode/zun/issues/36).
-//     See ../../test/os/README.md.
+//     Node writes it and is still a **no-op in this engine**, though for only
+//     one reason now rather than two: the symbol-keyed assignment onto a
+//     function value *does* land (`fn[sym] = v; fn[sym] === v` holds), but
+//     `${fn}` / `+fn` still ignore a function's own `Symbol.toPrimitive`,
+//     `toString` and `valueOf` (https://github.com/UrubuCode/zun/issues/36).
+//     It is kept because it is the correct code, it costs nothing, and
+//     `${os.hostname}` starts working the day the engine threads ToPrimitive
+//     through a function. See ../../test/os/README.md.
+//
+// One constraint this file was written around is gone: a `Map` keeps its
+// methods through an `any` binding again (zun#7), so `Map`/`Set` are available
+// here. The netmask-to-prefix lookup stays arithmetic rather than becoming the
+// `Map` Node's own test writes, because the arithmetic is exact over all 33
+// netmasks and a table would only re-state it; `events.ts`'s side tables, which
+// genuinely needed identity keys, are `Map`s again.
 //   * `userInfo({ encoding: 'buffer' })` cannot return a `Buffer`, because
 //     `node:buffer` does not exist yet. It returns the byte view built by
 //     `__osByteView` — the real UTF-8 bytes, indexable, with a working
@@ -82,13 +90,17 @@ const __OS_FAILED: string = "-";
 // `ERR_SYSTEM_ERROR` — Node's `SystemError`, whose message it composes from the
 // libuv context rather than receiving pre-made. The four fields come from the
 // extension's error slots.
-class ERR_SYSTEM_ERROR extends Error {
-  code: string = "";
+// It extends `NodeError` from ../events/events.ts (the bundle places that file
+// ahead of this one), so `code` is a declared field rather than an expando —
+// see the note on those base classes and
+// https://github.com/UrubuCode/zun/issues/37.
+class ERR_SYSTEM_ERROR extends NodeError {
   errno: number = 0;
   syscall: string = "";
   info: any = undefined;
   constructor(syscall: string, errorCode: string, errno: number, description: string) {
     super(
+      "ERR_SYSTEM_ERROR",
       "A system error occurred: " +
         syscall +
         " returned " +
@@ -97,7 +109,6 @@ class ERR_SYSTEM_ERROR extends Error {
         description +
         ")",
     );
-    this.code = "ERR_SYSTEM_ERROR";
     this.errno = errno;
     this.syscall = syscall;
     this.info = {

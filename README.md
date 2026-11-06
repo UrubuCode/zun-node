@@ -43,6 +43,16 @@ runs each through the Zun engine
 passes. The percentages below are that measurement — they climb as the library
 grows.
 
+The `path`, `events` and `os` numbers below were last regenerated on **Windows**
+(the CI workflow runs on `ubuntu-latest`). One test differs between the two:
+`test-os-process-priority.js` passes on Linux and fails on Windows
+([zun#34](https://github.com/UrubuCode/zun/issues/34)), while
+`test-path-win32-normalize-device-names.js` is only a real signal on Windows,
+where it passes — on Linux it `common.skip`s, which the harness scores as a
+pass. So `os` reads 1/7 here, and should read 2/7 on Linux once CI runs again —
+`test-os-eol.js`'s fix is platform-independent and
+`test-os-process-priority.js` already passed there.
+
 Because the engine has no CommonJS `require` or module resolution
 ([zun#4](https://github.com/UrubuCode/zun/issues/4)), a Zun TypeScript module's
 tests are first passed through
@@ -81,7 +91,7 @@ runs as `zun run <bundle.ts>`. Extension modules keep the direct
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
 
-`███░░░░░░░░░░░░░░░░░░░░░` **14.2%** — 5 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+`████░░░░░░░░░░░░░░░░░░░░` **17.1%** — 6 / 35 Node `test-event-emitter-*|test-events-*` tests passing
 <!-- node-events:end -->
 
 > `events` is implemented end to end — the whole `EventEmitter` surface plus every
@@ -89,8 +99,12 @@ runs as `zun run <bundle.ts>`. Extension modules keep the direct
 > features that do not exist yet, not because the module is thin. Nine of the
 > thirty-five files open with `new events.EventEmitter()`, which cannot compile:
 > `new` accepts a class identifier or a `Proxy`-typed expression, never a member
-> expression. Three more need class statics (`EventEmitter.defaultMaxListeners`,
-> `EventEmitter.once`), five need a bound `this` inside a listener
+> expression ([zun#18](https://github.com/UrubuCode/zun/issues/18)). Three more
+> need a class static that shares a name with an instance method
+> (`EventEmitter.once`, `EventEmitter.listenerCount` —
+> [zun#20](https://github.com/UrubuCode/zun/issues/20); the value-shaped statics
+> `defaultMaxListeners` and `errorMonitor` *are* reachable now and are real
+> statics in `events.ts`), five need a bound `this` inside a listener
 > ([zun#1](https://github.com/UrubuCode/zun/issues/1) — `apply`/`call` thread no
 > receiver), and three require Node's `internal/event_target`. The full
 > blocker-by-blocker table is in [`test/events/README.md`](test/events/README.md),
@@ -111,11 +125,17 @@ runs as `zun run <bundle.ts>`. Extension modules keep the direct
 > Linux**. The corpus number is low because the seven test files are unusually
 > harness-hungry: two require `internal/test/binding` to monkey-patch the `os`
 > binding, two re-run themselves through `child_process` to see a different
-> environment, one needs a callable `assert`
-> ([zun#14](https://github.com/UrubuCode/zun/issues/14)), and one needs
-> `assert.throws(fn, TypeError)` with the constructor as a *value*
-> ([zun#17](https://github.com/UrubuCode/zun/issues/17)).
-> `test-os-process-priority.js` passes. The blocker-by-blocker table is in
+> environment, and one needs a callable `assert`
+> ([zun#14](https://github.com/UrubuCode/zun/issues/14)).
+> `test-os-eol.js` passes: `assert.throws(fn, TypeError)` with the constructor as
+> a *value* works now, because `assert.ts` matches the standard error
+> constructors by identity and spells the `instanceof` against the literal class
+> ([zun#17](https://github.com/UrubuCode/zun/issues/17) still leaves a
+> constructor value with no `.name` and unusable on the right of an
+> `instanceof`). `test-os-process-priority.js` passes on Linux but not on
+> Windows, where it needs a top-level destructuring declaration to be visible to
+> a function body ([zun#34](https://github.com/UrubuCode/zun/issues/34)) — the
+> number above was measured on Windows. The blocker-by-blocker table is in
 > [`test/os/README.md`](test/os/README.md), the per-test breakdown in
 > [`test/os/RESULTS.md`](test/os/RESULTS.md).
 

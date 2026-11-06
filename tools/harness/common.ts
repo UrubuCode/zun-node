@@ -351,8 +351,12 @@ function __checkWarning(warning: any): void {
 const fixtures: any = {
   fixturesDir: path.join(process.cwd(), "test", "fixtures"),
 
-  // Built with repeated two-argument joins: `join.apply(null, parts)` would hit
-  // https://github.com/UrubuCode/zun/issues/1.
+  // Built with repeated two-argument joins. The argument-shifting half of
+  // https://github.com/UrubuCode/zun/issues/1 is fixed, so `apply` would pass
+  // the right arguments now, but `path.join` is an object-literal method and a
+  // call on an `any` receiver still fails to compile past six arguments
+  // (https://github.com/UrubuCode/zun/issues/10), which a fixtures path can
+  // easily exceed. The fold has no such ceiling.
   path(...segments: any[]): string {
     let result = path.join(process.cwd(), "test", "fixtures");
     for (const segment of segments) result = path.join(result, segment);

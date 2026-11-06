@@ -30,9 +30,15 @@
 //     inside a promise reaction runs after it rather than before. The relative
 //     order *within* the nextTick queue is FIFO, as in Node.
 //   * every function stored into an object property goes through
-//     `__evRawSet`-style delete-then-assign where the slot may already hold
-//     `undefined`, because a function written over an `undefined` property is
-//     shadowed by it.
+//     `__evRawSet`-style delete-then-assign, because a function written over a
+//     property that currently holds an **object** is swallowed and the object
+//     stays (https://github.com/UrubuCode/zun/issues/32). The `undefined` form
+//     of that bug is fixed; the object form is not.
+//   * `process.emitWarning` builds a `ProcessWarning`, a declared class, rather
+//     than attaching `name`/`code`/`detail` to a plain `Error`: an undeclared
+//     key written onto a typed instance through an `any` alias poisons every
+//     later statically typed read of that instance, `warning.name` included
+//     (https://github.com/UrubuCode/zun/issues/37).
 
 import { host } from "zun:core";
 
@@ -62,14 +68,22 @@ function __processEnvGet(name: string): any {
 // `process.env`.
 //
 // A live `Proxy` lookup would be the right shape, since `zun:core` can read a
-// variable by name but cannot enumerate the environment block. It is not usable:
-// Proxy traps are keyed on the receiver's static type, so reading the proxy through
-// the `any`-typed `env` field of the `process` object loses them and every variable
-// answers `undefined` (https://github.com/UrubuCode/zun/issues/6).
+// variable by name but cannot enumerate the environment block. It is still not
+// usable. https://github.com/UrubuCode/zun/issues/6 is partly fixed — the `get`
+// and `set` traps do fire through an `any`-typed receiver now — but only for a
+// **literal** key: `env.PATH` and `env["PATH"]` reach the trap, while
+// `env[name]` with `name` a variable answers `undefined` and never calls it.
+// `env[name]` is precisely how `path.ts` reads it, so a Proxy would break the
+// one real consumer. The `has`, `deleteProperty` and `ownKeys` traps do not fire
+// at all, so a Proxy would additionally lose `'X' in process.env`,
+// `delete process.env.X` — which Node's own `os` and `path` tests both use — and
+// a non-empty `Object.keys(process.env)`. Measured on this engine, that is a net
+// loss, so the snapshot stays.
 //
-// Until that is fixed, `env` is a snapshot over a fixed list of names: the variables
-// Node's own tests touch, plus the per-drive `=X:` cwd variables `win32.resolve`
-// consults. `envLookup` stays available for a name outside the list.
+// `env` is a snapshot over a fixed list of names: the variables Node's own tests
+// touch, plus the per-drive `=X:` cwd variables `win32.resolve` consults.
+// `envLookup` stays available for a name outside the list, which is what makes
+// the live-read advantage of a Proxy mostly moot.
 const __envNames: string[] = [
   "PATH",
   "Path",
@@ -176,20 +190,42 @@ function __processNextTick(fn: any, ...args: any[]): void {
 // process.emitWarning
 // ---------------------------------------------------------------------------
 
+// The warning a string `process.emitWarning(message, ...)` becomes. Node builds
+// a plain `Error` and then assigns `name`, `code` and `detail` onto it; here
+// every one of the three is a **declared field**, because writing an undeclared
+// key onto a typed instance through an `any` alias poisons the instance and
+// every later statically typed read of its own members — `warning.name`
+// included, which is what a `process.on('warning')` listener reads — throws
+// `Cannot read private member from an object whose class did not declare it`
+// (https://github.com/UrubuCode/zun/issues/37). `name` is a getter over
+// `warningName` because `name` on an `Error` subclass cannot be assigned.
+class ProcessWarning extends Error {
+  code: string = "";
+  detail: any = undefined;
+  warningName: string = "Warning";
+  constructor(message: string) {
+    super(message);
+  }
+  get name(): string {
+    return this.warningName;
+  }
+}
+
 function __processEmitWarning(warning: any, type?: any, code?: any): void {
   let built: any = warning;
   if (typeof warning === "string") {
-    built = new Error(warning);
+    const made = new ProcessWarning(warning);
     if (type !== undefined && type !== null) {
       if (typeof type === "object") {
-        if (type.type !== undefined) built.__warningName = type.type;
-        if (type.code !== undefined) built.code = type.code;
-        if (type.detail !== undefined) built.detail = type.detail;
+        if (type.type !== undefined) made.warningName = String(type.type);
+        if (type.code !== undefined) made.code = String(type.code);
+        if (type.detail !== undefined) made.detail = type.detail;
       } else {
-        built.__warningName = String(type);
+        made.warningName = String(type);
       }
     }
-    if (code !== undefined && code !== null) built.code = String(code);
+    if (code !== undefined && code !== null) made.code = String(code);
+    built = made;
   }
   // A warning is delivered on the next tick in Node; the tests observe it
   // through `process.on('warning')`, so the same deferral is kept.
