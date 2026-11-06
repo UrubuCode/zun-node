@@ -6,9 +6,12 @@
 // ../../test/buffer/). The module shaping follows Node's `lib/buffer.js` (MIT,
 // Copyright Joyent, Inc. and other Node contributors) — the `constants` object,
 // the `INSPECT_MAX_BYTES` accessor, the `atob`/`btoa` status codes, the
-// `isUtf8`/`isAscii` argument contract and the `transcode` normalization — and
-// `lib/internal/blob.js` for `Blob`. `normalizeEncoding`'s alias table comes
-// from `lib/internal/util.js`.
+// `isUtf8`/`isAscii` argument contract and the full ICU matrix `transcode`
+// reproduces — and `lib/internal/blob.js` for `Blob`. `normalizeEncoding`'s
+// alias table comes from `lib/internal/util.js`. The inspected form of a byte
+// view belongs to `lib/buffer.js` too, and lives in `src/util/util.ts`
+// (`__utilFormatByteView`), because `util` is inlined into every bundle while
+// this file is conditional.
 //
 // ---------------------------------------------------------------------------
 // Why this module is thin, and what it deliberately does NOT do
@@ -35,10 +38,19 @@
 // in the checker ("type BufferView(U8) has no methods"), not a missing
 // property, so there is no prototype to extend and no `any` lane to route
 // around it: a byte view read through `any` is completely opaque in this engine
-// (`buf.length` answers `undefined`). Those are engine gaps, each reduced to a
-// minimal repro in ../../test/buffer/README.md. What *is* implementable here is
-// exactly the module surface — the constants, the encoders, the scanners, the
-// transcoder and `Blob`/`File` — and that is what this file is.
+// (`buf.length` answers `undefined`, and no method on it resolves). Those are
+// engine gaps, each reduced to a minimal repro in ../../test/buffer/README.md,
+// which also records why declaring a `class Buffer` here — the one escape hatch
+// the checker leaves open — is not the answer. What *is* implementable is
+// exactly the module surface: the constants, the encoders, the scanners, the
+// transcoder, the inspected form and `Blob`/`File`.
+//
+// Two facts about a value *do* survive the `any` boundary, and this file leans
+// on both: `Buffer.isBuffer` (true for a `U8` byte view and nothing else — not
+// a `Uint16Array`, not a `DataView`, not a plain object) and
+// `ArrayBuffer.isView`. They let the module recognise a byte view it cannot
+// read; the bytes themselves come from passing the same value *into* a
+// `Buffer`-typed parameter.
 //
 // ---------------------------------------------------------------------------
 // Engine workarounds in this file, each tied to an open zun issue
@@ -48,8 +60,11 @@
 //     `nodeBuffer` intrinsics take machine integers, and the checker rejects a
 //     `number` there outright ("Buffer size must be an integer", zun#3). The
 //     cast is the only coercion that lands, and it is *unchecked* — a negative
-//     size wraps and panics the interpreter (see `__bufValidateSize`, which is
-//     therefore not optional).
+//     size wraps and **panics the interpreter** with a `raw_vec` capacity
+//     overflow. Nothing here hands an allocator a size that did not come from a
+//     byte sequence this file already holds: the only `Buffer.alloc` left takes
+//     the literal `0`, and every other allocation goes through
+//     `Buffer.from(<string | array>)`, which derives its own length.
 //   * `Number(x.length)` throughout: `.length` is typed `u64`, so it can be
 //     neither assigned to nor passed as a `number` (zun#3).
 //   * `__bufCc(s, i)` instead of `s.charCodeAt(i)` past the end: a
@@ -57,12 +72,12 @@
 //   * the module's functions are **object-literal methods** delegating to
 //     top-level `__buf*` functions, because a bare function value does not
 //     survive every path through `any` (zun#17), while a method does.
-//   * `INSPECT_MAX_BYTES` is a plain data property, not the accessor pair Node
-//     defines: there is no `Object.defineProperty` getter/setter on a dynamic
-//     object in this engine, so the `validateNumber` Node runs on assignment
-//     cannot run anywhere. Reading and writing it works, which is what every
-//     consumer does; the rejected-assignment half is noted in
-//     ../../test/buffer/README.md rather than written here unreachable.
+//   * `INSPECT_MAX_BYTES` is the accessor pair Node defines, spelled as
+//     `get`/`set` members of the module's object literal (the engine supports
+//     those) rather than through `Object.defineProperties`. The number it
+//     guards lives in `src/util/util.ts`, because the inspector that reads it
+//     is there and `util` is inlined into every bundle while this file is
+//     conditional.
 //   * `Blob`'s async surface returns `Promise.resolve(...)` of an
 //     already-materialized value rather than a real stream: `node:stream` does
 //     not exist here yet, so `blob.stream()` is absent rather than faked.
@@ -126,24 +141,6 @@ class ERR_UNKNOWN_ENCODING extends NodeTypeError {
 // `charCodeAt` past the end throws here instead of answering `NaN` (zun#2).
 function __bufCc(s: string, i: number): number {
   return i >= 0 && i < Number(s.length) ? s.charCodeAt(i) : -1;
-}
-
-// `validateNumber(size, 'size', 0, kMaxLength)`, as every `Buffer.alloc*` in
-// `lib/buffer.js` runs it. This is not a nicety: the engine's allocators take a
-// machine `u64` and the `as u64` cast is unchecked, so `Buffer.alloc(-1)`
-// wraps to 2^64-1 and **panics the interpreter** with a `raw_vec` capacity
-// overflow. Everything in this file that allocates goes through here first.
-function __bufValidateSize(size: any, name: string): number {
-  if (typeof size !== "number") {
-    throw new ERR_INVALID_ARG_TYPE(name, "number", size);
-  }
-  const n: number = size;
-  // `NaN` fails every comparison, so the range test below rejects it; Node
-  // reports it as out of range rather than as a wrong type.
-  if (!(n >= 0) || !(n <= __BUF_MAX_LENGTH)) {
-    throw new ERR_OUT_OF_RANGE(name, ">= 0 and <= " + __BUF_MAX_LENGTH, size);
-  }
-  return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -302,11 +299,35 @@ function __bufAtob(input: any): string {
 // function, because a byte view read *through* `any` is opaque in this engine
 // while the same value passed *into* a typed parameter is not.
 
+// Two divergences live here, both because a value held in an `any` does not
+// report its class in this engine (zun#38) — neither can be fixed from the
+// library side, and neither is reachable from Node's own `buffer` corpus:
+//
+//   * Node accepts an `ArrayBuffer`/`SharedArrayBuffer` as well as a view.
+//     Through `any` an `ArrayBuffer` is indistinguishable from `{}`
+//     (`ArrayBuffer.isView` is false, `Object.prototype.toString` answers
+//     `[object Object]`), so accepting one would mean accepting every object.
+//     It is rejected with Node's `ERR_INVALID_ARG_TYPE` instead.
+//   * Node rejects a `DataView` and accepts every *typed* array, validating the
+//     view's bytes. `ArrayBuffer.isView` is true for both and nothing separates
+//     them, while reading a `DataView` through the typed-array accessors is an
+//     **uncatchable** engine error ("call did not resolve to a method"). So
+//     only a `U8` view — which `Buffer.isBuffer` does recognise — is scanned,
+//     and any other view is reported as the wrong type. That is Node's answer
+//     for a `DataView` and a divergence for a `Uint16Array`.
+//
+// Node also throws `ERR_INVALID_STATE` for a detached `ArrayBuffer`; there is
+// no way to detach one here (`structuredClone` takes a single argument), and no
+// way to observe detachment if there were.
 function __bufIsUtf8(input: any): boolean {
-  if (!ArrayBuffer.isView(input)) {
+  __bufValidateScanInput(input);
+  return __bufScanUtf8(input);
+}
+
+function __bufValidateScanInput(input: any): void {
+  if (!Buffer.isBuffer(input)) {
     throw new ERR_INVALID_ARG_TYPE("input", ["ArrayBuffer", "Buffer", "TypedArray"], input);
   }
-  return __bufScanUtf8(input);
 }
 
 function __bufScanUtf8(bytes: Buffer): boolean {
@@ -359,9 +380,7 @@ function __bufScanUtf8(bytes: Buffer): boolean {
 }
 
 function __bufIsAscii(input: any): boolean {
-  if (!ArrayBuffer.isView(input)) {
-    throw new ERR_INVALID_ARG_TYPE("input", ["ArrayBuffer", "Buffer", "TypedArray"], input);
-  }
+  __bufValidateScanInput(input);
   return __bufScanAscii(input);
 }
 
@@ -377,26 +396,243 @@ function __bufScanAscii(bytes: Buffer): boolean {
 // `transcode`
 // ---------------------------------------------------------------------------
 //
-// Node's goes through ICU; here it is a decode in `fromEncoding` followed by an
-// encode in `toEncoding`, which is the same function for every pair the
-// engine's codec table covers. The normalization and the empty-input shortcut
-// are Node's.
+// Node's `transcode` is ICU, reached through `internalBinding('icu')`, and ICU
+// is not a decode-then-encode over the engine's codec table: it has four
+// encodings (`ascii`, `latin1`, `utf8`, `ucs2` and their aliases — `hex`,
+// `base64` and `base64url` are *not* ICU charsets and are rejected), it
+// substitutes rather than guesses, and `node_i18n.cc` routes six of the sixteen
+// pairs through specialized converters instead of the generic one. The whole
+// matrix was read off `node` — 4 source encodings x 4 target encodings x 34 byte
+// sequences, 544 cases, and this file reproduces it exactly:
+//
+//   * **generic**, `{ascii,latin1,utf8}` -> `{ascii,latin1,utf8}`: decode with
+//     substitution (an `ascii` byte >= 0x80 and every malformed UTF-8 maximal
+//     subpart become U+FFFD; `latin1` is one byte per code point), then encode
+//     with substitution — a code point the single-byte target cannot hold
+//     becomes `?` (0x3F), and a surrogate pair counts as **one** code point, so
+//     it is one `?`.
+//   * `{ascii,latin1}` -> `ucs2`: `TranscodeLatin1ToUcs2`, a plain widening of
+//     every byte to a code unit. This is the one place where `ascii` does *not*
+//     substitute: `transcode(<80>, 'ascii', 'ucs2')` is U+0080, while
+//     `transcode(<80>, 'ascii', 'utf8')` is U+FFFD.
+//   * `utf8` -> `ucs2`: `u_strFromUTF8`, which is **strict** — any malformed
+//     UTF-8 (including a surrogate encoded as three bytes, and `f4 90 80 80`)
+//     raises `U_INVALID_CHAR_FOUND` instead of substituting.
+//   * `ucs2` -> `utf8`: `u_strToUTF8` over `byteLength / 2` code units, so a
+//     trailing odd byte is dropped — but an unpaired surrogate, or an input of
+//     fewer than two bytes, raises `U_INVALID_CHAR_FOUND`.
+//   * `ucs2` -> `{ascii,latin1}`: `byteLength / 2` code units again, trailing
+//     odd byte dropped and no error; an unpaired surrogate is unmappable, so it
+//     is one `?`.
+//   * `ucs2` -> `ucs2`: the generic converter, which *keeps* the trailing odd
+//     byte as U+FFFD and turns an unpaired surrogate into U+FFFD.
+//
+// The error is Node's `genericNodeError`: a plain `Error` carrying `code` and
+// `errno`, not one of the `ERR_*` classes, and an unknown encoding name reaches
+// ICU verbatim (`normalizeEncoding(e) || e`) and fails there — so it is
+// `U_ILLEGAL_ARGUMENT_ERROR`, never `ERR_UNKNOWN_ENCODING`.
 function __bufTranscode(source: any, fromEncoding: any, toEncoding: any): any {
-  if (!ArrayBuffer.isView(source)) {
+  // `isUint8Array(source)`: an `ArrayBuffer` and a `Uint16Array` are both
+  // rejected by Node, and `Buffer.isBuffer` is the engine predicate that says
+  // `U8` view and nothing else.
+  if (!Buffer.isBuffer(source)) {
     throw new ERR_INVALID_ARG_TYPE("source", ["Buffer", "Uint8Array"], source);
   }
-  const from = __bufNormalizeEncoding(fromEncoding);
-  const to = __bufNormalizeEncoding(toEncoding);
+  if (__bufViewLength(source) === 0) return Buffer.alloc(0);
+  const from = __bufIcuCharset(fromEncoding);
+  const to = __bufIcuCharset(toEncoding);
   if (from === "" || to === "") {
-    throw new ERR_UNKNOWN_ENCODING(from === "" ? fromEncoding : toEncoding);
+    throw new __BufTranscodeError("U_ILLEGAL_ARGUMENT_ERROR", 1);
   }
   return __bufTranscodeView(source, from, to);
 }
 
+// The four charsets ICU is handed. `normalizeEncoding` maps the aliases; a name
+// it does not know, and the three byte-codec names it does, are not charsets.
+function __bufIcuCharset(encoding: any): string {
+  const normalized = __bufNormalizeEncoding(encoding);
+  if (
+    normalized === "utf8" || normalized === "latin1" ||
+    normalized === "ascii" || normalized === "utf16le"
+  ) {
+    return normalized;
+  }
+  return "";
+}
+
+// `genericNodeError(`Unable to transcode Buffer [${code}]`, { code, errno })`.
+// A plain `Error` with two own properties — declared fields rather than
+// expando writes through an `any`, which poison the instance (zun#37).
+class __BufTranscodeError extends Error {
+  code: string = "";
+  errno: number = 0;
+  constructor(code: string, errno: number) {
+    super("Unable to transcode Buffer [" + code + "]");
+    this.code = code;
+    this.errno = errno;
+  }
+}
+
+function __bufViewLength(view: Buffer): number {
+  return Number(view.length);
+}
+
 function __bufTranscodeView(source: Buffer, from: string, to: string): Buffer {
-  const n = Number(source.length);
-  if (n === 0) return Buffer.alloc(0);
-  return Buffer.from(source.toString(from, 0, source.length), to);
+  const units = __bufTranscodeDecode(source, from, to);
+  return Buffer.from(__bufTranscodeEncode(units, to));
+}
+
+// Decode to UTF-16 code units. `to` is part of the signature because ICU's
+// routing makes the decoder depend on the target: see the table above.
+function __bufTranscodeDecode(source: Buffer, from: string, to: string): number[] {
+  const n = __bufViewLength(source);
+  const units: number[] = [];
+
+  if (from === "utf16le") {
+    const complete = (n - (n % 2)) / 2;
+    if (to === "utf8") {
+      // `u_strToUTF8`: fewer than one whole code unit, or any unpaired
+      // surrogate, is `U_INVALID_CHAR_FOUND`.
+      if (complete === 0) throw new __BufTranscodeError("U_INVALID_CHAR_FOUND", 10);
+      for (let i = 0; i < complete; i++) {
+        units.push(Number(source[i * 2]) | (Number(source[i * 2 + 1]) << 8));
+      }
+      if (!__bufUnitsArePaired(units)) {
+        throw new __BufTranscodeError("U_INVALID_CHAR_FOUND", 10);
+      }
+      return units;
+    }
+    for (let i = 0; i < complete; i++) {
+      units.push(Number(source[i * 2]) | (Number(source[i * 2 + 1]) << 8));
+    }
+    if (to === "utf16le") {
+      // The generic converter: an unpaired surrogate and a trailing odd byte
+      // both come out as U+FFFD — with one join. A *high* surrogate as the last
+      // complete unit leaves the converter waiting for its low half, so a
+      // trailing odd byte is absorbed into that one error rather than reported
+      // as a second: `<3d d8 61>` is one U+FFFD, while `<4d dc 61>` (a low
+      // surrogate) and `<61 00 62>` are two.
+      const replaced: number[] = [];
+      let i = 0;
+      const count = Number(units.length);
+      let pendingHigh = false;
+      while (i < count) {
+        const unit = units[i];
+        pendingHigh = false;
+        if (unit >= 0xd800 && unit <= 0xdbff && i + 1 < count) {
+          const next = units[i + 1];
+          if (next >= 0xdc00 && next <= 0xdfff) {
+            replaced.push(unit);
+            replaced.push(next);
+            i = i + 2;
+            continue;
+          }
+        }
+        if (unit >= 0xd800 && unit <= 0xdfff) {
+          replaced.push(0xfffd);
+          pendingHigh = unit <= 0xdbff && i === count - 1;
+        } else {
+          replaced.push(unit);
+        }
+        i = i + 1;
+      }
+      if (n % 2 === 1 && !pendingHigh) replaced.push(0xfffd);
+      return replaced;
+    }
+    // `ucs2` -> `{ascii,latin1}`: the units are handed to the encoder as they
+    // are, and an unpaired surrogate is simply unmappable there.
+    return units;
+  }
+
+  if (from === "utf8") {
+    if (to === "utf16le" && !__bufScanUtf8(source)) {
+      // `u_strFromUTF8` is strict.
+      throw new __BufTranscodeError("U_INVALID_CHAR_FOUND", 10);
+    }
+    // The engine's own lossy UTF-8 decode is V8's, which is the substitution
+    // ICU performs: one U+FFFD per maximal subpart of an ill-formed sequence.
+    const text = source.toString("utf8", 0 as u64, n as u64);
+    const chars = Number(text.length);
+    for (let i = 0; i < chars; i++) units.push(__bufCc(text, i));
+    return units;
+  }
+
+  // `latin1`, and `ascii` when the target is `ucs2` (the widening path).
+  const substitute = from === "ascii" && to !== "utf16le";
+  for (let i = 0; i < n; i++) {
+    const byte = Number(source[i]);
+    units.push(substitute && byte > 0x7f ? 0xfffd : byte);
+  }
+  return units;
+}
+
+function __bufUnitsArePaired(units: number[]): boolean {
+  const count = Number(units.length);
+  let i = 0;
+  while (i < count) {
+    const unit = units[i];
+    if (unit >= 0xdc00 && unit <= 0xdfff) return false;
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      if (i + 1 >= count) return false;
+      const next = units[i + 1];
+      if (next < 0xdc00 || next > 0xdfff) return false;
+      i = i + 2;
+      continue;
+    }
+    i = i + 1;
+  }
+  return true;
+}
+
+// Encode UTF-16 code units. A single-byte target substitutes `?` once per code
+// *point*, so a surrogate pair is one `?` rather than two.
+function __bufTranscodeEncode(units: number[], to: string): number[] {
+  const out: number[] = [];
+  const count = Number(units.length);
+
+  if (to === "utf16le") {
+    for (let i = 0; i < count; i++) {
+      const unit = units[i];
+      out.push(unit & 0xff);
+      out.push((unit >> 8) & 0xff);
+    }
+    return out;
+  }
+
+  const max = to === "ascii" ? 0x7f : 0xff;
+  let i = 0;
+  while (i < count) {
+    let cp = units[i];
+    let width = 1;
+    if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < count) {
+      const next = units[i + 1];
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        cp = 0x10000 + ((cp - 0xd800) << 10) + (next - 0xdc00);
+        width = 2;
+      }
+    }
+    i = i + width;
+    if (to !== "utf8") {
+      out.push(cp <= max ? cp : 0x3f);
+      continue;
+    }
+    if (cp <= 0x7f) {
+      out.push(cp);
+    } else if (cp <= 0x7ff) {
+      out.push(0xc0 | (cp >> 6));
+      out.push(0x80 | (cp & 0x3f));
+    } else if (cp <= 0xffff) {
+      out.push(0xe0 | (cp >> 12));
+      out.push(0x80 | ((cp >> 6) & 0x3f));
+      out.push(0x80 | (cp & 0x3f));
+    } else {
+      out.push(0xf0 | (cp >> 18));
+      out.push(0x80 | ((cp >> 12) & 0x3f));
+      out.push(0x80 | ((cp >> 6) & 0x3f));
+      out.push(0x80 | (cp & 0x3f));
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -426,60 +662,78 @@ function __bufNormalizeBlobType(type: any): string {
 // Flatten a `BlobPart[]` into one Buffer. A part is a string (UTF-8 encoded), a
 // byte view, or anything else (stringified), exactly as the spec's
 // "process blob parts" does for the subset reachable here.
-function __bufBlobBytes(sources: any): Buffer {
-  if (sources === undefined) return Buffer.alloc(0);
+// The concatenated sources, as a **latin1 string** rather than a Buffer: see
+// `class Blob` for why that is the storage, and `__bufLatin1Of` /
+// `__bufBytesOfLatin1` for the round trip.
+//
+// Node's `new Blob()` with no argument is `new Blob([])`, so `undefined` is the
+// empty blob and only a non-iterable argument is `ERR_INVALID_ARG_TYPE`. A
+// `Blob` part contributes its own bytes; anything that is not a string, a view
+// or a blob is stringified, which is the spec's `USVString` branch.
+//
+// Divergence: Node also takes an `ArrayBuffer`/`SharedArrayBuffer` part. One
+// held in an `any` is indistinguishable from a plain object in this engine
+// (zun#38), so it falls into the stringify branch and contributes
+// `"[object Object]"`. There is no predicate that would separate it.
+function __bufBlobBytes(sources: any): string {
+  if (sources === undefined) return "";
   if (!Array.isArray(sources)) {
-    throw new ERR_INVALID_ARG_TYPE("sources", "Iterable", sources);
+    throw new ERR_INVALID_ARG_TYPE("sources", "a sequence", sources);
   }
-  const parts: any[] = [];
+  let out = "";
   for (const part of sources) {
     if (typeof part === "string") {
-      parts.push(Buffer.from(part, "utf8"));
-    } else if (ArrayBuffer.isView(part)) {
-      parts.push(__bufCopyOf(part));
+      out = out + __bufLatin1Of(Buffer.from(part, "utf8"));
+    } else if (part instanceof Blob) {
+      const blob: Blob = part;
+      out = out + blob.__latin1;
+    } else if (Buffer.isBuffer(part)) {
+      out = out + __bufLatin1Of(part);
     } else {
-      parts.push(Buffer.from(String(part), "utf8"));
+      out = out + __bufLatin1Of(Buffer.from(String(part), "utf8"));
     }
   }
-  return Buffer.concat(parts);
-}
-
-// Every allocation in this file goes through here, so that
-// `__bufValidateSize`'s range check stands between a computed length and the
-// unchecked `as u64` cast (`Buffer.alloc(-1 as u64)` panics the interpreter —
-// see ../../test/buffer/README.md). The sizes below are all derived from a
-// view's own length and so always in range; the guard is what makes that a
-// fact rather than an assumption.
-function __bufAlloc(size: number, name: string): Buffer {
-  const n = __bufValidateSize(size, name);
-  return Buffer.alloc(n as u64);
-}
-
-// A Buffer holding a fresh copy of a view's bytes. `Buffer.from(buffer)` — the
-// copying overload — is not in this engine (`Buffer.from` takes a string, an
-// array or an ArrayBuffer), so the copy is spelled out.
-function __bufCopyOf(view: Buffer): Buffer {
-  const n = Number(view.length);
-  const out = __bufAlloc(n, "length");
-  view.copy(out, 0, 0, n);
   return out;
+}
+
+// A byte string and back. `latin1` is one byte per code point in both
+// directions, which the transcode matrix in this file verifies against Node for
+// every byte value, so this round trip is exact.
+function __bufLatin1Of(view: Buffer): string {
+  return view.toString("latin1", 0 as u64, view.length);
+}
+
+function __bufBytesOfLatin1(text: string): Buffer {
+  return Buffer.from(text, "latin1");
 }
 
 class Blob {
   // The whole blob, materialized. Node keeps a list of handles and reads them
-  // lazily; there is no file-backed blob here, so one Buffer is the same thing.
-  __bytes: Buffer = Buffer.alloc(0);
+  // lazily; there is no file-backed blob here, so one byte sequence is the same
+  // thing.
+  //
+  // It is held as a **latin1 string, not as a Buffer**, and that is not a
+  // stylistic choice: the GC does not trace the `ArrayBuffer` behind a byte
+  // view (zun#55), and a view stored in a class instance field has its bytes
+  // freed under it at the first young collection — reproducibly once ~256
+  // further objects have been allocated. The failure is worse than a crash: in
+  // a dynamically dispatched call the resulting engine error is swallowed and
+  // `blob.size` simply answers `NaN`, so a long-running program would see a
+  // blob quietly empty itself. A string is traced, and latin1 round-trips bytes
+  // one for one. `src/string_decoder/string_decoder.ts` keeps its pending bytes
+  // out of a Buffer for exactly the same reason.
+  __latin1: string = "";
   __type: string = "";
 
   constructor(sources: any, options?: any) {
-    this.__bytes = __bufBlobBytes(sources);
+    this.__latin1 = __bufBlobBytes(sources);
     this.__type = __bufNormalizeBlobType(
       options === undefined || options === null ? undefined : options.type,
     );
   }
 
   get size(): number {
-    return Number(this.__bytes.length);
+    return Number(this.__latin1.length);
   }
 
   get type(): string {
@@ -487,7 +741,7 @@ class Blob {
   }
 
   slice(start?: any, end?: any, contentType?: any): any {
-    const n = Number(this.__bytes.length);
+    const n = Number(this.__latin1.length);
     let from = start === undefined ? 0 : Number(start);
     let to = end === undefined ? n : Number(end);
     if (from < 0) from = n + from < 0 ? 0 : n + from;
@@ -496,30 +750,23 @@ class Blob {
     if (to > n) to = n;
     if (to < from) to = from;
     const out = new Blob([], undefined);
-    out.__bytes = __bufSliceCopy(this.__bytes, from, to);
+    out.__latin1 = this.__latin1.slice(from, to);
     out.__type = __bufNormalizeBlobType(contentType);
     return out;
   }
 
   bytes(): any {
-    return Promise.resolve(__bufCopyOf(this.__bytes));
+    return Promise.resolve(__bufBytesOfLatin1(this.__latin1));
   }
 
   arrayBuffer(): any {
-    return Promise.resolve(__bufCopyOf(this.__bytes).buffer());
+    return Promise.resolve(__bufBytesOfLatin1(this.__latin1).buffer());
   }
 
   text(): any {
-    const n = this.__bytes.length;
-    return Promise.resolve(this.__bytes.toString("utf8", 0, n));
+    const bytes = __bufBytesOfLatin1(this.__latin1);
+    return Promise.resolve(bytes.toString("utf8", 0 as u64, bytes.length));
   }
-}
-
-function __bufSliceCopy(view: Buffer, from: number, to: number): Buffer {
-  const len = to - from;
-  const out = __bufAlloc(len, "length");
-  if (len > 0) view.copy(out, 0, from, to);
-  return out;
 }
 
 // `File` is a `Blob` with a name and a modification time. `extends Blob` is a
@@ -531,8 +778,12 @@ class File extends Blob {
 
   constructor(sources: any, fileName: any, options?: any) {
     super(sources, options);
+    // `lib/internal/file.js` keys this on the argument count, which is not
+    // observable here, so `undefined` stands in for "not passed": passing
+    // `undefined` explicitly as the second argument is the one input where the
+    // two differ.
     if (fileName === undefined) {
-      throw new ERR_INVALID_ARG_TYPE("fileName", "string", fileName);
+      throw new ERR_MISSING_ARGS("fileBits", "fileName");
     }
     this.__name = String(fileName);
     const lm =
@@ -561,6 +812,20 @@ function __bufResolveObjectURL(id: any): any {
   return undefined;
 }
 
+// `validateNumber(value, 'INSPECT_MAX_BYTES', 0)` from
+// `lib/internal/validators.js`, which is what Node's `INSPECT_MAX_BYTES` setter
+// runs: anything that is not a `number` is an `ERR_INVALID_ARG_TYPE`, and a
+// number below the minimum — or `NaN`, because a minimum is given — is an
+// `ERR_OUT_OF_RANGE` whose range reads `>= 0`.
+function __bufValidateInspectMaxBytes(value: any): void {
+  if (typeof value !== "number") {
+    throw new ERR_INVALID_ARG_TYPE("INSPECT_MAX_BYTES", "number", value);
+  }
+  if (Number(value) < 0 || Number.isNaN(Number(value))) {
+    throw new ERR_OUT_OF_RANGE("INSPECT_MAX_BYTES", ">= 0", value);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The module object
 // ---------------------------------------------------------------------------
@@ -586,12 +851,23 @@ const __node_buffer: any = {
   },
 
   // Node defines this as an accessor pair on `module.exports` whose setter runs
-  // `validateNumber`, so `buffer.INSPECT_MAX_BYTES = 'foo'` throws. There is no
-  // getter/setter on a dynamic object in this engine, so it is a plain data
-  // property: reading and writing it work, which is what every consumer does,
-  // and the rejected-assignment half is an engine gap rather than a validation
-  // written here and never reached. See ../../test/buffer/README.md.
-  INSPECT_MAX_BYTES: 50,
+  // `validateNumber(val, 'INSPECT_MAX_BYTES', 0)`, so
+  // `buffer.INSPECT_MAX_BYTES = 'foo'` throws `ERR_INVALID_ARG_TYPE` and
+  // `= -1` / `= NaN` throw `ERR_OUT_OF_RANGE`. The engine supports accessors in
+  // an object literal, so that is exactly what this is.
+  //
+  // The number itself lives in `src/util/util.ts`
+  // (`__utilGet/SetInspectMaxBytes`), because the inspector that reads it is
+  // there and `util` is inlined into every bundle while this file is
+  // conditional — the same split Node has between `lib/buffer.js`'s accessor
+  // and the `INSPECT_MAX_BYTES` its custom inspector closes over.
+  get INSPECT_MAX_BYTES(): number {
+    return __utilGetInspectMaxBytes();
+  },
+  set INSPECT_MAX_BYTES(value: any) {
+    __bufValidateInspectMaxBytes(value);
+    __utilSetInspectMaxBytes(Number(value));
+  },
 
   atob(input: any): string {
     return __bufAtob(input);

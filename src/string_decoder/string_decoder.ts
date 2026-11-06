@@ -41,12 +41,15 @@
 // (https://github.com/UrubuCode/zun/issues)
 // ---------------------------------------------------------------------------
 //   * every method that touches a caller-supplied buffer takes it as `any`,
-//     tests it with `ArrayBuffer.isView`, and then hands it to a **top-level
+//     tests it with `Buffer.isBuffer`, and then hands it to a **top-level
 //     function with a `Buffer`-typed parameter**. A byte view is completely
 //     opaque when read through `any` in this engine — `buf.length` answers
 //     `undefined` and `buf.toString(...)` throws — while the same `any` value
 //     passed *into* a `Buffer` parameter works. That asymmetry is the single
-//     shape this whole file is built around.
+//     shape this whole file is built around. The predicate used to be
+//     `ArrayBuffer.isView`, which also admits a `Uint16Array` and a
+//     `DataView` — whose bytes the typed-array accessors cannot reach, so the
+//     program died on an uncatchable engine error; see `__sdValidateView`.
 //   * `__sdUtf16Decode` replaces `buf.toString('utf16le', ...)`: the engine's
 //     UTF-16 decoder turns an unpaired surrogate into U+FFFD where V8 keeps
 //     it, and an unpaired surrogate is exactly what a UTF-16 stream decoder
@@ -238,9 +241,7 @@ class StringDecoder {
   // trailing partial character held back.
   write(buf: any): string {
     if (typeof buf === "string") return buf;
-    if (!ArrayBuffer.isView(buf)) {
-      throw new ERR_INVALID_ARG_TYPE("buf", ["Buffer", "TypedArray", "DataView"], buf);
-    }
+    __sdValidateView(buf);
     return __sdWrite(this, buf);
   }
 
@@ -260,10 +261,23 @@ class StringDecoder {
       const s: string = buf;
       return s.slice(offset === undefined ? 0 : Number(offset));
     }
-    if (!ArrayBuffer.isView(buf)) {
-      throw new ERR_INVALID_ARG_TYPE("buf", ["Buffer", "TypedArray", "DataView"], buf);
-    }
+    __sdValidateView(buf);
     return __sdTextFrom(this, buf, offset === undefined ? 0 : Number(offset));
+  }
+}
+
+// Node accepts a `Buffer`, any other `TypedArray` and a `DataView` here, and
+// decodes the view's bytes. `Buffer.isBuffer` is the only engine predicate that
+// recognises a view *and* guarantees its bytes can be read: a view held in an
+// `any` does not report its class (zun#38), and handing a `DataView` to the
+// typed-array accessors is an **uncatchable** engine error that stops the
+// program. So a non-`U8` view is reported as the wrong type instead — Node's
+// answer for the shapes it rejects, and a divergence for a `Uint16Array`, but
+// never a crash. The same trade-off is made in `src/buffer/buffer.ts`'s
+// `isUtf8`/`isAscii`.
+function __sdValidateView(buf: any): void {
+  if (!Buffer.isBuffer(buf)) {
+    throw new ERR_INVALID_ARG_TYPE("buf", ["Buffer", "TypedArray", "DataView"], buf);
   }
 }
 

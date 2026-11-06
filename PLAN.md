@@ -430,9 +430,23 @@ gets deleted; nothing else in the tracker changes.
   intrinsics — NUCLEUS #21), and `buffer.Buffer === globalThis.Buffer` in Node,
   so **this library never introduces a second Buffer**. What it owns is the
   module surface, and all of it is there: `kMaxLength`, `kStringMaxLength`,
-  `constants`, `INSPECT_MAX_BYTES`, a strict WHATWG `atob`/`btoa` (the engine
+  `constants`, `INSPECT_MAX_BYTES` (Node's **accessor pair**, running
+  `validateNumber` on assignment), a strict WHATWG `atob`/`btoa` (the engine
   globals are lenient where Node throws), `isUtf8`, `isAscii`, `transcode`,
-  `Blob`, `File` and `resolveObjectURL`. **No `SlowBuffer`:** Node removed
+  `Blob`, `File` and `resolveObjectURL` — plus the one piece of the *inspector*
+  that `lib/buffer.js` owns rather than `lib/internal/util/inspect.js`:
+  `Buffer.prototype[util.inspect.custom]`, so a byte view prints as
+  `<Buffer 61 62 63>`, and under `customInspect: false` (which is how `assert`
+  renders its diff) as `Buffer(3) [Uint8Array] [ 97, 98, 99 ]`. Those two live
+  in `src/util/util.ts`, because `util` is inlined into every bundle while
+  `buffer` is conditional — the same split Node has at the point of use.
+  `transcode` is **ICU's behaviour**, not a decode-then-encode over the engine's
+  codecs: four charsets, `?` for an unmappable code point, U+FFFD for a
+  malformed decode, two strict directions and the six specialized converter
+  paths of `node_i18n.cc`, verified against `node` over the full
+  4 × 4 × 34 = 544-case matrix, byte for byte. A `Blob` holds its bytes as a
+  latin1 string rather than as a Buffer, because of the GC bug below.
+  **No `SlowBuffer`:** Node removed
   DEP0030 in v25 and `test-buffer-slow.js` now tests
   `Buffer.allocUnsafeSlow`. **Not done, and not doable from here:** every gap in
   the engine's `Buffer`. A method the checker does not know on a
@@ -442,11 +456,18 @@ gets deleted; nothing else in the tracker changes.
   `Buffer.compare`, `isEncoding`, `of`, `allocUnsafeSlow` and `poolSize` are
   engine work. The dominant blocker is narrower than any of them: the
   `nodeBuffer` intrinsics take machine integers, so a plain `number` is rejected
-  at the call site, which stops 28 of the 64 tests on their first line. The
+  at the call site, which stops 32 of the 64 tests on their first line. The
   worst is a GC bug this track found — **a live Buffer's backing `ArrayBuffer`
   is freed at the first young collection**, reproducibly on the 256th class
   instance, because a view object carries type RID 0 and the mark phase has no
-  reference slots for it. The four historical Buffer CVEs were each checked:
+  reference slots for it; and when the read that fails is reached through a
+  dynamically dispatched call, the resulting engine error is *swallowed* and the
+  expression simply answers `undefined`. The whole blocker table was re-probed
+  against the engine at `c4afcca4` and is current; what the engine has gained
+  since (indexed access through a `number`, `for…of` over a buffer, working
+  `Buffer.isBuffer`/`ArrayBuffer.isView` through an `any`, getters and setters
+  in an object literal) is tabulated there too. The four historical Buffer CVEs
+  were each checked, and all four findings still stand:
   `alloc` never returns non-zeroed memory, the `alloc(size, fill, encoding)` and
   `write(string, offset, length, encoding)` forms are unreachable rather than
   unsafe, and the UCS-2 `write` near the end of a buffer stays in bounds but
@@ -466,10 +487,16 @@ gets deleted; nothing else in the tracker changes.
   run against Node** — `test-string-decoder.js`'s own driver over 33 byte
   sequences × every possible split across successive `write()` calls × 8
   encodings (1216 cases) plus all 32 `testEnd` vectors of
-  `test-string-decoder-end.js`: **zero divergences**. All three corpus files
-  fail to compile on engine gaps (`Buffer.from`/`Buffer.of` with an `any`
-  argument, `Math.random`, a call with one more argument than the function
-  declares); table in `test/string_decoder/README.md`.
+  `test-string-decoder-end.js`, and re-verified over a further 1056 cases
+  compared **code unit by code unit**, so that a surrogate pair cannot hide a
+  bug: **zero divergences**. The caller-supplied buffer is now validated with
+  `Buffer.isBuffer` rather than `ArrayBuffer.isView`, which removes a latent
+  crash: the bytes of a `Uint16Array` or a `DataView` cannot be reached through
+  the typed-array accessors, and trying is an uncatchable engine error. All
+  three corpus files fail to compile on engine gaps (`Buffer.from`/`Buffer.of`
+  with an `any` argument, `Math.random`, a call with one more argument than the
+  function declares), all three re-probed and unchanged; table in
+  `test/string_decoder/README.md`.
 - **`node:util`: complete, in `src/util/util.ts`, measured against the full
   Node corpus.** The whole Node 25 public surface is there — `format`,
   `formatWithOptions`, `inspect` with every documented option (`depth`,
