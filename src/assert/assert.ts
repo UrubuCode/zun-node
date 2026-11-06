@@ -176,10 +176,12 @@ function __expectationMatches(error: any, boxedExpected: any): boolean {
   const expected: any = __unboxFn(boxedExpected);
   if (expected === undefined) return true;
   if (expected instanceof RegExp) {
-    return __regexTest(
-      expected,
-      String(error && error.message ? error.message : error),
-    );
+    // Node's `expectedException` tests the regex against `String(actual)`, i.e.
+    // against `"RangeError: Invalid input"`, not against the message alone —
+    // which is why its own tests anchor the error's *name* in the pattern
+    // (`test-punycode.js` uses `/^RangeError: Invalid input$/`). `String(err)`
+    // composes name and message correctly here, so this is the whole of it.
+    return __regexTest(expected, String(error));
   }
   const kind = typeof expected;
   if (kind === "function") {

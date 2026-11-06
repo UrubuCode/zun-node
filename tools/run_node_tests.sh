@@ -64,6 +64,12 @@ case "$MODULE" in
   util)   KIND="zun-ts";     PATTERNS="test-util";                        PATTERN="test-util";;
   events) KIND="zun-ts";     PATTERNS="test-event-emitter- test-events-"; PATTERN="test-event-emitter-*|test-events-";;
   os)     KIND="zun-ts+ext"; PATTERNS="test-os";                          PATTERN="test-os";;
+  querystring) KIND="zun-ts"; PATTERNS="test-querystring";                PATTERN="test-querystring";;
+  punycode)    KIND="zun-ts"; PATTERNS="test-punycode";                   PATTERN="test-punycode";;
+  # `url`'s corpus is `test-url*`, which also selects `test-urlpattern*`:
+  # `URLPattern` is a `node:url` export in Node 25, so those files are part of
+  # this module's bar rather than a different one's.
+  url)         KIND="zun-ts"; PATTERNS="test-url";                        PATTERN="test-url";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 

@@ -376,6 +376,84 @@ gets deleted; nothing else in the tracker changes.
   because `fn.name` is unavailable
   ([#25](https://github.com/UrubuCode/zun/issues/25)) — a class correctly
   inspects as `[class Foo]`.
+- **`node:querystring`: implemented in `src/querystring/querystring.ts`,
+  measured against the full Node corpus.** `parse`/`decode`,
+  `stringify`/`encode`, `escape`, `unescape`, `unescapeBuffer`, `maxKeys`,
+  custom `sep`/`eq` of any length and the
+  `decodeURIComponent`/`encodeURIComponent` options, following Node's own
+  scanner instruction for instruction — including the quirks its tests pin
+  (which empty segment spends a `maxKeys` slot, that `parse('a=b', [])` drops
+  the value, that `escape` consumes the code unit after a high surrogate and
+  masks it with `0x3FF`). Results are null-prototype objects and **nothing in
+  the file builds a RegExp**, which is the structural reason `querystring` has
+  no CVEs of its own in Node's history; the scanner runs over the code-unit
+  array `split("")` produces, because `charCodeAt(index)` is O(n)
+  ([#12](https://github.com/UrubuCode/zun/issues/12)) and Node's indexed loop
+  would be O(n²) — a 98 kB query string, which
+  `test-querystring-maxKeys-non-finite.js` parses four times, is the test that
+  forces it. **Both remaining failures are outside the module:** Node's other
+  two files open their `check()` with the bare callable form
+  `assert(!(actual instanceof Object))`, which needs
+  [#14](https://github.com/UrubuCode/zun/issues/14) and an `instanceof Object`
+  that answers `false` for a null-prototype object
+  ([#26](https://github.com/UrubuCode/zun/issues/26)), and
+  `test-querystring.js` additionally needs a second realm
+  (`vm.runInNewContext`). `unescapeBuffer` answers a documented byte view
+  rather than a `Buffer`, for the same reason `os.userInfo({ encoding:
+  'buffer' })` does. Table in `test/querystring/README.md`.
+- **`node:punycode`: complete, in `src/punycode/punycode.ts`, 100% of the Node
+  corpus.** `encode`, `decode`, `toASCII`, `toUnicode`, `ucs2.decode`,
+  `ucs2.encode` and `version`, verified against all nineteen RFC 3492 section
+  7.1 test vectors through four functions each, the surrogate and
+  email-address cases, the three `RangeError` paths and the DEP0040
+  deprecation warning. The module is deprecated in Node and still shipped, so
+  the warning is reproduced — and because Node emits it on the *first require*,
+  the single `process.emitWarning` call lives in
+  `src/punycode/deprecation.ts`, which the bundler inlines only for a test that
+  requires `punycode` (`CONDITIONAL_FILES`). The algorithms themselves are
+  always inlined, because `src/url/url.ts` stands on them. Node's four regular
+  expressions here are four scans, for
+  [#7](https://github.com/UrubuCode/zun/issues/7) and for the same
+  no-backtracking posture `querystring.ts` takes. Getting to 100% needed
+  `assert.throws(fn, regexp)` to match `String(err)` the way Node's does, and
+  the Bootstring state variables annotated `number` — a conditional mixing an
+  integer-typed constant with a float-typed expression yields an `Any`, and
+  passing that to a `number` parameter panics the interpreter (new bug, found
+  by this work).
+- **`node:url`: implemented in `src/url/url.ts`, measured against the full Node
+  corpus.** The legacy API (`parse` with `parseQueryString` and
+  `slashesDenoteHost`, `format` in its string/object/`URL` forms plus
+  `format(URL, options)`, `resolve`, `resolveObject`, the `Url` class and its
+  five methods), the WHATWG re-exports (`URL`, `URLSearchParams` — the engine's
+  prelude classes, which is the relationship `node:url` has with the globals in
+  Node), `domainToASCII`/`domainToUnicode`, `fileURLToPath`, `pathToFileURL`
+  and `urlToHttpOptions`, plus `internal/url`'s `isURL` and the three protocol
+  sets. It follows `lib/url.js` and `lib/internal/url.js` instruction for
+  instruction, because `url.parse` is explicitly not standardized — that is
+  what DEP0169 says — so its behaviour simply *is* that code. **Every CVE guard
+  is reproduced**, not simplified: the scheme is lower-cased before any
+  protocol-set decision (CVE-2018-12123); the hostname is re-checked against
+  the forbidden set *after* IDNA, so a NUL can neither be accepted nor
+  truncated away (the CVE-2026-48930 class); an empty post-IDNA hostname throws
+  `ERR_INVALID_URL`; `parse(url, true)` hands back a null-prototype query. All
+  eight of Node's regular expressions here are hand-written scans, so the
+  parser owns no backtracking engine. A differential run against Node over the
+  whole of `test-url-relative.js` — all 194 `relativeTests2` cases through
+  `resolve`, and all 31 `relativeTests` through `resolve`, `resolveObject` +
+  `deepStrictEqual` and `format` — shows **zero divergences**; that file fails
+  only because the engine corrupts a long-lived array of strings after roughly
+  250 `url.parse` calls (new bug, reported with this work).
+  **Not done, by capability:** `URLPattern` (a separate WHATWG specification
+  Node implements in C++, declared as a gap rather than faked),
+  `fileURLToPathBuffer` (needs `node:buffer`), and full UTS#46 IDNA —
+  `domainToASCII`/`domainToUnicode` are punycode, which agrees with ICU for
+  every ASCII label and every `xn--` label and differs on ICU's mapping steps;
+  Node's own test for them is `{ skip: !hasIntl }`. The prelude `URL` cannot
+  parse a `file:` URL with an empty host, which is why `pathToFileURL` and
+  `fileURLToPath` build genuine `URL` instances from components instead (a Zun
+  class has no constructor body, so `new URL(...)` fills its fields
+  positionally and the lazy parser short-circuits). Table in
+  `test/url/README.md`.
 - **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
   `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
   `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,

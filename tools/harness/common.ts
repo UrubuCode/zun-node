@@ -407,3 +407,21 @@ const __node_domain: any = {
 const __node_stream: any = {
   Stream: undefined,
 };
+
+// `node:vm` is required by `test-querystring.js`, which uses
+// `vm.runInNewContext('({"foo": ["bar", "baz"]})')` to obtain a plain object
+// from *another realm* and check that `querystring.stringify` handles it. A
+// second realm is a VM facility, not something a library can synthesize, so the
+// stub throws rather than handing back a same-realm object and quietly turning
+// a cross-realm test into a tautology.
+const __node_vm: any = {
+  runInNewContext(): any {
+    throw new Error("vm is not available in the zun harness");
+  },
+  runInThisContext(): any {
+    throw new Error("vm is not available in the zun harness");
+  },
+  createContext(): any {
+    throw new Error("vm is not available in the zun harness");
+  },
+};
