@@ -817,6 +817,38 @@ gets deleted; nothing else in the tracker changes.
   `Map` rather than Node's `{ __proto__: null }`, which is the CVE-2022-21824
   fix carried over to an engine where a null-prototype object is not a safe
   accumulator either (zun#46, zun#47). Table in `test/console/README.md`.
+- **`node:perf_hooks`: complete, in `src/perf_hooks/perf_hooks.ts`.** The whole
+  performance timeline: `performance` with `now`/`timeOrigin`,
+  `mark`/`measure` (all six start/end/duration resolutions, `detail`,
+  `startTime`), the `getEntriesBy*`/`clear*` trio over Node's three separate
+  global buffers, `setResourceTimingBufferSize`/`markResourceTiming` with the
+  secondary buffer and its single `resourcetimingbufferfull` drain, `toJSON`,
+  `timerify`, `eventLoopUtilization`, `nodeTiming`;
+  `PerformanceEntry`/`Mark`/`Measure`/`ResourceTiming`, `PerformanceObserver`
+  (+ `PerformanceObserverEntryList`, `supportedEntryTypes`, buffered
+  observation, callbacks delivered from a `setImmediate` as Node delivers
+  them); `createHistogram`, `monitorEventLoopDelay` and the
+  `Recordable`/`Interval` histogram surface including the five `*BigInt`
+  readings; and `constants`. It is pure Zun TypeScript (principle 2): the one
+  capability it does not own is a clock, and `src/process/process.ts` already
+  answers it as `process.hrtime` — through the `node:process` extension when
+  one is loaded and from `Date.now()` when none is. So the tracker kind is
+  `zun-ts`, not `zun-ts+ext`: running the bundle with `--ext` sharpens
+  `performance.now()` from whole milliseconds to the platform monotonic clock
+  (measured: 0.4355 ms against 3 ms for the same two statements), and no test
+  in the corpus distinguishes the two. It is inlined for any test that mentions
+  `performance` — not only one that requires the module — because `performance`
+  is a *global* in Node and the prelude's own `performance.now()` is lowered to
+  the prelude even when a user declaration shadows it, which is the `console`
+  situation one global further along and has the same fix: a second binding
+  plus a receiver rewrite in the bundler. The histogram is an exact
+  value→count map rather than an HdrHistogram, and `timerify` has no
+  `new.target` path (zun#25); both are argued at the top of the file. Table in
+  `test/perf_hooks/README.md`, which also names five new engine findings —
+  BigInt identity lost across a value round-trip, `writable: false` not stored
+  for a symbol-keyed property, quadratic class-instance allocation, a throw
+  inside a macrotask not failing the run, and a spread into a method call
+  rejected inside a function body.
 - **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
   `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
   `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,

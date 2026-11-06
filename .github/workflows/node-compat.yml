@@ -9,7 +9,8 @@
 # All three module kinds are measured (see ../../PLAN.md):
 #   * `util`, `assert`, `path`, `events`, `buffer`, `string_decoder`,
 #     `querystring`, `punycode`, `url`, `timers`, `stream`,
-#     `diagnostics_channel` and `console` are Zun TypeScript, so they need only
+#     `diagnostics_channel`, `console` and `perf_hooks` are Zun TypeScript, so
+#     they need only
 #     the `zun` binary: each test is bundled by tools/bundle_node_test.sh and run as
 #     `zun run <bundle.ts>`, with no --ext. (`buffer` is TypeScript although
 #     `Buffer` itself is an engine realm global: the module is the surface
@@ -33,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       module:
-        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, stream, diagnostics_channel, console, process, os, fs, child_process, … or "all")
+        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, stream, diagnostics_channel, console, perf_hooks, process, os, fs, child_process, … or "all")
         default: all
       limit:
         description: Only the first N tests (0 = all)
@@ -91,7 +92,7 @@ jobs:
           ZUN="$PWD/target/debug/zun"
           EXT="$PWD/zun-node/target/debug/libzun_node.so"
           case "$MODULE" in
-            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console process os fs child_process";;
+            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks process os fs child_process";;
             *)   MODULES="$MODULE";;
           esac
           test -f "$EXT" || { echo "extension cdylib missing: $EXT" >&2; exit 1; }
@@ -100,7 +101,7 @@ jobs:
             # needs it, and so does a TypeScript-over-natives module (`os`),
             # whose bundle calls into the cdylib.
             case "$m" in
-              util|assert|path|events|buffer|string_decoder|querystring|punycode|url|timers|stream|diagnostics_channel|console) EXT_ARGS="";;
+              util|assert|path|events|buffer|string_decoder|querystring|punycode|url|timers|stream|diagnostics_channel|console|perf_hooks) EXT_ARGS="";;
               *)           EXT_ARGS="--ext $EXT";;
             esac
             bash zun-node/tools/run_node_tests.sh \

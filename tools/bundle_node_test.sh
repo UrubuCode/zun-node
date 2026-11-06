@@ -159,6 +159,7 @@ crypto __node_crypto -
 test __node_test test
 tty __node_tty -
 worker_threads __node_worker_threads -
+perf_hooks __node_perf_hooks PerformanceEntry,PerformanceMark,PerformanceMeasure,PerformanceObserver,PerformanceObserverEntryList,PerformanceResourceTiming,Performance,createHistogram,monitorEventLoopDelay
 "
 
 # The modules inlined into every bundle, in dependency order.
@@ -253,6 +254,7 @@ diagnostics_channel src/diagnostics_channel/diagnostics_channel.ts
 [.][.]/common/tmpdir src/fs/fs.ts
 [.][.]/common/tmpdir tools/harness/tmpdir.ts
 [.][.]/common/hijackstdio tools/harness/hijackstdio.ts
+perf_hooks src/perf_hooks/perf_hooks.ts
 "
 
 # The harness, which stands on everything above it.
@@ -316,6 +318,27 @@ $file
 done <<EOF_CONDITIONAL
 $CONDITIONAL_FILES
 EOF_CONDITIONAL
+
+# The global `performance`.
+#
+# `performance` is a *global* in Node, so a test can reach it without ever
+# writing `require('perf_hooks')` -- `test-performance-many-marks.js` does
+# nothing else. The engine's prelude has a `performance` of its own with a
+# single method, so such a test compiles and then fails on the second method it
+# calls; the CONDITIONAL_FILES entry above cannot help it, because that gate is
+# the `require` call. One in-shell substring test over the source already read
+# therefore appends the module for any test that mentions `performance` or one
+# of the `Performance*` classes, with the same append-once rule as the loop.
+case "$SRC_TEXT" in *erformance*)
+  case "
+$FILES" in
+    *"
+src/perf_hooks/perf_hooks.ts
+"*) :;;
+    *) FILES="${FILES}src/perf_hooks/perf_hooks.ts
+";;
+  esac;;
+esac
 
 # The global `console`.
 #
@@ -410,6 +433,23 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
     printf '%s\n' "s#^console\(\.[A-Za-z_\$]\|\[\)#__zunConsole\1#"
     printf '%s\n' "s#\([^'\"\`A-Za-z0-9_\$.]\)console\(\.[A-Za-z_\$]\|\[\)#\1__zunConsole\2#g"
   done
+
+  # `performance` as a *receiver* becomes `__zunPerformance`, for the same
+  # reason and by the same rules as `console` above: the engine's prelude has a
+  # `performance` whose `now()` spelling the checker lowers to the prelude even
+  # when a user declaration shadows it, so the real module is bound under a
+  # second name that the checker has no opinion about (see the header of
+  # src/perf_hooks/perf_hooks.ts). A member read through a dot
+  # (`perf_hooks.performance`, `globalThis.performance`) is excluded by the
+  # same character class the console rule uses, and a test that declares its
+  # own `performance` keeps it -- the module object is still reachable as
+  # `__node_perf_hooks.performance`.
+  if ! grep -Eq "^[[:space:]]*(const|let|var)[[:space:]]+performance[[:space:]]*=" "$SRC"; then
+    for _pass in 1 2; do
+      printf '%s\n' "s#^performance\(\.[A-Za-z_\$]\|\[\)#__zunPerformance\1#"
+      printf '%s\n' "s#\([^'\"\`A-Za-z0-9_\$.]\)performance\(\.[A-Za-z_\$]\|\[\)#\1__zunPerformance\2#g"
+    done
+  fi
 
   # A canonical binding recovered from an *aliased* module object.
   #
