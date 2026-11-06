@@ -1057,59 +1057,59 @@ gets deleted; nothing else in the tracker changes.
   because a `RegExp` read out of a module-level `const` inside a function has
   lost its methods (zun#7). Table in `test/readline/README.md`.
 - **`node:v8`: complete, `src/v8/v8.ts`.** V8's `ValueSerializer` wire format
-  (version 15) escrito do zero e **byte-identical ao Node**: o cabeçalho
-  `ff 0f`, o alfabeto de tags de um byte, varints zigzag, doubles IEEE-754
-  little-endian, strings de um e de dois bytes com a regra de `kPadding`, o
-  split denso/esparso de arrays, a numeração de `kObjectReference`, `Map`,
-  `Set`, `Date`, `RegExp` com os bits de flag, `BigInt` em dígitos de 64 bits,
-  `Error` com os tags de protótipo, e os views como *host objects* pelos hooks
-  que o Node acrescenta (`DefaultSerializer`/`DefaultDeserializer`,
+  (version 15) written from scratch and **byte-identical to Node**: the `ff 0f`
+  header, the one-byte tag alphabet, zigzag varints, little-endian IEEE-754
+  doubles, one- and two-byte strings with the `kPadding` rule, the dense/sparse
+  array split, `kObjectReference` numbering, `Map`, `Set`, `Date`, `RegExp`
+  with its flag bits, `BigInt` in 64-bit digits, `Error` with its prototype
+  tags, and views as *host objects* through the hooks Node adds
+  (`DefaultSerializer`/`DefaultDeserializer`,
   `_writeHostObject`/`_readHostObject`, `_getDataCloneError`,
   `writeUint32`/`writeUint64`/`writeDouble`/`writeRawBytes`,
-  `transferArrayBuffer`, `getWireFormatVersion`). As 53 linhas da tabela de
-  `test/v8/README.md` foram conferidas contra o hex que o `node` imprime.
-  A outra metade do módulo é o *isolate*, que não existe aqui: espaços de
-  heap, profiler de amostragem, stream de eventos de GC e grafo de heap são
-  facilidades do V8. Essas leituras são **shape-true e content-empty** — as
-  chaves, os tipos e os formatos de arquivo são os do Node, os números são o
-  que o host observa (`getHeapStatistics` tira três valores de
-  `process.memoryUsage()` e zera os outros onze; `getHeapSpaceStatistics` dá
-  os treze nomes de espaço do V8 com tamanho zero; `getHeapSnapshot()`
-  devolve um `.heapsnapshot` válido e vazio; `startCpuProfile().stop()` um
-  `.cpuprofile` válido sem amostras; `cachedDataVersionTag()` um hash da
-  versão da engine mais as flags vistas até ali, que é por que ele muda depois
-  de `setFlagsFromString`). Quatro entradas não podem ser respondidas assim e
-  lançam com o motivo nomeado — `queryObjects`, `writeHeapSnapshot`,
-  `promiseHooks` e, na escrita, qualquer `ArrayBufferView` que não seja
-  `Uint8Array`/`Buffer`, porque a *largura do elemento* de um view é invisível
-  através de um `any` (zun#38) e adivinhá-la seria pior que recusar. Duas
-  descobertas novas de engine saíram daqui, com repro em
-  `test/v8/README.md`: uma função atribuída a uma instância de classe é
-  perdida (mesma raiz de zun#78) e um `const x: DataView` de topo não é um
-  `DataView` dentro de uma função. Tabela em `test/v8/README.md`, resultado
-  por teste em `test/v8/RESULTS.md`.
-- **`node:tty`: completo, `src/tty/tty.ts`.** `isatty(fd)` de verdade (o
-  predicado que `src/process/process.ts` já responde), `ReadStream` e
-  `WriteStream` como `Duplex` sobre os fds 0–2 com `ERR_INVALID_FD` e
-  `ERR_TTY_INIT_FAILED` exatos, `getColorDepth`/`hasColors` com a tabela de
-  ambiente inteira de `lib/internal/tty.js` na ordem do Node (`FORCE_COLOR` e
-  seu aviso único, `NO_COLOR`/`NODE_DISABLE_COLORS`/`TERM=dumb`, o build do
-  Windows, `TMUX`, Azure DevOps, os oito fornecedores de CI, o regexp de
-  versão do TeamCity, `TERM_PROGRAM`, `COLORTERM`, os regexps de `TERM` e a
-  tabela do `dircolors`), `getWindowSize`, e os quatro métodos de cursor
-  delegando às funções do `readline` **pelo objeto de módulo**, porque essa
-  indireção é observável. Substitui o stub `__node_tty` que vivia em
-  `tools/harness/common.ts`, e com ele `common.getTTYfd()` passa a procurar
-  nos fds 0–2 em vez de responder -1 sempre. Três lacunas, nomeadas no
-  arquivo: tamanho de janela e modo raw não têm capacidade embaixo (não há
-  `uv_tty_get_winsize` nem `uv_tty_set_mode`), e o refinamento Windows de
-  `getColorDepth` para 256/16m precisa de `os.release()` — `node:os` é
-  extensão nativa e um bundle de `node:tty` roda sem `--ext`, porque o corpus
-  do `console` exige `node:tty`. Uma descoberta nova de engine: recursão
-  profunda estoura a pilha **nativa** (`thread '<unknown>' has overflowed its
-  stack`) em vez de levantar `RangeError`, o que derruba
-  `test-ttywrap-stack.js`. Tabela em `test/tty/README.md`, resultado por teste
-  em `test/tty/RESULTS.md`.
+  `transferArrayBuffer`, `getWireFormatVersion`). The 53 rows of the table in
+  `test/v8/README.md` were checked against the hex `node` prints.
+  The other half of the module is the *isolate*, which does not exist here:
+  heap spaces, the sampling profiler, the GC event stream and the heap graph
+  are V8 facilities. Those reads are **shape-true and content-empty** — the
+  keys, types and file formats are Node's, the numbers are what the host
+  observes (`getHeapStatistics` takes three values from
+  `process.memoryUsage()` and zeroes the other eleven;
+  `getHeapSpaceStatistics` gives V8's thirteen space names with size zero;
+  `getHeapSnapshot()` returns a valid, empty `.heapsnapshot`;
+  `startCpuProfile().stop()` a valid `.cpuprofile` with no samples;
+  `cachedDataVersionTag()` a hash of the engine version plus the flags seen so
+  far, which is why it changes after `setFlagsFromString`). Four entries cannot
+  be answered that way and throw with the reason named — `queryObjects`,
+  `writeHeapSnapshot`, `promiseHooks` and, when writing, any `ArrayBufferView`
+  that is not a `Uint8Array`/`Buffer`, because a view's *element width* is
+  invisible through an `any` (zun#38) and guessing it would be worse than
+  refusing. Two new engine findings came out of this, with repros in
+  `test/v8/README.md`: a function assigned onto a class instance is lost (same
+  root as zun#78) and a top-level `const x: DataView` is not a `DataView` inside
+  a function (zun#97). Table in `test/v8/README.md`, per-test results in
+  `test/v8/RESULTS.md`.
+- **`node:tty`: complete, `src/tty/tty.ts`.** A real `isatty(fd)` (the
+  predicate `src/process/process.ts` already answers), `ReadStream` and
+  `WriteStream` as a `Duplex` over fds 0–2 with exact `ERR_INVALID_FD` and
+  `ERR_TTY_INIT_FAILED`, `getColorDepth`/`hasColors` with the whole environment
+  table of `lib/internal/tty.js` in Node's order (`FORCE_COLOR` and its
+  one-time warning, `NO_COLOR`/`NODE_DISABLE_COLORS`/`TERM=dumb`, the Windows
+  build, `TMUX`, Azure DevOps, the eight CI vendors, the TeamCity version
+  regexp, `TERM_PROGRAM`, `COLORTERM`, the `TERM` regexps and the `dircolors`
+  table), `getWindowSize`, and the four cursor methods delegating to
+  `readline`'s functions **through the module object**, because that
+  indirection is observable. It replaces the `__node_tty` stub that lived in
+  `tools/harness/common.ts`, and with it `common.getTTYfd()` now searches fds
+  0–2 instead of always answering -1. Three gaps, named in the file: window
+  size and raw mode have no capability underneath (there is no
+  `uv_tty_get_winsize` nor `uv_tty_set_mode`), and the Windows refinement of
+  `getColorDepth` to 256/16m needs `os.release()` — `node:os` is a native
+  extension and a `node:tty` bundle runs without `--ext`, because the
+  `console` corpus requires `node:tty`. One new engine finding: deep recursion
+  overflows the **native** stack (`thread '<unknown>' has overflowed its
+  stack`) instead of raising `RangeError` (zun#96), which brings down
+  `test-ttywrap-stack.js`. Table in `test/tty/README.md`, per-test results in
+  `test/tty/RESULTS.md`.
 - **`node:dns` + `node:dns/promises`: implemented, TS over natives (the `os`
   kind), in `src/dns/*.rs` + `src/dns/dns.ts`.** The Rust half is the system
   resolver (`getaddrinfo`/`getnameinfo` through `libc` and `GetAddrInfoW`, with
@@ -1228,6 +1228,71 @@ gets deleted; nothing else in the tracker changes.
   ([zun#50](https://github.com/UrubuCode/zun/issues/50)); and
   `Domain.prototype.dispose` is absent, as it is in Node 25. Table in
   `test/domain/README.md`.
+- **`node:io` (not a Node module): the shared asynchronous-I/O loop, in
+  `src/io/*.rs` + `src/io/io.ts` + `src/io/native.ts`.**
+  This is the piece of infrastructure the library did not have, and without
+  which `net` would not exist. Until now every native in this crate was
+  **blocking**, and the asynchrony of Node's API was restored by
+  `process.nextTick` (the pattern `src/dns/dns.ts` documents as "synchronous
+  natives, asynchronous API"). That is honest for a name resolution; it does
+  not work for a socket, which has to be *waiting* while the program runs.
+  ABI v1 does not let a native complete a call later, so the direction is
+  inverted: no native waits for a *particular* event — each operation completes
+  or answers "not yet" (`+A`) — and **one** native, `ioPoll(timeoutMs)`, waits
+  for *any* registered handle, blocking at most the requested timeout. That is
+  the *readiness* model (`select`/`poll`), and it is the only asynchrony this
+  ABI can express.
+  The Rust side is the table of non-blocking handles and the eleven verbs on
+  one (create, bind, listen, accept, connect, recv, send, shutdown, close,
+  name, readiness) plus the socket options Node exposes; on POSIX it is
+  `poll(2)`, on Windows it is `select` and **not** `WSAPoll` — the latter has
+  the documented defect of never reporting a *refused* connection attempt,
+  which would hang the loop instead of raising `ECONNREFUSED` (libuv avoids it
+  for the same reason). The classic `select` limit, `FD_SETSIZE`, does not
+  apply: the Windows `fd_set` is a *counted array* and `src/io/sys.rs` builds
+  that layout in a `Vec` of the required size.
+  The TypeScript side is the scheduling: who wants which event, which handles
+  keep the process alive (`ref`/`unref` — `test-net-server-unref.js` checks
+  this directly), when to pump and whom to call. `io.ts` goes into **every**
+  bundle (like `process.ts` and `timers.ts`), because `tools/harness/common.ts`
+  asks it how many ref'd handles are alive exactly as it asks `timers`; the
+  `import` lives in `src/io/native.ts`, attached only with `--ext`.
+  Three design points the next tracks (`dgram`, `child_process.spawn`, `fs`
+  streams, `http`) inherit for free. **The real wait happens inside the
+  native**, because the VM's macrotask tier runs on a *virtual* clock that
+  jumps to the next due time instead of sleeping (NUCLEUS §9a) — a pump armed
+  with `setTimeout(…, 20)` re-enters immediately and would burn a core;
+  measured, an idle *referenced* server spends 31 ms of CPU in 5 s, 0.6% of a
+  core. **The loop has no chain of its own**: the first version re-armed itself
+  every turn, and that *does not work* here — with the clock jumping, every
+  armed task is due at once, and among due tasks this engine runs the most
+  recently armed one, so a pump that re-arms at the end of its own turn always
+  wins and **nothing else in the program ever runs again** (a four-line probe
+  shows it: a `net` server plus `setTimeout(f, 1)`, and `f` never fires; it
+  cost 20 of the 149 tests, which died on the runner's timeout instead of on
+  their own assertions). So `src/io/io.ts` exposes **one turn**,
+  `__ioPumpOnce()`, and whoever already drives the program's macrotasks calls
+  it — today the harness's settle loop, tomorrow a VM "before blocking" hook.
+  And **`pause()` is real**, because a handle with no read interest is simply
+  not waited on, so the peer's data stays in the kernel buffer and the TCP
+  window closes.
+- **`node:net`: implemented, TS over the I/O loop, in `src/net/net.ts`.**
+  `Socket` is a `stream.Duplex` whose `_read`/`_write`/`_final`/`_destroy` are
+  the loop's events; `Server` is an `EventEmitter` over a listening handle; and
+  the rest is shape — `isIP`/`isIPv4`/`isIPv6` (a hand-written grammar,
+  because a `RegExp` loses its methods through `any`, zun#7, and because
+  `BlockList` compares addresses *numerically*), `BlockList`, `SocketAddress`,
+  the `connect`/`listen` argument cascades, `readyState`, `allowHalfOpen`,
+  `setTimeout`/`setNoDelay`/`setKeepAlive`, `maxConnections` with the `'drop'`
+  event, `getConnections`, `ref`/`unref` and the four `autoSelectFamily`
+  accessors. **Documented deviations**: name resolution blocks (synchronous
+  `getaddrinfo` delivered through `process.nextTick`, as in `dns`), there are
+  no *pipes* / Unix domain sockets (a different kernel object, with a
+  different readiness story — `listen(path)` and `connect(path)` raise an
+  error instead of pretending), and Happy Eyeballs is *sequential* instead of
+  raced: a name with A and AAAA records has the second candidate as a
+  fallback, which is the observable half of `autoSelectFamily`. Table in
+  `test/net/README.md`.
 
 ### Module keys and host dispatch
 

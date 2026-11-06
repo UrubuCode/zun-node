@@ -13,8 +13,8 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-timers-api-refs.js` | ❌ engine panic | thread '<unnamed>' (46920) panicked at crates\zun_interp\src\value.rs:228:22: |
-| `test-timers-args.js` | ❌ type error | bundles/test-timers-args.ts:17777:28: error: [SEM0001] type Array has no fields |
+| `test-timers-api-refs.js` | ❌ engine panic | thread '<unnamed>' (26372) panicked at crates\zun_interp\src\value.rs:228:22: |
+| `test-timers-args.js` | ❌ type error | bundles/test-timers-args.ts:20383:28: error: [SEM0001] type Array has no fields |
 | `test-timers-clear-null-does-not-throw-error.js` | ✅ pass | |
 | `test-timers-clear-object-does-not-throw-error.js` | ✅ pass | |
 | `test-timers-clear-timeout-interval-equivalent.js` | ✅ pass | |
@@ -67,7 +67,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-timers-unref.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-timers-unrefd-interval-still-fires.js` | ✅ pass | |
 | `test-timers-unrefed-in-beforeexit.js` | ✅ pass | |
-| `test-timers-unrefed-in-callback.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-timers-unrefed-in-callback.js: |
+| `test-timers-unrefed-in-callback.js` | ❌ parse | Error [ERR_METHOD_NOT_IMPLEMENTED]: node:net needs the zun-node native extension (run with --ext) |
 | `test-timers-user-call.js` | ❌ parse | ReferenceError: interval is not defined |
 | `test-timers-zero-timeout.js` | ✅ pass | |
 | `test-timers.js` | ❌ parse | (zun-node) TimeoutNaNWarning: NaN is not a number. |

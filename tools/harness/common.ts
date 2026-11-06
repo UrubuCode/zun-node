@@ -61,6 +61,16 @@
 const __IDLE_ROUNDS: number = 24;
 const __MAX_ROUNDS: number = 1024;
 
+// The round budget is a count of settle turns, which is the right guard for a
+// program whose only pending work is timers and ticks: those run on the VM's
+// virtual clock, so a thousand turns cost no real time at all. Asynchronous
+// I/O is the one kind of work that does not fit that measure — a turn with a
+// live handle in it blocks inside `ioPoll` (see src/io/io.ts), so its turns are
+// real milliseconds and a thousand of them is not a generous budget but a
+// single second. While `__ioPendingRefs()` is positive the guard is therefore a
+// *deadline* instead of a count, and this is it.
+const __IO_DEADLINE_MS: number = 12000;
+
 // Registered wrappers, checked when 'exit' fires.
 const __mustCallChecks: any[] = [];
 const __harnessState: any = { skipped: false, warningExpectations: [], failures: [] };
@@ -129,6 +139,18 @@ function __runCallChecks(): void {
   }
 }
 
+// `common.hasIPv6`, probed rather than assumed: bind the IPv6 loopback through
+// the shared I/O loop and throw the handle away. See the `hasIPv6` entry below
+// for why this is a probe and not an interface enumeration.
+function __zunHarnessHasIPv6(): boolean {
+  if (!__ioAvailable()) return false;
+  const ops: any = __ioOps();
+  const payload: any = ops.listen("::1", 0, 1, 0);
+  if (__ioFailed(payload)) return false;
+  ops.close(Number(__ioFields(payload)[0]));
+  return true;
+}
+
 // Registered at load time, so it runs ahead of any 'exit' listener the test adds
 // — the same ordering Node's `test/common` gets from being required first.
 process.on("exit", __runCallChecks);
@@ -144,18 +166,57 @@ import { timers as __harnessTimers } from "zun:core";
 // `setTimeout` callback — an `any`-typed binding holding a function is rejected
 // with "`setTimeout` expects a function callback", so the loop state lives in a
 // module-level object instead of being captured.
-const __harnessLoop: any = { idle: 0, rounds: 0 };
+const __harnessLoop: any = { idle: 0, rounds: 0, deadline: 0 };
 
 function __zunHarnessStep(): void {
-  __harnessLoop.rounds = Number(__harnessLoop.rounds) + 1;
-  if (__processPendingTicks() > 0 || __timerPendingRefs() > 0) {
+  // Drive the shared I/O loop one turn.
+  //
+  // `src/io/io.ts` deliberately owns no macrotask chain of its own: a pump that
+  // re-armed itself always won the queue (that file's header carries the probe)
+  // and starved everything else, this loop included. So the settle loop is the
+  // driver, and a turn with a live handle in it waits inside `ioPoll` rather
+  // than returning at once — which is also what makes a `net` test's timers
+  // advance at roughly real speed.
+  //
+  // The `try` is not defensive clutter. An exception raised inside a socket
+  // callback — a failed assertion in a `'data'` listener, say — would otherwise
+  // propagate out of this turn and kill the settle loop, and a program whose
+  // settle loop is dead never emits `'exit'` and exits **0**: a failing test
+  // would be scored as a pass. Node prints such an exception and exits 1, so
+  // that is what this does, while keeping the loop alive long enough to report
+  // it.
+  try {
+    __ioPumpOnce();
+  } catch (error: any) {
+    const name: any = error === null || error === undefined ? "Error" : error.name;
+    const message: any = error === null || error === undefined ? "" : error.message;
+    host.stderrWrite("Uncaught " + String(name) + ": " + String(message) + "\n");
+    process.exitCode = 1;
+  }
+
+  // A turn spent waiting on a socket does not count against the round budget;
+  // the deadline above is its guard instead. See `__IO_DEADLINE_MS`.
+  const io: number = __ioPendingRefs();
+  if (io > 0) {
+    if (Number(__harnessLoop.deadline) === 0) {
+      __harnessLoop.deadline = Number(Date.now()) + __IO_DEADLINE_MS;
+    }
+  } else {
+    __harnessLoop.rounds = Number(__harnessLoop.rounds) + 1;
+    __harnessLoop.deadline = 0;
+  }
+  if (__processPendingTicks() > 0 || __timerPendingRefs() > 0 || io > 0) {
     __harnessLoop.idle = 0;
   } else {
     __harnessLoop.idle = Number(__harnessLoop.idle) + 1;
   }
+  const expired: boolean =
+    Number(__harnessLoop.deadline) !== 0 &&
+    Number(Date.now()) >= Number(__harnessLoop.deadline);
   if (
     Number(__harnessLoop.idle) >= __IDLE_ROUNDS ||
-    Number(__harnessLoop.rounds) >= __MAX_ROUNDS
+    Number(__harnessLoop.rounds) >= __MAX_ROUNDS ||
+    expired
   ) {
     if (
       Number(__harnessLoop.rounds) < __MAX_ROUNDS &&
@@ -181,7 +242,7 @@ function __zunHarnessBeforeExit(): boolean {
   if (Number(process.listenerCount("beforeExit")) === 0) return false;
   const code: any = process.exitCode;
   process.emit("beforeExit", code === undefined || code === null ? 0 : Number(code));
-  return __processPendingTicks() > 0 || __timerPendingRefs() > 0;
+  return __processPendingTicks() > 0 || __timerPendingRefs() > 0 || __ioPendingRefs() > 0;
 }
 
 // One settle turn, armed for whenever the next Node timer is due (1ms when none
@@ -190,6 +251,15 @@ function __zunHarnessBeforeExit(): boolean {
 // millisecond.
 function __zunHarnessArm(): void {
   const next: number = __timerNextDelay();
+  // While a handle is registered the turn is armed one millisecond out whatever
+  // the timers say, because the *virtual* clock must not be fast-forwarded past
+  // a pending timer while a socket is still making progress in real time: one
+  // turn per virtual millisecond, each blocking a real millisecond inside
+  // `ioPoll`, keeps the two in step. See `src/io/io.ts`.
+  if (__ioPending() > 0) {
+    __harnessTimers.setTimeout(__zunHarnessStep, 1);
+    return;
+  }
   __harnessTimers.setTimeout(__zunHarnessStep, next > 1 ? next : 1);
 }
 
@@ -204,6 +274,9 @@ function __zunHarnessExit(): void {
   // have abandoned at this point, but the VM's timer heap keeps re-arming it,
   // which would hang the run.
   __timerShutdown();
+  // The same for the I/O loop: a listening server is work Node would have
+  // abandoned here, and the pump would otherwise keep re-arming.
+  __ioShutdown();
   const code: any = process.exitCode;
   if (code !== undefined && code !== null && Number(code) !== 0) {
     host.exitProcess(Number(code));
@@ -447,6 +520,35 @@ const common: any = {
   canCreateSymLink(): boolean {
     return process.platform !== "win32";
   },
+
+  // `test/common/index.js`' loopback name, which 20 files in the `net` corpus
+  // connect to. Node resolves `localhost` for it on POSIX and hardcodes
+  // `127.0.0.1` on Windows; the resolved answer is the same on every machine
+  // the corpus is meant to run on, so this is the constant.
+  localhostIPv4: "127.0.0.1",
+
+  // `common.hasIPv6`. Node reads `os.networkInterfaces()` for it; this harness
+  // cannot, because `node:os` is only inlined for a test that requires it. So
+  // the answer is a **real probe** through the I/O loop — bind `::1:0`, and
+  // throw the handle away — which is a sharper test than enumerating
+  // interfaces anyway (it is exactly what a test is about to do). A bundle with
+  // no extension has no loop and answers `false`, which is what makes those
+  // tests `common.skip` instead of failing on a missing capability.
+  hasIPv6: __zunHarnessHasIPv6(),
+
+  // `common.PIPE`. Pipes are a named gap of `node:net` (see
+  // ../../test/net/README.md), so this exists to let such a test reach the
+  // honest error instead of failing on an undefined path.
+  PIPE:
+    process.platform === "win32"
+      ? "\\\\?\\pipe\\zun-node-test-" + String(process.pid)
+      : "/tmp/zun-node-test-" + String(process.pid) + ".sock",
+
+  // Node's own default for `autoSelectFamilyAttemptTimeout` in the test
+  // harness, read by two files in the `net` corpus.
+  defaultAutoSelectFamilyAttemptTimeout: 2500,
+
+  inFreeBSDJail: false,
 
   // `common.hasFipsCrypto` and friends are read as plain flags by a few tests.
   hasFipsCrypto: false,
