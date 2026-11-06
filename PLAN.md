@@ -1204,6 +1204,58 @@ gets deleted; nothing else in the tracker changes.
   ([zun#50](https://github.com/UrubuCode/zun/issues/50)); and
   `Domain.prototype.dispose` is absent, as it is in Node 25. Table in
   `test/domain/README.md`.
+- **`node:vm`: complete, in `src/vm/vm.ts`.** It is the one module whose job
+  *is* compiling at run time, and the platform has that path: the checker
+  lowers `new Function(p1, ..., body)` to the `functionConstruct` intrinsic
+  (`zun_sema/src/check/builtins/object.rs`), the interpreter hands the strings
+  to an injected `EvalHost` (`zun_interp/src/eval.rs`), and the driver answers
+  with the project's own compiler (`zun_vm/src/eval_host.rs` →
+  `zun_compiler::compile_without_prelude`), links the resulting methods into
+  the live module with `Module::link` and re-verifies that range. There is no
+  `eval`, direct or indirect; there is no host/ABI entry that compiles —
+  `zun_abi` publishes natives *to* the engine, never the other way round — and
+  there is no ES module instantiation entry. So `vm` is built on
+  `new Function` rather than on an imitation of it: every `Script` really is
+  compiled.
+  The two gaps between `new Function(body)` and `vm.Script` are closed with
+  **the compiler as the authority**. (1) *Completion value*: `__vmScan` finds
+  the top-level statement boundaries (tracking comments, the three string
+  forms, regular-expression literals and bracket depth) and `__vmCompile`
+  walks them from the last one backwards asking the compiler whether
+  `<prefix> __zunVmR = (<suffix>);` compiles; the first split it accepts is the
+  one used, and a bad proposal simply fails to compile and is discarded.
+  (2) *Contextified globals*: reading a free identifier lowers to
+  `globalGet(name)`, but **writing** one is a compile error
+  (``unknown variable `foo` ``, `zun_sema/src/check/expr/assign.rs`) — and that
+  error *names* every implicitly assigned global, so the names are read out of
+  the message, declared `let` at the top of the generated body (initialised
+  from the active context) and copied back in a `finally`; reads are served by
+  installing the context's own properties on the realm global for the run and
+  restoring them afterwards. Top-level `var` and `function` declarations go
+  back to the context too, because in Node they become context-global
+  properties where `let` and `const` do not.
+  **Documented deviations**: the engine has **one** realm global, so a context
+  cannot *hide* the host's globals (`vm.runInNewContext('typeof process')`
+  answers `"object"`, not `"undefined"`) — isolation is the missing part, and
+  `test/vm/README.md` records file by file what it costs; `timeout` and
+  `breakOnSigint` are validated and then ignored, because nothing interrupts a
+  running frame; there is no code cache, so `produceCachedData` answers
+  `cachedDataProduced: false`, a supplied `cachedData` is honestly rejected and
+  `createCachedData()` throws with its reason; `vm.Module`,
+  `vm.SourceTextModule` and `vm.SyntheticModule` are **absent**, which is
+  exactly their shape in a Node run without `--experimental-vm-modules`.
+  Three new engine findings came out of this work, each with a standalone repro
+  in `test/vm/README.md`: `new Error(...)` inside dynamically compiled code
+  evaluates to a **function value** (the builtin class cannot be referenced —
+  `Module::link` forbids the type ref — so `new` on the realm class descriptor
+  returns the descriptor, with no diagnostic); `this.x = v` in compiled code
+  **panics the interpreter** (`zun_interp/src/value.rs:228`, "expected object,
+  found Void") instead of throwing a `TypeError`; and
+  `zun run --ext <lib> file.ts` **injects no `EvalHost`**
+  (`execute_with_extensions` calls `run_with` with no host), so loading any
+  native extension silently removes run-time code generation — which is why
+  `vm`'s tracker kind is `zun-ts` and the CI workflow excludes it from
+  `--ext`. Table in `test/vm/README.md`.
 
 ### Module keys and host dispatch
 

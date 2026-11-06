@@ -161,7 +161,7 @@ internal/readline/utils __node_internal_readline_utils CSI
 internal/readline/callbacks __node_internal_readline_callbacks -
 internal/util/inspect __node_internal_util_inspect -
 [.][.]/common/arraystream __node_harness_arraystream ArrayStream
-vm __node_vm -
+vm __node_vm Script,compileFunction
 crypto __node_crypto Hash,Hmac,Cipheriv,Decipheriv,KeyObject
 [.][.]/common/crypto __node_harness_crypto -
 test __node_test test
@@ -265,6 +265,15 @@ src/process/native.ts
 # `v8` stands on `stream` for one member: `getHeapSnapshot()` answers a
 # `Readable`. The serializer itself is pure computation over the engine's
 # `Buffer` and a `DataView`.
+
+# `vm` is conditional for the plainest of the reasons: two corpora other than
+# its own require it (`querystring` for a second-realm object literal, `domain`
+# for five files), and nothing else needs it, so there is no sense putting a
+# module whose whole floor is `new Function` in front of every `path` bundle.
+# It also declares a top-level `compileFunction`, which is its canonical
+# binding in the table above -- `vm.compileFunction(...)` hands back a
+# *closure*, and a closure returned through a dynamic member call reads as a
+# non-callable box in this engine (zun#17/#19), so that call has to be static.
 #
 # One line per module: `<specifier> <file>`. The files are appended in this
 # order, after BUNDLE_FILES and before the harness.
@@ -305,6 +314,7 @@ zlib src/string_decoder/string_decoder.ts
 zlib src/stream/stream.ts
 zlib src/zlib/zlib.ts
 test tools/harness/node_test.ts
+vm src/vm/vm.ts
 punycode src/punycode/deprecation.ts
 fs src/fs/fs.ts
 fs/promises src/fs/fs.ts

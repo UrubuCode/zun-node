@@ -158,6 +158,11 @@ case "$MODULE" in
   # here -- so there is no syscall for a native to make. See the resolution
   # table in src/v8/v8.ts.
   v8)     KIND="zun-ts";     PATTERNS="test-v8-";                          PATTERN="test-v8-";;
+  # `vm` is Zun TypeScript over the engine's own run-time compile path: the
+  # checker lowers `new Function(...)` to the `functionConstruct` intrinsic and
+  # the driver's `EvalHost` answers it with the project's compiler, so no
+  # syscall and no `--ext` is involved. The corpus is `test-vm-*`.
+  vm)     KIND="zun-ts";     PATTERNS="test-vm-";                          PATTERN="test-vm-";;
   # `tty`'s corpus is two prefixes: `test-tty-` (the module) and `test-ttywrap`
   # (the libuv handle under it, which Node's tests reach through
   # `internalBinding('tty_wrap')`). The module is pure Zun TypeScript -- the
