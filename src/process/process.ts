@@ -689,6 +689,24 @@ function __drainTicks(): void {
     // rejected microtask: it reaches `process.on('uncaughtException')` and, with
     // no listener, ends the process. That is what `test-process-next-tick.js`
     // measures, and the reason each callback runs inside a `try`.
+    //
+    // `node:domain`: a tick belongs to the domain that was active when it was
+    // *scheduled*, and a throw out of it is routed to that domain rather than
+    // straight to `process` — which has to happen while the domain is still on
+    // the stack, so the hook owns the whole invocation. Both slots are `null`
+    // unless `src/domain/domain.ts` is in the bundle (see `__domainHooks` in
+    // ../events/events.ts).
+    const scheduledIn: any = entry.domain;
+    const hook: any = __domainHooks.callback;
+    if (
+      scheduledIn !== null &&
+      scheduledIn !== undefined &&
+      hook !== null &&
+      hook !== undefined
+    ) {
+      __evCall(hook, [scheduledIn, entry.fn, entry.args]);
+      continue;
+    }
     try {
       __evCall(entry.fn, entry.args);
     } catch (error) {
@@ -706,7 +724,10 @@ function __processNextTick(fn: any, ...args: any[]): void {
     const count = Number(args.length);
     for (let i = 0; i < count; i++) passed.push(args[i]);
   }
-  const entry: any = { args: passed, fn: fn };
+  // `domain` is the active domain at *schedule* time, which is what makes a
+  // tick re-enter it when it runs; `null` whenever `node:domain` is not in the
+  // bundle.
+  const entry: any = { args: passed, domain: __domainHooks.active, fn: fn };
   __tickQueue.items.push(entry);
   if (!__tickQueue.scheduled) {
     __tickQueue.scheduled = true;
@@ -1849,6 +1870,15 @@ const process: any = {
 
   // ---- scheduling and diagnostics ----------------------------------------
 
+  // `process.domain` — the active domain, or `null`. In Node this property is
+  // installed by `lib/domain.js` as an accessor over a one-element array; here
+  // it is a plain data property declared in this literal, because the module
+  // is inlined *after* `process` and a key written onto the object afterwards
+  // would be an expando. `src/domain/domain.ts` is its only writer, and with
+  // no `domain` in the bundle it simply stays `null`, which is also what Node
+  // answers before anything enters a domain.
+  domain: null,
+
   nextTick(fn: any, ...args: any[]): void {
     const passed: any[] = [];
     if (args !== undefined && args !== null) {
@@ -1918,6 +1948,12 @@ const process: any = {
     };
   },
   setUncaughtExceptionCaptureCallback(fn?: any): void {
+    // `node:domain` claims the capture callback for itself (`lib/domain.js`
+    // replaces this very function), so once the module is loaded every call
+    // here throws ERR_DOMAIN_CANNOT_SET_UNCAUGHT_EXCEPTION_CAPTURE. The slot is
+    // `null` unless `src/domain/domain.ts` is in the bundle.
+    const blocked: any = __domainHooks.blockCapture;
+    if (blocked !== null && blocked !== undefined) __evCall(blocked, []);
     if (fn === null) {
       __processUncaught.callback = undefined;
       return;

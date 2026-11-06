@@ -103,6 +103,19 @@ case "$MODULE" in
   diagnostics_channel)
           KIND="zun-ts";     PATTERNS="test-diagnostics-channel";         PATTERN="test-diagnostics-channel";;
   console) KIND="zun-ts";    PATTERNS="test-console";                     PATTERN="test-console";;
+  # `domain` is pure Zun TypeScript: it is bookkeeping over `events`,
+  # `process.nextTick` and `timers`, and the one capability Node's version
+  # needs beyond them -- the async_hooks tier that re-enters a domain inside a
+  # scheduled callback -- is reproduced by hook slots in those modules rather
+  # than by a syscall. Nothing in src/domain imports a native.
+  #
+  # The kind is nevertheless `zun-ts+ext`, for the same reason `readline`'s is:
+  # four files in the corpus require a module that *is* syscalls
+  # (`test-domain-implicit-fs`, `-implicit-binding` and `-fs-enoent-stream`
+  # require `fs`, `-crypto` requires `crypto`), and without `--ext` those
+  # bundles fail to compile rather than failing on their real blocker. See
+  # src/domain/domain.ts.
+  domain) KIND="zun-ts+ext"; PATTERNS="test-domain-";                      PATTERN="test-domain-";;
   # `readline`'s corpus is `test-readline*`, which also selects the
   # `test-readline-promises-*` files: `readline/promises` is the same module's
   # second surface (src/readline/promises.ts), so those files are part of this

@@ -1099,6 +1099,47 @@ gets deleted; nothing else in the tracker changes.
   has no `EventEmitter`-derived prototype; `versions` names only `node` and
   `zun`, because no V8, libuv, OpenSSL or ICU is embedded. Table in
   `test/process/README.md`.
+- **`node:domain`: complete, in `src/domain/domain.ts`, plus one hook record in
+  `src/events/events.ts` that `process` and `timers` read.** The whole surface
+  is there — `create`/`createDomain`, `Domain` with `run`, `add`, `remove`,
+  `bind`, `intercept`, `enter`, `exit`, `members` and `_errorHandler`,
+  `domain._stack`, `domain.active`, `process.domain`, `events.usingDomains`,
+  the implicit binding of an emitter constructed inside a domain, the
+  `error.domain`/`domainEmitter`/`domainBound`/`domainThrown` decoration,
+  Node's stack-truncate-emit-restore dance in `emit`, the stack-clearing
+  `uncaughtException` listener kept first through `process`' own
+  `newListener`/`removeListener` events, and the exclusive claim on
+  `process.setUncaughtExceptionCaptureCallback`. It is the module where the
+  *seam* is the whole design question: Node implements `domain` by
+  monkey-patching `EventEmitter.init`, `EventEmitter.prototype.emit`,
+  `process.setUncaughtExceptionCaptureCallback` and `process.domain`, and by
+  registering an `async_hooks` hook so every scheduled callback re-enters the
+  domain that created it — and this engine has no prototype model
+  ([zun#25](https://github.com/UrubuCode/zun/issues/25)), no class method
+  readable as a value ([zun#19](https://github.com/UrubuCode/zun/issues/19))
+  and no async-hooks tier. Patching is therefore inverted into *declared hook
+  slots*: `src/events/events.ts` holds one `__domainHooks` record whose every
+  slot is `null`, `EventEmitter`'s constructor and `emit` consult two of them,
+  `process.nextTick` stamps each queue entry and `src/timers/timers.ts` each
+  `Timeout`/`Immediate` with the active domain and both hand the callback to a
+  third, and `src/domain/domain.ts` — a CONDITIONAL_FILES module, inlined only
+  for a test that requires it — is the record's only writer. The cost to every
+  other module is one null check per emit, per constructed emitter, per tick
+  and per timer fire. This is principle 2 read the other way round: the module
+  stays pure computation precisely because the three integration points are
+  narrow, named and dead when it is absent. **Documented deviations**: a throw
+  out of `run`/`bind`/`intercept` is caught and routed here, because the engine
+  has no uncaught-exception hook (the same gap `process` records above), which
+  differs from Node only when the *caller* would have caught it;
+  `EventEmitter.domain` and `Timeout._domain` are declared fields and therefore
+  enumerable, where Node's are non-enumerable own properties, because
+  `Object.defineProperty` on a class instance poisons its typed reads
+  ([zun#37](https://github.com/UrubuCode/zun/issues/37)); a promise
+  continuation carries no domain, for the same reason `AsyncLocalStorage` is a
+  synchronous context; `d.bind(cb)`'s result carries no `domain` property
+  ([zun#50](https://github.com/UrubuCode/zun/issues/50)); and
+  `Domain.prototype.dispose` is absent, as it is in Node 25. Table in
+  `test/domain/README.md`.
 
 ### Module keys and host dispatch
 

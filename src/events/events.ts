@@ -580,6 +580,64 @@ function __evEmitWarning(warning: any): void {
   console.error(String(warning.name) + ": " + String(warning.message));
 }
 
+// ---------------------------------------------------------------------------
+// The `node:domain` integration slot
+// ---------------------------------------------------------------------------
+//
+// Node's `lib/domain.js` installs itself by *monkey-patching*: it replaces
+// `EventEmitter.init` and `EventEmitter.prototype.emit`, and it registers
+// async_hooks callbacks so that every scheduled callback re-enters the domain
+// that created it. Neither half is expressible here — this engine has no
+// function-constructor/prototype model
+// (https://github.com/UrubuCode/zun/issues/25), a class method cannot be read
+// as a value (zun#19), and there is no async_hooks tier at all. So each place
+// `domain` has to be consulted holds one slot in this record, every slot is
+// `null` unless `src/domain/domain.ts` is in the bundle, and that file is the
+// record's only writer (through `__evInstallDomainHooks`). Function slots hold
+// boxed callables invoked with `__evCall`, for the same reason
+// `__evWarningRoute` does.
+//
+// With no `domain` in the bundle every slot stays `null`, so the whole cost to
+// every other module is one null check per `emit`, per constructed emitter,
+// per `process.nextTick` drain and per timer fire.
+const __domainHooks: any = {
+  // The active domain, or `null`. `src/process/process.ts` (`nextTick`) and
+  // `src/timers/timers.ts` read it to pair a callback with the domain that
+  // scheduled it; `src/domain/domain.ts` is the only writer.
+  active: null,
+  // `(emitter) => void` — Node's patched `EventEmitter.init`: make a freshly
+  // constructed emitter a member of the active domain by filling its declared
+  // `domain` field.
+  init: null,
+  // `(emitter, type, args) => boolean` — Node's patched
+  // `EventEmitter.prototype.emit`, which routes an unhandled 'error' to the
+  // emitter's domain and runs every other emit inside it.
+  emit: null,
+  // `(domain, fn, args) => void` — run one domain-paired callback: enter the
+  // domain, call `fn`, route a throw to that domain, exit. The hook owns the
+  // whole invocation, because the routing has to happen while the domain is
+  // still on the stack.
+  callback: null,
+  // `() => never` — throw ERR_DOMAIN_CANNOT_SET_UNCAUGHT_EXCEPTION_CAPTURE:
+  // `domain` claims `process.setUncaughtExceptionCaptureCallback` for itself.
+  blockCapture: null,
+};
+
+function __evInstallDomainHooks(hooks: any): void {
+  __domainHooks.init = hooks.init;
+  __domainHooks.emit = hooks.emit;
+  __domainHooks.callback = hooks.callback;
+  __domainHooks.blockCapture = hooks.blockCapture;
+}
+
+// Called from the `EventEmitter` constructor and from `init()`, so that each
+// call site stays one line.
+function __evDomainInit(target: any): void {
+  const hook: any = __domainHooks.init;
+  if (hook === null || hook === undefined) return;
+  __evCall(hook, [target]);
+}
+
 class MaxListenersExceededWarning extends Error {
   emitter: any;
   type: any;
@@ -1154,6 +1212,18 @@ class EventEmitter {
   // The `captureRejections` flag, declared rather than attached: see
   // `__kCaptureKey` above and https://github.com/UrubuCode/zun/issues/37.
   __zunEventsCapture: boolean = false;
+  // `node:domain`'s property, which `lib/domain.js` installs from its patched
+  // `EventEmitter.init` on every emitter — `null` outside a domain, the active
+  // domain inside one. It is a **declared** field rather than a property added
+  // from the outside for two reasons: Node's own domain tests read it off a
+  // statically typed emitter (`e.domain`, which is a compile error for a field
+  // no class declares), and a property added to a class instance afterwards
+  // poisons every later typed read of that instance's own fields
+  // (https://github.com/UrubuCode/zun/issues/37). The one cost is that it is
+  // enumerable where Node's is not, which is already true of `__evTypes` and
+  // `__zunEventsCapture`. With no `domain` in the bundle it simply stays
+  // `null`, which is what Node answers too.
+  domain: any = null;
 
   constructor(options?: any) {
     this._events = Object.create(null);
@@ -1167,6 +1237,9 @@ class EventEmitter {
     } else {
       self[__kCaptureKey] = false;
     }
+    // `node:domain`'s patched `EventEmitter.init`: a no-op unless
+    // `src/domain/domain.ts` is in the bundle. See `__domainHooks`.
+    __evDomainInit(self);
   }
 
   // `EventEmitter.init.call(this)` is not expressible (no receiver threading),
@@ -1182,6 +1255,7 @@ class EventEmitter {
       __evValidateBoolean(options.captureRejections, "options.captureRejections");
       self[__kCaptureKey] = options.captureRejections === true;
     }
+    __evDomainInit(self);
   }
 
   addListener(type: any, listener: any): any {
@@ -1228,6 +1302,15 @@ class EventEmitter {
   // `emit('x', undefined)` is a one-argument emit again, and an emit may carry
   // more than ten arguments.
   emit(type: any, ...args: any[]): boolean {
+    // `node:domain` replaces `EventEmitter.prototype.emit` in Node; here it
+    // fills one slot instead and the routing runs ahead of the real dispatch,
+    // which it reaches by calling `__evEmit` itself. `process.emit` calls
+    // `__evEmit` directly, which is exactly Node's `this === process`
+    // exclusion. See `__domainHooks`.
+    const route: any = __domainHooks.emit;
+    if (route !== null && route !== undefined) {
+      return __evCall(route, [this, type, args]) === true;
+    }
     return __evEmit(this, type, args);
   }
 

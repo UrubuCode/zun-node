@@ -143,7 +143,7 @@ async_hooks __node_async_hooks AsyncLocalStorage
 console __node_console Console
 internal/util/debuglog __node_internal_util_debuglog -
 [.][.]/common/hijackstdio __node_harness_hijackstdio -
-domain __node_domain -
+domain __node_domain Domain
 stream __node_stream Stream,Readable,Writable,Duplex,Transform,PassThrough
 stream/promises __node_stream_promises -
 stream/web __node_stream_web -
@@ -310,6 +310,7 @@ fs src/fs/fs.ts
 fs/promises src/fs/fs.ts
 child_process src/child_process/child_process.ts
 async_hooks src/async_hooks/async_hooks.ts
+domain src/domain/domain.ts
 diagnostics_channel src/async_hooks/async_hooks.ts
 diagnostics_channel src/diagnostics_channel/diagnostics_channel.ts
 [.][.]/common/tmpdir src/fs/fs.ts

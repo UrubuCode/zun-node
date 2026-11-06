@@ -205,6 +205,15 @@ class Timeout {
   _hasPrimitive: boolean;
   _handle: number;
   _enrolled: boolean;
+  // The domain this timer was created in, or `null`. In Node the timer *is*
+  // the async resource, so `lib/domain.js`' init hook hangs a non-enumerable
+  // `domain` property on it; a property added to a class instance from outside
+  // poisons every later typed read of that instance's own fields here
+  // (https://github.com/UrubuCode/zun/issues/37 — `this._refed` inside
+  // `unref()` then throws), so it is a declared field under this
+  // implementation's `_`-prefix instead. It stays `null` whenever `node:domain`
+  // is not in the bundle.
+  _domain: any;
 
   constructor(callback: any, after: any, args: any, isRepeat: boolean, isRefed: boolean) {
     const ms: number = __timerCoerceDelay(after);
@@ -228,6 +237,7 @@ class Timeout {
     this._hasPrimitive = false;
     this._handle = -1;
     this._enrolled = false;
+    this._domain = __domainHooks.active;
   }
 
   // `refresh()` restarts the countdown from now. Node routes it through
@@ -304,6 +314,8 @@ class Immediate {
   _refed: boolean;
   _handle: number;
   _enrolled: boolean;
+  // The domain this immediate was created in; see `Timeout._domain`.
+  _domain: any;
 
   constructor(callback: any, args: any) {
     this._idleNext = null;
@@ -316,6 +328,7 @@ class Immediate {
     this._refed = true;
     this._handle = -1;
     this._enrolled = false;
+    this._domain = __domainHooks.active;
   }
 
   ref(): any {
@@ -422,11 +435,26 @@ function __timerUnenrol(timer: any): void {
 // callable held in an `any` with the right arity; no receiver is threaded
 // (https://github.com/UrubuCode/zun/issues/1), which is this module's one
 // behavioural gap against Node.
-function __timerInvoke(callback: any, args: any): void {
+//
+// `node:domain`: a timer callback runs inside the domain that was active when
+// the timer was *created* (Node gets that from `lib/domain.js`' async_hooks
+// `before`/`after` pair, the timer being its own async resource), and a throw
+// out of it is routed to that domain rather than straight to `process`. The
+// routing has to happen while the domain is still on the stack, so the hook
+// owns the whole invocation and does not re-throw — which is also why
+// `__timerFire`'s re-arm step still sees a clean run. Both the domain and the
+// hook are `null` unless `src/domain/domain.ts` is in the bundle (see
+// `__domainHooks` in ../events/events.ts).
+function __timerInvoke(callback: any, args: any, domain: any): void {
   const passed: any[] = [];
   if (args !== undefined && args !== null) {
     const count: number = Number(args.length);
     for (let i = 0; i < count; i++) passed.push(args[i]);
+  }
+  const hook: any = __domainHooks.callback;
+  if (domain !== null && domain !== undefined && hook !== null && hook !== undefined) {
+    __evCall(hook, [domain, callback, passed]);
+    return;
   }
   __evCall(callback, passed);
 }
@@ -475,7 +503,7 @@ function __timerFire(idArg: any): void {
   let failure: any = undefined;
   let failed: boolean = false;
   try {
-    __timerInvoke(callback, timer._timerArgs);
+    __timerInvoke(callback, timer._timerArgs, timer._domain);
   } catch (error) {
     failed = true;
     failure = error;
@@ -517,7 +545,7 @@ function __timerFireImmediate(idArg: any): void {
   __timerClearImmediate(immediate);
   if (callback === undefined || callback === null) return;
   try {
-    __timerInvoke(callback, immediate._argv);
+    __timerInvoke(callback, immediate._argv, immediate._domain);
   } catch (error) {
     __timerReportUncaught(error);
   }

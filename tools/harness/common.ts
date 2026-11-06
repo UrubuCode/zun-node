@@ -549,14 +549,10 @@ Object.defineProperty(fixtures, "fixturesDir", {
 // `child_process` now needs `--ext`; a `path` or `util` bundle that does so
 // fails to compile without one, where before it compiled and threw.
 
-// `node:domain` is required by `test-event-emitter-no-error-provided-to-error-event.js`.
-// Domains are a deprecated, async-hooks-backed facility; there is nothing here to
-// implement them on, so the stub throws rather than silently passing a test.
-const __node_domain: any = {
-  create(): any {
-    throw new Error("domain is not available in the zun harness");
-  },
-};
+// `node:domain` used to be stubbed here, throwing. It is a real module now
+// (`src/domain/domain.ts`), inlined by the bundler for any test that requires
+// it -- so the stub is gone rather than shadowing it: a second declaration of
+// `__node_domain` in one program is a compile error.
 
 // `node:tty` used to be stubbed here. It is a real module now
 // (`src/tty/tty.ts`), inlined by the bundler for any test that requires it —

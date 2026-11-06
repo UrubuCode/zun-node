@@ -47,7 +47,15 @@ A Node module lands here in whichever form fits what it actually does:
   is a clock, which `process` already answers as `process.hrtime`. So it needs
   no native of its own and runs with or without `--ext`; the extension only
   sharpens `performance.now()` from whole milliseconds to the platform
-  monotonic clock.
+  monotonic clock. `domain` (`src/domain/domain.ts`) is the kind's limiting
+  case: it computes nothing at all for itself — a domain is a stack, a member
+  list and an error route — but Node implements it by *monkey-patching*
+  `events`, `process` and `timers`, which this engine has no prototype model to
+  allow. So the three modules declare one hook record between them
+  (`__domainHooks` in `src/events/events.ts`), every slot of it is `null`, and
+  `src/domain/domain.ts` is the only writer; see
+  [`test/domain/README.md`](test/domain/README.md) for the table of what each
+  slot replaces.
 
   `console` can still be bundled. `readline` and `readline/promises`
   (`src/readline/`) are pure computation over `events`, `stream`,
@@ -149,7 +157,7 @@ tests are first passed through
 util/events/process/assert/path/querystring/punycode/url/timers/console
 modules, `src/process/native.ts` when the bundle will be run with `--ext`, the
 modules the test actually requires (`os`, `buffer`, `string_decoder`, `stream`,
-`fs`, `child_process`, `diagnostics_channel`) and the
+`fs`, `child_process`, `diagnostics_channel`, `domain`) and the
 `common` harness (plus `node:test` when the test requires it) ahead of the test body,
 rewrites its `require` lines to the one object each
 inlined module exposes (`__node_events`, `__node_assert`, …), and appends the
@@ -969,3 +977,59 @@ target/debug/zun run /tmp/bundle.ts
 > [`test/dns/README.md`](test/dns/README.md) with the other findings, alongside
 > the per-test blocker table; the per-test run is in
 > [`test/dns/RESULTS.md`](test/dns/RESULTS.md).
+
+<!-- node-domain:start -->
+### Node.js v25 `domain` compatibility
+
+`████████░░░░░░░░░░░░░░░░` **36.0%** — 18 / 50 Node `test-domain-*` tests passing
+<!-- node-domain:end -->
+
+> `node:domain` is deprecated but fully specified, and it is the one module in
+> this library whose implementation is defined by what it does to the *other*
+> modules. Node's `lib/domain.js` replaces `EventEmitter.init`,
+> `EventEmitter.prototype.emit` and
+> `process.setUncaughtExceptionCaptureCallback`, redefines `process.domain` as
+> an accessor, and registers an `async_hooks` hook so that every scheduled
+> callback re-enters the domain that created it. None of that is expressible
+> here — there is no prototype to patch
+> ([zun#25](https://github.com/UrubuCode/zun/issues/25)), a class method cannot
+> be read as a value ([zun#19](https://github.com/UrubuCode/zun/issues/19)),
+> and the VM has no async-hooks tier. So the direction is inverted:
+> `src/events/events.ts` declares one record whose every slot is `null`,
+> `src/process/process.ts` stamps each `nextTick` entry and
+> `src/timers/timers.ts` each `Timeout`/`Immediate` with the active domain, and
+> `src/domain/domain.ts` — inlined only for a test that requires it — fills the
+> slots. The cost to every other corpus is one null check per emit, per
+> constructed emitter, per tick and per timer fire.
+>
+> The whole surface is implemented: `create`/`createDomain`, the `Domain` class
+> with `run`, `add`, `remove`, `bind`, `intercept`, `enter`, `exit`, `members`
+> and `_errorHandler`, `domain._stack`, `domain.active`, `process.domain`,
+> `events.usingDomains`, the implicit binding of an `EventEmitter` constructed
+> inside a domain, the full `error.domain`/`domainEmitter`/`domainBound`/
+> `domainThrown` decoration, Node's stack-truncate-emit-restore dance in
+> `emit`, the stack-clearing `uncaughtException` listener kept first through
+> `process`' own `newListener`/`removeListener` events, and the exclusive claim
+> on `process.setUncaughtExceptionCaptureCallback`
+> (`ERR_DOMAIN_CALLBACK_NOT_AVAILABLE`,
+> `ERR_DOMAIN_CANNOT_SET_UNCAUGHT_EXCEPTION_CAPTURE`). A throw out of a
+> `nextTick` callback, a `setTimeout`, a `setImmediate` and an `fs` callback is
+> routed to the domain that scheduled it, through the capture-callback path
+> `src/process/process.ts` already walks in Node's order.
+>
+> Twenty-two of the fifty files are not about any of that: fifteen spawn a
+> **child of the engine** to watch what V8's `--abort-on-uncaught-exception`
+> does, five need a module this library does not have (`http`, `inspector`,
+> `net`, `vm`), one needs `vm` plus the async-hooks tier and one needs
+> `async_hooks.AsyncResource` with `--expose-gc`. Of the twenty-eight that are
+> the module, **eighteen pass** — including every file that pins the stack
+> discipline. The other ten are one engine gap each, and two engine bugs were
+> found here: `Error`'s `name` and `stack`
+> become unreadable, *even through an `any`*, once the error carries any added
+> own property — which makes `console.error(err)` die for every error a
+> Node-style `err.code = …` has annotated — and `Error.stackTraceLimit =
+> Infinity` panics the interpreter. There is no `Function` global either, so
+> `Function.call.bind(Object.prototype.propertyIsEnumerable)` is the sole
+> blocker of three files. Deviations, repros and the blocker table:
+> [`test/domain/README.md`](test/domain/README.md); per-test breakdown:
+> [`test/domain/RESULTS.md`](test/domain/RESULTS.md).
