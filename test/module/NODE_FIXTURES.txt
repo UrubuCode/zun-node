@@ -1,0 +1,37 @@
+# Node's own test/fixtures/ files this corpus opens or stats. They are not
+# vendored: tools/run_node_tests.sh downloads each next to the test file, so
+# that the harness's `fixtures.path(...)` -- which computes exactly what
+# Node's test/common/fixtures.js computes -- finds them.
+test/fixtures/a.js
+test/fixtures/invalid.json
+test/fixtures/semicolon.js
+test/fixtures/throws_error.js
+test/fixtures/require-resolve.js
+test/fixtures/es-modules/test-esm-ok.mjs
+test/fixtures/GH-7131/a.js
+test/fixtures/GH-7131/b.js
+test/fixtures/json-with-directory-name-module/module-stub.json
+test/fixtures/json-with-directory-name-module/module-stub/index.js
+test/fixtures/json-with-directory-name-module/module-stub/package.json
+test/fixtures/json-with-directory-name-module/module-stub/one/two/three.js
+test/fixtures/json-with-directory-name-module/module-stub/one-trailing-slash/two/three.js
+test/fixtures/module-extension-over-directory/inner.js
+test/fixtures/module-extension-over-directory/inner/package.json
+test/fixtures/module-require/not-found/trailingSlash.js
+test/fixtures/module-require/not-found/node_modules/module1/package.json
+test/fixtures/module-require/relative/dot.js
+test/fixtures/module-require/relative/dot-slash.js
+test/fixtures/module-require/relative/index.js
+test/fixtures/module-require/relative/subdir/relative-subdir.js
+test/fixtures/nested-index/one/index.js
+test/fixtures/nested-index/one/hello.js
+test/fixtures/packages/missing-main/index.js
+test/fixtures/packages/missing-main/package.json
+test/fixtures/packages/is-dir/package.json/.placeholder
+test/fixtures/require-bin/package.json
+test/fixtures/require-bin/bin/req.js
+test/fixtures/require-bin/lib/req.js
+test/fixtures/require-empty-main/index.js
+test/fixtures/require-empty-main/package.json
+test/fixtures/resolve-paths/default/verify-paths.js
+test/fixtures/resolve-paths/default/node_modules/dep/index.js

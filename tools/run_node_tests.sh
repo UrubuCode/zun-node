@@ -173,6 +173,19 @@ case "$MODULE" in
   # `DNSException` and the record shapes. Its corpus is `test-dns*`, which
   # includes `test-dns.js` itself.
   dns)    KIND="zun-ts+ext"; PATTERNS="test-dns";                          PATTERN="test-dns";;
+  # `module` is the one corpus whose subject is `require` itself, and the
+  # bundler has a mode for it: ZUN_NODE_REQUIRE (exported below) leaves a Node
+  # builtin specifier for the run-time `require` to resolve and renames the
+  # body's `require` to `__zunRequire`, the `require` of the bundled file's own
+  # module record. See the ZUN_NODE_REQUIRE block in tools/bundle_node_test.sh.
+  #
+  # Its corpus is two prefixes: `test-module-` (the module surface) and
+  # `test-require-` (the same module system exercised through `require`), which
+  # is the split Node's own test names make. The kind is `zun-ts+ext` because
+  # the resolver is file-system work -- `Module._stat`, `realpath`, reading a
+  # package.json -- and `src/fs/fs.ts` is syscalls.
+  module) KIND="zun-ts+ext"; PATTERNS="test-module- test-require-";
+          PATTERN="test-module-*|test-require-";;
   # `crypto` is TS over natives: the `Hash`/`Hmac`/`Cipheriv`/`Decipheriv`
   # classes and the whole convenience surface are src/crypto/crypto.ts, and the
   # primitives (the RustCrypto hashes, AES, GHASH, Poly1305, scrypt and the OS
@@ -206,6 +219,12 @@ esac
 # without the extension.
 if [ -n "$EXT" ] && [ "$KIND" != "zun-ts" ]; then
   export ZUN_NODE_EXT="$EXT"
+fi
+
+# The `module` corpus needs the bundler's require mode; see the case entry
+# above and the ZUN_NODE_REQUIRE block in tools/bundle_node_test.sh.
+if [ "$MODULE" = module ]; then
+  export ZUN_NODE_REQUIRE=1
 fi
 
 LIST="$ROOT/test/$MODULE/NODE_TESTS.txt"

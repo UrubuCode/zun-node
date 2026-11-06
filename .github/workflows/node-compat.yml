@@ -16,14 +16,20 @@
 #     `zun run <bundle.ts>`, with no --ext. (`buffer` is TypeScript although
 #     `Buffer` itself is an engine realm global: the module is the surface
 #     around that global, not a second Buffer — see test/buffer/README.md.)
-#   * `process`, `os`, `fs`, `child_process`, `zlib`, `dns` and `crypto` are Zun TypeScript
+#   * `process`, `os`, `fs`, `child_process`, `zlib`, `dns`, `crypto` and
+#     `module` are Zun TypeScript
 #     *over* a Rust zun_abi cdylib, so they need both: the bundle from
 #     tools/bundle_node_test.sh and `--ext`. The cdylib is therefore built before
 #     any of them is measured. `process` is the one that also changes how the
 #     *other* bundles are built: `tools/run_node_tests.sh` exports ZUN_NODE_EXT
 #     whenever it passes --ext, and the bundler inlines src/process/native.ts
 #     only then, because every bundle inlines src/process/process.ts and the
-#     `zun-ts` kinds have no extension to import from.
+#     `zun-ts` kinds have no extension to import from. `module` is the second:
+#     `tools/run_node_tests.sh --module module` exports ZUN_NODE_REQUIRE, under
+#     which the bundler leaves `require` as a run-time function instead of
+#     rewriting it away -- the corpus whose subject is `require` needs that.
+#     Both gates are environment variables set by the runner, so no other
+#     module's bundle changes.
 #
 # zun-node is a submodule of the engine, and its Cargo path dependency on
 # `../crates/zun_abi` assumes it sits inside the engine checkout at
@@ -35,7 +41,7 @@ on:
   workflow_dispatch:
     inputs:
       module:
-        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, stream, diagnostics_channel, console, perf_hooks, v8, tty, readline, domain, process, os, fs, child_process, zlib, dns, crypto, … or "all")
+        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, stream, diagnostics_channel, console, perf_hooks, v8, tty, readline, domain, process, os, fs, child_process, zlib, dns, crypto, module, … or "all")
         default: all
       limit:
         description: Only the first N tests (0 = all)
@@ -93,7 +99,7 @@ jobs:
           ZUN="$PWD/target/debug/zun"
           EXT="$PWD/zun-node/target/debug/libzun_node.so"
           case "$MODULE" in
-            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks v8 tty readline domain process os fs child_process zlib dns crypto";;
+            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks v8 tty readline domain process os fs child_process zlib dns crypto module";;
             *)   MODULES="$MODULE";;
           esac
           test -f "$EXT" || { echo "extension cdylib missing: $EXT" >&2; exit 1; }
