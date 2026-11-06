@@ -317,6 +317,14 @@ const common: any = {
     return ms;
   },
 
+  // Node's `common.getTTYfd()` finds a tty among fds 0/1/2/4/5 and otherwise
+  // opens `/dev/tty`, returning -1 when neither works. This runtime has no tty
+  // facility at all, so -1 is the honest answer and a test that needs a real
+  // TTY takes its own `common.skip` branch.
+  getTTYfd(): number {
+    return -1;
+  },
+
   allowGlobals(): void {},
 
   // `common.hasFipsCrypto` and friends are read as plain flags by a few tests.

@@ -61,6 +61,7 @@ done
 # the human-readable form used in the README block and the results header.
 case "$MODULE" in
   path)   KIND="zun-ts";     PATTERNS="test-path";                        PATTERN="test-path";;
+  util)   KIND="zun-ts";     PATTERNS="test-util";                        PATTERN="test-util";;
   events) KIND="zun-ts";     PATTERNS="test-event-emitter- test-events-"; PATTERN="test-event-emitter-*|test-events-";;
   os)     KIND="zun-ts+ext"; PATTERNS="test-os";                          PATTERN="test-os";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;

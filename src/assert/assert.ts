@@ -40,30 +40,29 @@ class AssertionError extends Error {
   }
 }
 
-// A compact `util.inspect` stand-in, enough for assertion messages.
+// Assertion messages are formatted with `util.inspect`, the way Node's own
+// `assert` formats them (`lib/assert.js` → `inspectValue`): a string comes out
+// single-quoted, a Map as `Map(1) { 'a' => 1 }`, a circular graph as
+// `<ref *1> { self: [Circular *1] }`. `util` is bundled ahead of this module
+// (see tools/bundle_node_test.sh), so `inspect` is the real one — this used to
+// be a hand-rolled stand-in because `util` only carried a slice of it.
+//
+// Node's options here are `{ compact: 3, customInspect: false, depth: 1000,
+// maxArrayLength: Infinity, showHidden: false, breakLength: Infinity, showProxy:
+// false, sorted: true, getters: true, numericSeparator: false }`.
 function __inspect(value: any): string {
-  if (value === null) return "null";
-  if (value === undefined) return "undefined";
-  const kind = typeof value;
-  if (kind === "string") return JSON.stringify(value);
-  if (kind === "number" || kind === "boolean" || kind === "bigint") {
-    return String(value);
-  }
-  if (kind === "function") return "[Function]";
-  if (kind === "symbol") return String(value);
-  if (Array.isArray(value)) {
-    const parts: string[] = [];
-    for (const item of value) parts.push(__inspect(item));
-    return "[ " + parts.join(", ") + " ]";
-  }
-  if (kind === "object") {
-    const keys = Object.keys(value);
-    if (keys.length === 0) return "{}";
-    const parts: string[] = [];
-    for (const key of keys) parts.push(key + ": " + __inspect(value[key]));
-    return "{ " + parts.join(", ") + " }";
-  }
-  return String(value);
+  return inspect(value, {
+    compact: 3,
+    customInspect: false,
+    depth: 1000,
+    maxArrayLength: Infinity,
+    showHidden: false,
+    breakLength: Infinity,
+    showProxy: false,
+    sorted: true,
+    getters: true,
+    numericSeparator: false,
+  });
 }
 
 function __fail(
@@ -138,46 +137,15 @@ function __sameValue(a: any, b: any): boolean {
   return __unboxFn(a) === __unboxFn(b);
 }
 
+// `assert.deepStrictEqual` is `util.isDeepStrictEqual`, which is how Node wires
+// it (`lib/assert.js` calls `isDeepEqual`/`isDeepStrictEqual` out of
+// `internal/util/comparisons`, the module `util.isDeepStrictEqual` also exposes).
+// This module used to carry its own reduced copy — arrays, plain objects and the
+// `-0`/`NaN` rules — which meant `assert.deepStrictEqual(new Map(…), new Map(…))`
+// and `util.isDeepStrictEqual(new Map(…), new Map(…))` could disagree. One
+// implementation, in `util`, is the only arrangement where they cannot.
 function __isDeepStrictEqual(a: any, b: any): boolean {
-  if (__sameValue(a, b)) return true;
-  // -0 / +0 are distinct under deepStrictEqual, NaN equals NaN.
-  const ta = typeof a;
-  const tb = typeof b;
-  if (ta !== tb) return false;
-  if (ta === "number") {
-    if (Number.isNaN(a) && Number.isNaN(b)) return true;
-    return a === b;
-  }
-  if (a === null || b === null) return false;
-  if (ta !== "object") return false;
-  // One side may be a boxed function and the other the bare callable.
-  if (typeof __unboxFn(a) === "function" || typeof __unboxFn(b) === "function") {
-    return __unboxFn(a) === __unboxFn(b);
-  }
-  const aIsArray = Array.isArray(a);
-  const bIsArray = Array.isArray(b);
-  if (aIsArray !== bIsArray) return false;
-  if (aIsArray) {
-    if (Number(a.length) !== Number(b.length)) return false;
-    const n = Number(a.length);
-    for (let i = 0; i < n; i++) {
-      if (!__isDeepStrictEqual(a[i], b[i])) return false;
-    }
-    return true;
-  }
-  const aKeys = Object.keys(a);
-  const bKeys = Object.keys(b);
-  if (Number(aKeys.length) !== Number(bKeys.length)) return false;
-  for (const key of aKeys) {
-    // `Object.prototype.hasOwnProperty.call(b, key)` works again
-    // (https://github.com/UrubuCode/zun/issues/5 is fixed apart from
-    // `Object.hasOwn`, which is still missing); the instance method is kept
-    // because it is the shorter spelling of the same check and `b` is always a
-    // plain object here.
-    if (!b.hasOwnProperty(key)) return false;
-    if (!__isDeepStrictEqual(a[key], b[key])) return false;
-  }
-  return true;
+  return isDeepStrictEqual(a, b);
 }
 
 // Is `error` an instance of `expected`, when `expected` is one of the standard

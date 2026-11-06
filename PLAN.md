@@ -175,7 +175,7 @@ The runner knows all three module kinds:
 - **extension modules** run as `zun run --ext <lib> <test.js>`; `--ext` is
   required for them.
 - **Zun TypeScript modules** are bundled first and run as `zun run <bundle.ts>`,
-  with no `--ext`.
+  with no `--ext`. `util`, `path` and `events` are this kind.
 - **Zun TypeScript over natives** (`zun-ts+ext`) are bundled first *and* need
   `--ext`: `zun run --ext <lib> <bundle.ts>`. `os` is this kind.
 
@@ -192,8 +192,9 @@ appends the one statement that settles the event loop and verifies the
 `common.mustCall` counts.
 
 The `require` convention is generic: **each inlined module exposes exactly one
-object**, named `__node_<module>` (`__node_events`, `__node_assert`, ...), and
-`require('x')` / `require('node:x')` both become that object. One refinement sits
+object**, named `__node_<module>` (`__node_events`, `__node_assert`,
+`__node_util_types`, `__node_internal_util`, ...), and `require('x')` /
+`require('node:x')` both become that object. One refinement sits
 on top: a module that is *already bound* under the name the tests use has that
 whole-line declaration deleted instead (`const path = require('path');`), and for
 `events` the canonical binding is the **class** `EventEmitter` rather than an
@@ -202,6 +203,14 @@ object, because `new <identifier>()` only compiles for a statically known class
 to the class, while the other destructured names come from `__node_events`. An
 unknown module makes the bundle fail with a named diagnostic, so a missing
 harness module is never mistaken for an engine bug.
+
+`node:test` is the one module in the table that is harness code rather than
+library code (`tools/harness/node_test.ts`): it is not a module zun-node
+implements, it is the language several of Node's newer test files are *written
+in*, so without it those files cannot be bundled at all and the public API they
+exercise never gets measured. Its canonical binding is the **function** `test`,
+because Node's files spell both `const test = require('node:test')` — where the
+module object is itself callable — and `const { test } = require('node:test')`.
 
 Exit verification is the harness's other job. The VM drains its unified event
 loop after the main script returns but exposes no "about to exit" hook, so the
@@ -282,7 +291,15 @@ gets deleted; nothing else in the tracker changes.
   `captureRejectionSymbol` is `Symbol.for('nodejs.rejection')`, and the
   EventTarget side tables are `Map`s. The `captureRejections` flag is a declared
   field, which is what keeps
-  [#37](https://github.com/UrubuCode/zun/issues/37) out of the module. **Not done:** `EventEmitterAsyncResource`, which
+  [#37](https://github.com/UrubuCode/zun/issues/37) out of the module. `events.ts`
+  also owns the library's three coded-error bases, and their message assembly is
+  now Node's own: `ERR_INVALID_ARG_TYPE` lowercases the nine primitive type
+  names, says `property` rather than `argument` for a dotted name, splits
+  capitalised names into an "an instance of …" clause and joins lists the way
+  `internal/errors`' `formatList` does; `ERR_INVALID_ARG_VALUE` quotes the name
+  and truncates the inspected value at 128 characters. Every module in the
+  library raises them, so `util.inherits(fn, {})` reports exactly what Node
+  reports. **Not done:** `EventEmitterAsyncResource`, which
   needs `async_hooks` — there is nothing to build it on, so it is absent rather
   than faked.
 - **`node:os`: complete, split across `src/os/` (natives) and
@@ -315,12 +332,50 @@ gets deleted; nothing else in the tracker changes.
   right of an `instanceof`
   ([#17](https://github.com/UrubuCode/zun/issues/17)). 28 crate tests green on
   both platforms (`cargo test`).
-- **`node:util` (harness slice): `src/util/util.ts`.** `inspect` (with
-  `inspect.custom`, `depth`, and the `[Constructor]` form `depth: -1` produces),
-  `format`, `inherits`, `types.isPromise`, `isDeepStrictEqual`. It exists because
-  `events` formats `ERR_UNHANDLED_ERROR` and the MaxListenersExceededWarning with
-  `util.inspect`, and Node's `test-event-emitter-errors.js` reads
-  `util.inspect.custom`. Not the finished module.
+- **`node:util`: complete, in `src/util/util.ts`, measured against the full
+  Node corpus.** The whole Node 25 public surface is there — `format`,
+  `formatWithOptions`, `inspect` with every documented option (`depth`,
+  `colors`, `customInspect`, `showHidden`, `showProxy`, `maxArrayLength`,
+  `maxStringLength`, `breakLength`, `compact`, `sorted`, `getters`,
+  `numericSeparator`, a user `stylize`), `inspect.custom`,
+  `inspect.defaultOptions`, `inspect.colors` (44 styles + Node's twelve
+  aliases), `inspect.styles` **including Node 25's regular-expression depth
+  highlighter**, `stripVTControlCharacters`, `styleText`, `isDeepStrictEqual`
+  (with the v25 `skipPrototype` argument), `inherits`, `deprecate`, `promisify`
+  (+ `promisify.custom`), `callbackify`, `debuglog`/`debug`, `types`,
+  `getSystemErrorName`/`getSystemErrorMessage`/`getSystemErrorMap` over libuv's
+  85-row `UV_ERRNO_MAP` for both platforms, `toUSVString`, `aborted`,
+  `transferableAbortSignal`/`transferableAbortController`, `parseArgs`,
+  `parseEnv`, `MIMEType`/`MIMEParams`, `getCallSites`, `TextEncoder`/
+  `TextDecoder`, and the two deprecated entries v25 still ships (`isArray`,
+  `_extend`). The line-breaking is Node's own
+  `reduceToSingleString`/`isBelowBreakLength`/`groupArrayElements` plus its
+  2²⁷-character output budget, so `inspect` of a ten-element numeric array
+  really does come out as Node's two right-aligned columns.
+  **`util` was taken before `stream`** because `stream` cannot be written
+  without it (`inspect`, `promisify`, `deprecate`, `debuglog`, `types` are all
+  load-bearing in `lib/internal/streams/*`) and because nearly every test file
+  in every corpus reads through it: `assert` now formats its messages with
+  `util.inspect` and compares with `util.isDeepStrictEqual`, the way Node's
+  `assert` does, instead of carrying reduced copies that could disagree with it.
+  `lib/internal/util.js`'s own surface (`sleep`, `emitExperimentalWarning`,
+  `pendingDeprecate`, `customPromisifyArgs`) is implemented in the same file,
+  because in Node it *is* the same module. **Every remaining test failure is
+  outside this module**: fourteen need a harness module that does not exist
+  (`vm`, `v8`, `worker_threads`, `url`, `node:fs`, `child_process`,
+  `internal/test/binding`, `internal/errors`), and five are engine gaps — four
+  of them new (typed arrays/`ArrayBuffer` opaque through `any`, a symbol's
+  `description` panicking there, `Object.keys = fn` panicking, and a regex
+  literal with a duplicate named capture group being rejected although ES2025
+  and Node 25 accept it). The table is in `test/util/README.md`. **Documented
+  capability gaps**, not omissions: `types.isProxy` and `showProxy` need a host
+  hook; a promise's settled value is unreadable, so `inspect` prints
+  `Promise { <pending> }`; every typed-array/boxed-primitive predicate answers
+  `false`; `getters: true` cannot find an accessor because accessors are not
+  reflectable; a function declaration inspects as `[Function (anonymous)]`
+  because `fn.name` is unavailable
+  ([#25](https://github.com/UrubuCode/zun/issues/25)) — a class correctly
+  inspects as `[class Foo]`.
 - **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
   `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
   `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,

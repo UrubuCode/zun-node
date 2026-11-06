@@ -30,9 +30,22 @@
 #     name `EventEmitter` bound to that class; only the *other* destructured
 #     names are taken from `__node_events`.
 #
-# Anything else (`internal/event_target`, `node:test`, ...) is reported as an
-# unresolved module and the bundle fails, so a missing harness module is never
-# mistaken for an engine bug.
+#   * `util/types` is the *same object* as `util.types`, and `internal/util` is
+#     `util`'s own implementation surface (`sleep`, `emitExperimentalWarning`,
+#     `pendingDeprecate`, `customPromisifyArgs`), which lives in
+#     `src/util/util.ts` for the same reason it lives in `lib/internal/util.js`
+#     in Node: it is the same module.
+#   * `test` is the other canonical-binding case, and the only entry that is
+#     *harness* code rather than library code: `node:test` is not a module
+#     zun-node implements, it is the language several of Node's newer test files
+#     are written in (`tools/harness/node_test.ts`). Its binding is the function
+#     `test`, because those files spell both `const test = require('node:test')`
+#     — where the module object is itself callable — and
+#     `const { test } = require('node:test')`.
+#
+# Anything else (`internal/event_target`, `vm`, `v8`, `worker_threads`, ...) is
+# reported as an unresolved module and the bundle fails, so a missing harness
+# module is never mistaken for an engine bug.
 #
 # CommonJS also provides `__filename` and `__dirname`; they are injected as the
 # test's own location (override the file name with ZUN_NODE_TEST_FILENAME, used
@@ -61,7 +74,10 @@ json_string() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"
 #
 # A canonical binding of `-` means the module is only reachable through its
 # object. The order is the bundle order, which is also the dependency order:
-# util has no dependencies, events formats its messages with util.inspect,
+# util has no dependencies of its own (it raises events' `ERR_*` classes and
+# calls `process.emitWarning`, but top-level declarations resolve across the
+# whole program, so bundle order does not constrain that), events formats its
+# messages with util.inspect,
 # process is an EventEmitter over events, assert and path stand on process, os
 # stands on events (for its ERR_* classes) and process (for `env`, which
 # `os.tmpdir()` reads), and the harness stands on all of them.
@@ -74,6 +90,8 @@ json_string() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"
 # ---------------------------------------------------------------------------
 MODULE_SPECS="
 util __node_util -
+util/types __node_util_types -
+internal/util __node_internal_util -
 events __node_events EventEmitter
 process __node_process process
 assert __node_assert assert
@@ -82,6 +100,8 @@ os __node_os os
 child_process __node_child_process -
 domain __node_domain -
 stream __node_stream -
+test __node_test test
+tty __node_tty -
 "
 
 # The modules inlined into every bundle, in dependency order.
@@ -108,6 +128,7 @@ os src/os/os.ts
 # The harness, which stands on everything above it.
 HARNESS_FILES="
 tools/harness/common.ts
+tools/harness/node_test.ts
 "
 
 obj_of() { printf '%s\n' "$MODULE_SPECS" | awk -v m="$1" '$1 == m { print $2 }'; }

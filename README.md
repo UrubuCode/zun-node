@@ -28,10 +28,11 @@ A Node module lands here in whichever form fits what it actually does:
 
 Support slices exist to run Node's own tests, and are Zun TypeScript for the
 same reason: `src/assert/assert.ts` (the strict-mode `assert` surface the tests
-assert with), `src/process/process.ts` (`cwd()`, `env`, `platform`, and — because
-Node's `process` is an EventEmitter — `on`/`emit`/`nextTick`/`emitWarning`), and
-`src/util/util.ts` (`inspect`, which `events` formats its error and warning
-messages with).
+assert with) and `src/process/process.ts` (`cwd()`, `env`, `platform`, and —
+because Node's `process` is an EventEmitter —
+`on`/`emit`/`nextTick`/`emitWarning`). `src/util/util.ts` used to be one of them;
+it is now a module in its own right, and `assert` stands on it rather than
+carrying its own copy of `inspect` and `deepStrictEqual`.
 
 ## Compatibility
 
@@ -43,7 +44,7 @@ runs each through the Zun engine
 passes. The percentages below are that measurement — they climb as the library
 grows.
 
-The `path`, `events` and `os` numbers below were last regenerated on **Windows**
+The `util`, `path`, `events` and `os` numbers below were last regenerated on **Windows**
 (the CI workflow runs on `ubuntu-latest`). One test differs between the two:
 `test-os-process-priority.js` passes on Linux and fails on Windows
 ([zun#34](https://github.com/UrubuCode/zun/issues/34)), while
@@ -57,12 +58,12 @@ Because the engine has no CommonJS `require` or module resolution
 ([zun#4](https://github.com/UrubuCode/zun/issues/4)), a Zun TypeScript module's
 tests are first passed through
 [`tools/bundle_node_test.sh`](tools/bundle_node_test.sh), which inlines the
-util/events/process/assert/path/common modules ahead of the test body, rewrites
-its `require` lines to the one object each inlined module exposes
-(`__node_events`, `__node_assert`, …), and appends the statement that settles the
-event loop and verifies the `common.mustCall` counts; the resulting single file
-runs as `zun run <bundle.ts>`. Extension modules keep the direct
-`zun run --ext <lib> <test.js>` path.
+util/events/process/assert/path modules and the `common`/`node:test` harness
+ahead of the test body, rewrites its `require` lines to the one object each
+inlined module exposes (`__node_events`, `__node_assert`, …), and appends the
+statement that settles the event loop and verifies the `common.mustCall` counts;
+the resulting single file runs as `zun run <bundle.ts>`. Extension modules keep
+the direct `zun run --ext <lib> <test.js>` path.
 
 <!-- node-fs:start -->
 ### Node.js v25 `fs` compatibility
@@ -75,6 +76,35 @@ runs as `zun run <bundle.ts>`. Extension modules keep the direct
 > descriptors, callbacks and promises, a full `Stats`), `node:test`, and the
 > `test/fixtures/` tree. Those are the next work; this number is how we watch it
 > land. Per-test breakdown: [`test/fs/RESULTS.md`](test/fs/RESULTS.md).
+
+<!-- node-util:start -->
+### Node.js v25 `util` compatibility
+
+`██████░░░░░░░░░░░░░░░░░░` **26.9%** — 7 / 26 Node `test-util*` tests passing
+<!-- node-util:end -->
+
+> `util` is implemented end to end — `inspect` with every option Node documents
+> (including the Node 25 regular-expression depth highlighter and the
+> `compact`/`breakLength` line-breaking algorithm), `format`/`formatWithOptions`,
+> `isDeepStrictEqual`, `promisify`, `callbackify`, `deprecate`, `debuglog`,
+> `types`, `styleText`, `stripVTControlCharacters`, `parseArgs`, `parseEnv`,
+> `MIMEType`, the `getSystemError*` trio over libuv's 85-row table, and the abort
+> helpers. It was taken before `stream` because `stream` cannot be written
+> without it, and because `assert` now formats its messages with `util.inspect`
+> and compares with `util.isDeepStrictEqual`, the way Node's `assert` does.
+> **No remaining failure is in `util.ts`**: eleven of the nineteen need a
+> harness module that does not exist (`vm`, `v8`, `worker_threads`, `url`,
+> `node:fs`, `child_process`, `internal/test/binding`, `internal/errors`), and
+> the other eight are engine gaps — four of them found by this work: typed arrays
+> and `ArrayBuffer` are completely opaque through an `any` lane, a symbol's
+> `description` panics the interpreter there, assigning to a built-in namespace
+> member (`Object.keys = fn`) panics, and a regex literal with a duplicate named
+> capture group is rejected although ES2025 and Node 25 accept it — that last one
+> is the *only* thing standing between
+> `test-util-inspect-regexp.js` and a pass, since all ~100 of its colour
+> expectations match byte for byte without it. The blocker-by-blocker table is in
+> [`test/util/README.md`](test/util/README.md), the per-test breakdown in
+> [`test/util/RESULTS.md`](test/util/RESULTS.md).
 
 <!-- node-path:start -->
 ### Node.js v25 `path` compatibility

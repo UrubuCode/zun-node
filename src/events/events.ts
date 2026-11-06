@@ -264,29 +264,121 @@ class NodeError extends Error {
   }
 }
 
+// `lib/internal/errors.js`' `formatList(array, 'or')`.
+function __evFormatList(items: string[], conjunction: string): string {
+  const n = Number(items.length);
+  if (n === 0) return "";
+  if (n === 1) return items[0];
+  if (n === 2) return items[0] + " " + conjunction + " " + items[1];
+  if (n === 3) {
+    return items[0] + ", " + items[1] + ", " + conjunction + " " + items[2];
+  }
+  return items.slice(0, n - 1).join(", ") + ", " + conjunction + " " + items[n - 1];
+}
+
+// The nine type names `internal/errors` treats as *types* rather than classes;
+// each is lowercased in the message, which is why `validateFunction`'s
+// `'Function'` reads back as "of type function".
+const __EV_KTYPES: string[] = [
+  "string", "function", "number", "object",
+  "Function", "Object", "boolean", "bigint", "symbol",
+];
+
+function __evIsKType(value: string): boolean {
+  for (const known of __EV_KTYPES) {
+    if (known === value) return true;
+  }
+  return false;
+}
+
+// `ERR_INVALID_ARG_TYPE`'s message, assembled exactly as `internal/errors` does
+// it: `"name"` becomes `property` rather than `argument` when it contains a dot,
+// a name already ending in ` argument` is used verbatim, the nine primitive type
+// names are lowercased into an "of type …" clause, a capitalised name becomes an
+// "an instance of …" clause, and anything else is emitted as written (with an
+// `an ` prefix when it is not all lower case). Node decides the
+// instance-versus-other split with a regular expression over the *stringified
+// class*; the first-character test is the same decision for every type name the
+// library actually passes, and it keeps the classification out of the regex
+// engine.
 class ERR_INVALID_ARG_TYPE extends NodeTypeError {
   constructor(name: string, expected: any, actual: any) {
-    super(
-      "ERR_INVALID_ARG_TYPE",
-      'The "' +
-        name +
-        '" argument must be ' +
-        (Array.isArray(expected)
-          ? "one of type " + (expected as any[]).join(", ")
-          : "of type " + String(expected)) +
-        "." +
-        __evReceived(actual),
-    );
+    super("ERR_INVALID_ARG_TYPE", __evInvalidArgTypeMessage(name, expected, actual));
   }
 }
 
+function __evInvalidArgTypeMessage(name: string, expected: any, actual: any): string {
+  const wanted: any[] = Array.isArray(expected) ? expected : [expected];
+  let msg = "The ";
+  const suffix = " argument";
+  if (
+    Number(name.length) > Number(suffix.length) &&
+    name.slice(Number(name.length) - Number(suffix.length)) === suffix
+  ) {
+    msg = msg + name + " ";
+  } else {
+    msg = msg + '"' + name + '" ' + (Number(name.indexOf(".")) !== -1 ? "property" : "argument") + " ";
+  }
+  msg = msg + "must be ";
+
+  const types: string[] = [];
+  const instances: string[] = [];
+  const other: string[] = [];
+  for (const entry of wanted) {
+    const value = String(entry);
+    if (__evIsKType(value)) {
+      types.push(value.toLowerCase());
+    } else if (value !== "" && value.charAt(0) >= "A" && value.charAt(0) <= "Z") {
+      instances.push(value);
+    } else {
+      other.push(value);
+    }
+  }
+  // `object` is folded into the instance list when real classes are also
+  // allowed, so the message distinguishes them.
+  if (Number(instances.length) > 0) {
+    const pos = Number(types.indexOf("object"));
+    if (pos !== -1) {
+      // `splice`'s start index is only accepted through an `any`-typed array
+      // receiver: on a typed one the checker demands an integer literal.
+      const mutable: any = types;
+      mutable.splice(pos, 1);
+      instances.push("Object");
+    }
+  }
+
+  if (Number(types.length) > 0) {
+    msg = msg + (Number(types.length) > 1 ? "one of type " : "of type ") + __evFormatList(types, "or");
+    if (Number(instances.length) > 0 || Number(other.length) > 0) msg = msg + " or ";
+  }
+  if (Number(instances.length) > 0) {
+    msg = msg + "an instance of " + __evFormatList(instances, "or");
+    if (Number(other.length) > 0) msg = msg + " or ";
+  }
+  if (Number(other.length) > 0) {
+    if (Number(other.length) > 1) {
+      msg = msg + "one of " + __evFormatList(other, "or");
+    } else {
+      if (other[0].toLowerCase() !== other[0]) msg = msg + "an ";
+      msg = msg + other[0];
+    }
+  }
+  return msg + "." + __evReceived(actual);
+}
+
+// `The ${argument|property} '${name}' ${reason}. Received ${inspect(value)}`,
+// with the inspected value truncated at 128 characters, as in `internal/errors`.
 class ERR_INVALID_ARG_VALUE extends NodeTypeError {
   constructor(name: string, value: any, reason: string) {
-    super(
-      "ERR_INVALID_ARG_VALUE",
-      "The " + name + " argument " + reason + ". Received " + __evInspect(value),
-    );
+    super("ERR_INVALID_ARG_VALUE", __evInvalidArgValueMessage(name, value, reason));
   }
+}
+
+function __evInvalidArgValueMessage(name: string, value: any, reason: string): string {
+  let inspected = __evInspect(value);
+  if (Number(inspected.length) > 128) inspected = inspected.slice(0, 128) + "...";
+  const kind = Number(name.indexOf(".")) !== -1 ? "property" : "argument";
+  return "The " + kind + " '" + name + "' " + reason + ". Received " + inspected;
 }
 
 class ERR_OUT_OF_RANGE extends NodeRangeError {
