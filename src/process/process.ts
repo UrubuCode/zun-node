@@ -242,6 +242,11 @@ const process: any = {
   arch: "x64",
   version: "v25.0.0",
   versions: { node: "25.0.0" },
+  // A placeholder: `zun:core` reports no pid, and this module must keep
+  // compiling with no extension loaded (the `path` and `events` bundles run
+  // without `--ext`). `src/os/os.ts` overwrites it with the real pid from its
+  // own native whenever `os` is in the bundle, and the field moves here the
+  // moment `process` has a native of its own.
   pid: 1,
   exitCode: undefined,
   cwd(): string {

@@ -1,0 +1,7 @@
+test-os.js
+test-os-checked-function.js
+test-os-eol.js
+test-os-fast.js
+test-os-homedir-no-envvar.js
+test-os-process-priority.js
+test-os-userinfo-handles-getter-errors.js

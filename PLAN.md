@@ -36,6 +36,15 @@ that apply to it.**
      compiled by the platform. Crossing the ABI would buy nothing and would cost
      a marshalling convention. `path` is this kind (`src/path/path.ts`): it is
      string manipulation end to end.
+   - A module that is **both** draws the seam where the capability changes:
+     **TypeScript over natives**. `os` is this kind, and most Node modules are:
+     only a handful of its entry points touch the kernel, while everything a
+     caller actually sees — the objects, the arrays, `constants`, the argument
+     validation, the `ERR_*` errors — is shape. Putting the shape behind the ABI
+     would mean marshalling it; putting the syscalls in TypeScript is impossible.
+     So the extension answers only the facts, and `src/os/os.ts` builds Node's
+     module on top, reaching them with `import * as native from "node:os"`. See
+     *TS over natives* under Architecture.
 3. **No module graph beyond the engine.** Implement the maximum API that does not
    require a third-party package or the signed module registry. Self-contained.
 4. **Dependency rule.** If a module needs a capability another unfinished module
@@ -49,6 +58,8 @@ that apply to it.**
 
 ```
 src/fs/      ──[cdylib, zun_register_v1]──▶ zun_abi ◀──[loads + invokes]── Zun host
+src/os/*.rs  ──[same cdylib]─────────────────▶ zun_abi ◀────┐ (facts: syscalls)
+src/os/os.ts ──[compiled by the Zun compiler]───────────────┘ (shape: TS over natives)
 src/path/    ──[path.ts]──────────────────▶ compiled by the Zun compiler, run by the VM
 src/events/  ──[events.ts]────────────────▶ same route
 src/util/    ──[util.ts]─────────────────┐  harness slices (principle 4), same route
@@ -58,7 +69,45 @@ src/process/ ──[process.ts, zun:core]────┘
 
 Bundle order is dependency order: `util` (no dependencies) → `events`
 (`util.inspect` for its messages) → `process` (an `EventEmitter`) → `assert` →
-`path` → `tools/harness/common.ts`.
+`path` → `os` (the `ERR_*` classes from `events`, `process.env` for `tmpdir()`)
+→ `tools/harness/common.ts`.
+
+### TS over natives (the `os` pattern, and the one `fs` will take)
+
+`os` is the first module written as **Zun TypeScript on top of extension
+natives**, and the split is deliberate rather than incidental:
+
+- **The extension answers only what needs the kernel.** `src/os/{facts,stats,net,user}.rs`
+  are thin ABI wrappers over `src/os/sys/{unix,windows}.rs`, which is where the
+  syscalls live. Each one documents the libuv entry point Node calls and follows
+  it where the result is observable.
+- **The TypeScript is the module.** `src/os/os.ts` holds every object and array
+  shape, the per-platform `constants` tables, `EOL`/`devNull` with Node's own
+  property attributes, `validateInt32`, `ERR_SYSTEM_ERROR`, the `tmpdir()`
+  environment rules and the CIDR arithmetic. None of that is a syscall, and all
+  of it would need a marshalling convention if it lived behind the ABI.
+- **Structured results cross as one string.** ABI v1's carrier is a single
+  scalar word, so a CPU table or an interface list cannot cross as a structure.
+  `os` fixes the convention: `"+"` then records separated by U+001E, fields by
+  U+001F; `"-"` means the call failed and the four error slots describe it. The
+  separators are C0 controls, so no payload can contain one, and no quoting or
+  escaping rule exists for the two sides to disagree about. One call captures a
+  whole table, so its rows are a coherent snapshot rather than a sample smeared
+  across one call per field — which matters for CPU times, that move while they
+  are read. The grammar is documented in `src/lib.rs` and `src/os/mod.rs`.
+- **Failure is reported in band, not as a status.** The ABI has an error status,
+  but an exception thrown out of an extension call escapes an enclosing
+  `try`/`catch` in the host today, so a status-based failure could never become
+  a catchable `ERR_SYSTEM_ERROR`. The natives therefore always return
+  successfully and say `"-"`, and the TypeScript raises Node's `SystemError`
+  from the slots — `errorSyscall`, `errorCode`, `errorErrno`, `errorMessage`.
+- **Keys are unique across modules.** Those four readers are `node:fs`'s
+  `lastError*` functions under different names, because the checker rejects a
+  program as soon as a single function *name* is registered by two modules,
+  even when every use site is a namespace member access naming its module.
+
+The tracker knows this as a third module kind, `zun-ts+ext`: bundle the test
+like a TypeScript module, then run the bundle with `--ext`.
 
 - **`src/lib.rs`** — `zun_register_v1`, the ABI carrier helpers (`abi` module), the
   shared `Descriptor` type, and shared error retrieval. Extension modules only.
@@ -110,12 +159,14 @@ with the first line of stderr recorded for every failure. A test passes when the
 `zun run` invocation exits 0. Tests are downloaded into `<work>/test/parallel/`,
 because several of them assert their own location through `__dirname`.
 
-The runner knows both module kinds:
+The runner knows all three module kinds:
 
 - **extension modules** run as `zun run --ext <lib> <test.js>`; `--ext` is
   required for them.
 - **Zun TypeScript modules** are bundled first and run as `zun run <bundle.ts>`,
   with no `--ext`.
+- **Zun TypeScript over natives** (`zun-ts+ext`) are bundled first *and* need
+  `--ext`: `zun run --ext <lib> <bundle.ts>`. `os` is this kind.
 
 ### The test bundler
 
@@ -208,6 +259,31 @@ gets deleted; nothing else in the tracker changes.
   bases, `internal/` modules). **Not done:** `EventEmitterAsyncResource`, which
   needs `async_hooks` — there is nothing to build it on, so it is absent rather
   than faked.
+- **`node:os`: complete, split across `src/os/` (natives) and
+  `src/os/os.ts` (the module).** Every documented entry point is there —
+  `arch`, `availableParallelism`, `cpus`, `endianness`, `freemem`,
+  `getPriority`, `homedir`, `hostname`, `loadavg`, `machine`,
+  `networkInterfaces`, `platform`, `release`, `setPriority`, `tmpdir`,
+  `totalmem`, `type`, `uptime`, `userInfo`, `version`, plus `EOL`, `devNull`
+  and `constants` (`signals`, `errno`, `priority`, `dlopen`,
+  `UV_UDP_REUSEADDR`) with the per-platform values Node reports, the
+  `validateInt32` errors (`ERR_INVALID_ARG_TYPE`, `ERR_OUT_OF_RANGE`) and
+  `ERR_SYSTEM_ERROR` with Node's `SystemError` name, `errno`, `syscall` and
+  `info`. **Windows and Linux are both implemented** from libuv's own behavior:
+  `/proc` plus `getifaddrs`/`getpwuid_r`/`getpriority` on Linux;
+  `GetAdaptersAddresses`, `NtQuerySystemInformation`, `GlobalMemoryStatusEx`,
+  the `CentralProcessor` registry keys and the priority-class mapping on
+  Windows. A differential run against Node over 140 values — every string fact,
+  the whole `constants` table, every CPU row, every interface entry with its
+  CIDR and scope id, `userInfo()` in both encodings, all eight validation
+  messages, and every `tmpdir()` environment rule — shows **zero divergences on
+  both platforms**. **Not done, by capability:**
+  `userInfo({ encoding: 'buffer' })` returns a documented byte view rather than
+  a `Buffer`, because `node:buffer` does not exist yet; one function changes
+  when it does. The remaining test failures are all outside this module
+  (`internal/test/binding`, `node:child_process`, a callable `assert`, a
+  constructor used as a value) — the table is in `test/os/README.md`. 28 crate
+  tests green on both platforms (`cargo test`).
 - **`node:util` (harness slice): `src/util/util.ts`.** `inspect` (with
   `inspect.custom`, `depth`, and the `[Constructor]` form `depth: -1` produces),
   `format`, `inherits`, `types.isPromise`, `isDeepStrictEqual`. It exists because
@@ -231,15 +307,26 @@ gets deleted; nothing else in the tracker changes.
 
 ### Module keys and host dispatch
 
-The native surface is registered under `node:fs`, so that import specifier
-resolves. The engine already dispatches external module calls at runtime through
+The native surface is registered under `node:fs` and `node:os`, so those import
+specifiers resolve. The engine already dispatches external module calls at runtime through
 `CallHook::try_call_external(module, name, args)` (with string marshalling), and
 loads native extensions through `zun_abi` — **no `zun:core` core change is needed**.
 Wiring is a matter of loading this extension and routing `node:fs` external calls
 to its registered functions, in the engine's existing format.
 
-Until that routing is exercised from a user program, `cargo test` here is the
-verification path for the native side (it drives the real `zun_abi` registration +
-checked-invocation path). The Zun TypeScript modules need no such routing: they
-are compiled into the program, which is exactly why `path` is already measurable
-against Node's suite while `fs` is not.
+**That routing is now exercised end to end**, by `os`: a program that writes
+`import * as native from "node:os"` and calls `native.hostname()` reaches this
+crate's descriptor through the existing path — `zun run --ext` →
+`zun_compiler::external_functions_all` (which derives the compiler's external
+declarations from what the extension registered, so the toolchain hardcodes
+nothing) → the checker's namespace-import resolution →
+`CallHook::try_call_external` at run time. No `zun:core` change was needed, as
+predicted. Two limits surfaced in the process and are documented at their use
+sites in `src/os/mod.rs`: a function *name* may be registered by only one
+module, and an error thrown out of an extension call is not catchable.
+
+`cargo test` here remains the verification path for a native that no program
+calls yet (it drives the real `zun_abi` registration + checked-invocation path).
+The Zun TypeScript modules need no routing at all: they are compiled into the
+program, which is why `path` was measurable against Node's suite before any of
+this existed.

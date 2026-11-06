@@ -19,6 +19,13 @@
 #     inlines the process/assert/path/common shims and rewrites the test's
 #     `require` lines; the bundle then runs as `zun run <bundle.ts>`, with no
 #     `--ext`.
+#   * Zun-TypeScript-over-natives modules (`os`) are **both**: the Node-shaped
+#     API is TypeScript (`src/os/os.ts`) but the facts under it are syscalls in
+#     the cdylib, which the TypeScript reaches with
+#     `import * as native from "node:os"`. Their tests are bundled like a
+#     `zun-ts` module and then run as `zun run --ext <lib> <bundle.ts>`, so
+#     `--ext` is required for them too. This is the kind `fs` will become once
+#     its Node-API shaping is written in TypeScript over the existing natives.
 #
 # Tests are downloaded into `$WORK/test/parallel/<name>` because several of them
 # assert their own location through `__dirname`.
@@ -53,16 +60,25 @@ done
 # module statics). PATTERNS is therefore a space-separated list, and PATTERN is
 # the human-readable form used in the README block and the results header.
 case "$MODULE" in
-  path)   KIND="zun-ts";    PATTERNS="test-path";                        PATTERN="test-path";;
-  events) KIND="zun-ts";    PATTERNS="test-event-emitter- test-events-"; PATTERN="test-event-emitter-*|test-events-";;
-  *)      KIND="extension"; PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
+  path)   KIND="zun-ts";     PATTERNS="test-path";                        PATTERN="test-path";;
+  events) KIND="zun-ts";     PATTERNS="test-event-emitter- test-events-"; PATTERN="test-event-emitter-*|test-events-";;
+  os)     KIND="zun-ts+ext"; PATTERNS="test-os";                          PATTERN="test-os";;
+  *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 
-[ -n "$ZUN" ] || { echo "usage: --zun <path> [--ext <lib>] [--module fs|path|events]" >&2; exit 2; }
-if [ "$KIND" = "extension" ] && [ -z "$EXT" ]; then
-  echo "module '$MODULE' is a zun_abi extension: --ext <lib> is required" >&2
-  exit 2
-fi
+[ -n "$ZUN" ] || { echo "usage: --zun <path> [--ext <lib>] [--module fs|path|events|os]" >&2; exit 2; }
+case "$KIND" in
+  extension)
+    if [ -z "$EXT" ]; then
+      echo "module '$MODULE' is a zun_abi extension: --ext <lib> is required" >&2
+      exit 2
+    fi;;
+  zun-ts+ext)
+    if [ -z "$EXT" ]; then
+      echo "module '$MODULE' is Zun TypeScript over a native extension: --ext <lib> is required" >&2
+      exit 2
+    fi;;
+esac
 
 LIST="$ROOT/test/$MODULE/NODE_TESTS.txt"
 RESULTS="$ROOT/test/$MODULE/RESULTS.md"
@@ -120,17 +136,24 @@ for name in "${NAMES[@]}"; do
     continue
   fi
 
-  if [ "$KIND" = "zun-ts" ]; then
-    bundle="$WORK/bundles/${name%.*}.ts"
-    if ! bundle_err="$(bash "$BUNDLER" "$src" "$bundle" 2>&1 >/dev/null)"; then
-      ROWS+="| \`$name\` | ❌ bundle failed | $(note_of "$bundle_err") |"$'\n'
-      echo "[$i/$TOTAL] $name: bundle failed" >&2
-      continue
-    fi
-    err="$(runner "$ZUN" run "$bundle" 2>&1 >/dev/null)"; code=$?
-  else
-    err="$(runner "$ZUN" run --ext "$EXT" "$src" 2>&1 >/dev/null)"; code=$?
-  fi
+  case "$KIND" in
+    zun-ts|zun-ts+ext)
+      bundle="$WORK/bundles/${name%.*}.ts"
+      if ! bundle_err="$(bash "$BUNDLER" "$src" "$bundle" 2>&1 >/dev/null)"; then
+        ROWS+="| \`$name\` | ❌ bundle failed | $(note_of "$bundle_err") |"$'\n'
+        echo "[$i/$TOTAL] $name: bundle failed" >&2
+        continue
+      fi
+      # A `zun-ts+ext` module is TypeScript whose own facts are syscalls in the
+      # extension, so its bundle needs the bundler *and* --ext.
+      if [ "$KIND" = "zun-ts+ext" ]; then
+        err="$(runner "$ZUN" run --ext "$EXT" "$bundle" 2>&1 >/dev/null)"; code=$?
+      else
+        err="$(runner "$ZUN" run "$bundle" 2>&1 >/dev/null)"; code=$?
+      fi;;
+    *)
+      err="$(runner "$ZUN" run --ext "$EXT" "$src" 2>&1 >/dev/null)"; code=$?;;
+  esac
 
   if [ "$code" -eq 0 ]; then
     PASS=$((PASS + 1)); short="pass"
@@ -168,8 +191,9 @@ read -r -d '' BLOCK <<EOF
 EOF
 
 case "$KIND" in
-  zun-ts) HOW="\`tools/bundle_node_test.sh\` + \`zun run <bundle.ts>\`";;
-  *)      HOW="\`zun run --ext <lib> <test.js>\`";;
+  zun-ts)     HOW="\`tools/bundle_node_test.sh\` + \`zun run <bundle.ts>\`";;
+  zun-ts+ext) HOW="\`tools/bundle_node_test.sh\` + \`zun run --ext <lib> <bundle.ts>\`";;
+  *)          HOW="\`zun run --ext <lib> <test.js>\`";;
 esac
 
 mkdir -p "$(dirname "$RESULTS")"

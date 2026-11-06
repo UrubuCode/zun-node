@@ -6,12 +6,15 @@
 # test/<module>/RESULTS.md. The tests are never vendored — they are fetched at
 # run time by tools/run_node_tests.sh.
 #
-# Both module kinds are measured (see ../../PLAN.md):
+# All three module kinds are measured (see ../../PLAN.md):
 #   * `path` and `events` are Zun TypeScript, so they need only the `zun`
 #     binary: each test is bundled by tools/bundle_node_test.sh and run as
 #     `zun run <bundle.ts>`, with no --ext.
 #   * `fs` is a Rust zun_abi cdylib, so it also needs this repo built and is run
 #     as `zun run --ext <lib> <test.js>`.
+#   * `os` is Zun TypeScript *over* that cdylib, so it needs both: the bundle
+#     from tools/bundle_node_test.sh and `--ext`. The cdylib is therefore built
+#     before `os` is measured, not only before `fs`.
 #
 # zun-node is a submodule of the engine, and its Cargo path dependency on
 # `../crates/zun_abi` assumes it sits inside the engine checkout at
@@ -23,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       module:
-        description: Node module to measure (path, events, fs, … or "all")
+        description: Node module to measure (path, events, os, fs, … or "all")
         default: all
       limit:
         description: Only the first N tests (0 = all)
@@ -62,9 +65,15 @@ jobs:
         working-directory: engine
         run: cargo build -p zun_cli
 
+      # The cdylib must exist before `os` (and `fs`) are measured: `os`'s
+      # bundle resolves `import * as native from "node:os"` through it.
       - name: Build the zun-node extension
         working-directory: engine/zun-node
         run: cargo build
+
+      - name: Test the zun-node extension
+        working-directory: engine/zun-node
+        run: cargo test
 
       - name: Run the Node test tracker
         working-directory: engine
@@ -75,11 +84,14 @@ jobs:
           ZUN="$PWD/target/debug/zun"
           EXT="$PWD/zun-node/target/debug/libzun_node.so"
           case "$MODULE" in
-            all) MODULES="path events fs";;
+            all) MODULES="path events os fs";;
             *)   MODULES="$MODULE";;
           esac
+          test -f "$EXT" || { echo "extension cdylib missing: $EXT" >&2; exit 1; }
           for m in $MODULES; do
-            # A Zun TypeScript module takes no --ext; an extension module does.
+            # A pure Zun TypeScript module takes no --ext. An extension module
+            # needs it, and so does a TypeScript-over-natives module (`os`),
+            # whose bundle calls into the cdylib.
             case "$m" in
               path|events) EXT_ARGS="";;
               *)           EXT_ARGS="--ext $EXT";;

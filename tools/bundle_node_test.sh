@@ -62,8 +62,15 @@ json_string() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"
 # A canonical binding of `-` means the module is only reachable through its
 # object. The order is the bundle order, which is also the dependency order:
 # util has no dependencies, events formats its messages with util.inspect,
-# process is an EventEmitter over events, assert and path stand on process, and
-# the harness stands on all of them.
+# process is an EventEmitter over events, assert and path stand on process, os
+# stands on events (for its ERR_* classes) and process (for `env`, which
+# `os.tmpdir()` reads), and the harness stands on all of them.
+#
+# `os` is the first module whose bundle also needs `--ext`: the Node-shaped API
+# is this TypeScript file, but the facts underneath it are syscalls in the
+# `node:os` extension, which `src/os/os.ts` reaches with
+# `import * as __osNative from "node:os"`. The bundle is therefore run as
+# `zun run --ext <lib> <bundle.ts>`; see tools/run_node_tests.sh's `zun-ts+ext`.
 # ---------------------------------------------------------------------------
 MODULE_SPECS="
 util __node_util -
@@ -71,22 +78,62 @@ events __node_events EventEmitter
 process __node_process process
 assert __node_assert assert
 path __node_path path
+os __node_os os
 child_process __node_child_process -
 domain __node_domain -
 stream __node_stream -
 "
 
+# The modules inlined into every bundle, in dependency order.
 BUNDLE_FILES="
 src/util/util.ts
 src/events/events.ts
 src/process/process.ts
 src/assert/assert.ts
 src/path/path.ts
+"
+
+# Modules inlined **only when the test actually requires them**, because their
+# source calls into the native extension and so makes the bundle need `--ext`.
+# Inlining `os` unconditionally would make every `path` and `events` bundle fail
+# to compile without a cdylib, which is exactly the coupling PLAN.md's principle
+# 2 keeps out of a pure-computation module.
+#
+# One line per module: `<specifier> <file>`. The files are appended in this
+# order, after BUNDLE_FILES and before the harness.
+CONDITIONAL_FILES="
+os src/os/os.ts
+"
+
+# The harness, which stands on everything above it.
+HARNESS_FILES="
 tools/harness/common.ts
 "
 
 obj_of() { printf '%s\n' "$MODULE_SPECS" | awk -v m="$1" '$1 == m { print $2 }'; }
 canon_of() { printf '%s\n' "$MODULE_SPECS" | awk -v m="$1" '$1 == m { print $3 }'; }
+
+# Does the test require `<module>` (bare or `node:`-prefixed)? Single quotes
+# only, which is exactly what the rewriting rules above match — if that ever
+# grows, this grows with it, and until then a double-quoted require fails the
+# unresolved-require check at the end rather than silently losing a module.
+requires_module() {
+  grep -Eq "require\('(node:)?$1'\)" "$SRC"
+}
+
+# The final file list: the always-inlined modules, then the extension-backed
+# ones this test actually requires, then the harness.
+FILES="$BUNDLE_FILES"
+while read -r name file; do
+  [ -n "${name:-}" ] || continue
+  if requires_module "$name"; then
+    FILES="$FILES$file
+"
+  fi
+done <<EOF_CONDITIONAL
+$CONDITIONAL_FILES
+EOF_CONDITIONAL
+FILES="$FILES$HARNESS_FILES"
 
 # ---------------------------------------------------------------------------
 # Build the sed program that rewrites the test body.
@@ -155,7 +202,7 @@ trap 'rm -f "$REWRITE"' EXIT
 # ---------------------------------------------------------------------------
 {
   echo "// ==== zun-node bundle of $(basename "$SRC") ===="
-  printf '%s\n' "$BUNDLE_FILES" | while read -r file; do
+  printf '%s\n' "$FILES" | while read -r file; do
     [ -n "${file:-}" ] || continue
     cat "$ROOT/$file"
   done

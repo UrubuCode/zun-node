@@ -3,7 +3,7 @@
 A Node.js-compatible standard library for the [Zun](https://github.com/UrubuCode/zun)
 platform. See [`PLAN.md`](PLAN.md) for the architecture and the library roadmap.
 
-## Two kinds of module
+## Three kinds of module
 
 A Node module lands here in whichever form fits what it actually does:
 
@@ -15,6 +15,16 @@ A Node module lands here in whichever form fits what it actually does:
   run by the engine like any other program. This is for modules that are pure
   computation: `path` (`src/path/path.ts`) is string manipulation end to end, so
   there is nothing to gain from crossing the ABI, and no `--ext` is involved.
+- **Zun TypeScript over natives** — both, with the seam drawn where the
+  capability changes. `os` is the first: the facts it reports are syscalls
+  (`src/os/`, Rust), while the module *Node* exposes is objects, arrays,
+  `constants`, validation and `ERR_*` errors (`src/os/os.ts`, Zun TypeScript),
+  which reaches the natives with `import * as native from "node:os"`. Its tests
+  are bundled like a TypeScript module **and** run with `--ext`. This is the
+  shape `fs` takes once its Node-API shaping is written, which is why `os`
+  establishes it: ABI v1 carries one scalar word per value, so `os` also fixes
+  how a structured result crosses — one status-prefixed, separator-delimited
+  string per call, documented in [`src/os/mod.rs`](src/os/mod.rs).
 
 Support slices exist to run Node's own tests, and are Zun TypeScript for the
 same reason: `src/assert/assert.ts` (the strict-mode `assert` surface the tests
@@ -86,6 +96,29 @@ runs as `zun run <bundle.ts>`. Extension modules keep the direct
 > blocker-by-blocker table is in [`test/events/README.md`](test/events/README.md),
 > the per-test breakdown in [`test/events/RESULTS.md`](test/events/RESULTS.md).
 
+<!-- node-os:start -->
+### Node.js v25 `os` compatibility
+
+`███░░░░░░░░░░░░░░░░░░░░░` **14.2%** — 1 / 7 Node `test-os*` tests passing
+<!-- node-os:end -->
+
+> `os` is complete — every function, `constants` for both platforms, `EOL`,
+> `devNull`, the validation and the `ERR_SYSTEM_ERROR` shape — and verified by a
+> differential run against Node over 140 values (every string fact, the whole
+> `constants` table, every CPU row, every interface entry with its CIDR and
+> scope id, `userInfo()` in both encodings, all eight validation messages and
+> every `tmpdir()` environment rule): **zero divergences on Windows and zero on
+> Linux**. The corpus number is low because the seven test files are unusually
+> harness-hungry: two require `internal/test/binding` to monkey-patch the `os`
+> binding, two re-run themselves through `child_process` to see a different
+> environment, one needs a callable `assert`
+> ([zun#14](https://github.com/UrubuCode/zun/issues/14)), and one needs
+> `assert.throws(fn, TypeError)` with the constructor as a *value*
+> ([zun#17](https://github.com/UrubuCode/zun/issues/17)).
+> `test-os-process-priority.js` passes. The blocker-by-blocker table is in
+> [`test/os/README.md`](test/os/README.md), the per-test breakdown in
+> [`test/os/RESULTS.md`](test/os/RESULTS.md).
+
 ## Running the tracker locally
 
 The tracker always needs the `zun` binary from the engine checkout; it needs the
@@ -106,6 +139,12 @@ bash zun-node/tools/run_node_tests.sh \
     --zun target/debug/zun \
     --ext zun-node/target/debug/libzun_node.so \
     --module fs
+
+# a Zun TypeScript module over natives: bundled *and* --ext
+bash zun-node/tools/run_node_tests.sh \
+    --zun target/debug/zun \
+    --ext zun-node/target/debug/libzun_node.so \
+    --module os
 ```
 
 On Windows the binary is `target/debug/zun.exe` and the extension is

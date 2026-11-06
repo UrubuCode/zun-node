@@ -161,7 +161,11 @@ function __evReceived(value: any): string {
     const name: any = ctor === undefined || ctor === null ? undefined : ctor.name;
     return " Received an instance of " + (typeof name === "string" && name !== "" ? name : "Object");
   }
-  let shown = kind === "string" ? JSON.stringify(value) : String(value);
+  // Node formats the received value with `util.inspect`, not `JSON.stringify`:
+  // a string comes out single-quoted (`'foo'`), which `JSON.stringify` cannot
+  // produce. A differential run of `os` against Node caught the difference in
+  // every `ERR_INVALID_ARG_TYPE` whose argument was a string.
+  let shown = kind === "string" ? __evInspect(value) : String(value);
   if (Number(shown.length) > 28) shown = shown.slice(0, 25) + "...";
   return " Received type " + kind + " (" + shown + ")";
 }
