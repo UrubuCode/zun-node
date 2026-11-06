@@ -64,8 +64,20 @@ src/path/    ──[path.ts]─────────────────�
 src/events/  ──[events.ts]────────────────▶ same route
 src/util/    ──[util.ts]─────────────────┐  harness slices (principle 4), same route
 src/assert/  ──[assert.ts]               │
-src/process/ ──[process.ts, zun:core]────┘
+src/process/*.rs ──[same cdylib]──────────▶ zun_abi  (facts: syscalls)
+src/process/process.ts ──[in EVERY bundle]──────────┐ (shape, with a no-ext path)
+src/process/native.ts  ──[only when --ext is used]──┘ (the import, and nothing else)
 ```
+
+`process` is the one module that is **three** files, and the reason is that every
+other module's bundle inlines `src/process/process.ts` while most of those
+bundles run with no extension at all. A `node:process` import in that file would
+make the `path`, `events`, `util`, `assert` and `url` bundles fail to compile for
+want of a cdylib they do not need, so the import lives in a third file that the
+bundler appends only for a bundle that will be run with `--ext` (`EXT_FILES` in
+`tools/bundle_node_test.sh`, gated on `ZUN_NODE_EXT`). `process.ts` keeps a
+documented fallback for every native-backed value and never names the extension.
+See the table in its header.
 
 Bundle order is dependency order: `util` (no dependencies) → `events`
 (`util.inspect` for its messages) → `process` (an `EventEmitter`) → `assert` →
@@ -821,15 +833,37 @@ gets deleted; nothing else in the tracker changes.
   `test-os.js` and `test-event-emitter-listeners-side-effects.js`, which are now
   blocked one layer in (zun#36 and zun#26 respectively).
   Not the finished module: it is what the corpus asserts with.
-- **`node:process` (harness slice): `src/process/process.ts`.** `cwd()`, `env`,
-  `platform`, `argv`, `exit()`, `stdout`/`stderr`, over `zun:core`'s `host`, plus
-  the **EventEmitter surface** Node's `process` has
-  (`on`/`once`/`off`/`emit`/`listeners`/`listenerCount`/`eventNames`/`setMaxListeners`,
-  delegated to one `EventEmitter` instance), `nextTick` (a FIFO queue over
-  `queueMicrotask`), `emitWarning` (which the events module's warning route is
-  wired to), and `exitCode`. `platform` is derived from the shape of `cwd()`
-  because no host native reports the OS yet. Not the finished module; the full
-  `process` is still owed in the order above.
+- **`node:process`: complete, TS over natives, in three files (the `os` kind
+  plus one).** `src/process/*.rs` answers what needs the kernel — the pid and
+  parent pid, the executable path, the platform and architecture, `hrtime`
+  (monotonic nanoseconds, as text so neither the tuple nor the `BigInt` loses a
+  digit), the process `uptime`, `cpuUsage`/`threadCpuUsage`/`resourceUsage`
+  (`getrusage` and `GetProcessTimes`/`GetProcessIoCounters`), the resident set
+  size, `availableMemory`/`constrainedMemory` (the cgroup limit on Linux),
+  `kill` (libuv's `uv__kill` exactly, `TerminateProcess` and all), `chdir`,
+  the real `umask` (read by the set-and-restore sequence, so reading it does not
+  clear it), the whole environment block and `setenv`/`unsetenv`, the POSIX
+  credentials, the process title and `isatty`. `src/process/process.ts` is Node's
+  shape: the EventEmitter surface, `nextTick`, the `exit`/`exitCode`/`reallyExit`
+  ordering (an 'exit' listener that calls `process.exit(0)` wins over the
+  `exit(1)` that started it, and does not re-emit), `emitWarning`'s full option
+  grammar with `noDeprecation`/`throwDeprecation`/`traceDeprecation`,
+  `kill`'s signal table and monkey-patchable `_kill`, `cpuUsage`'s validation
+  order, `memoryUsage.rss`/`hrtime.bigint`, `config` (frozen), `features`,
+  `release`, `versions`, `allowedNodeEnvironmentFlags` (Node's frozen
+  `Set` subclass), `binding('util')` as a projection of `util.types`, `dlopen`,
+  `setSourceMapsEnabled`, `getActiveResourcesInfo` over the timer module,
+  `ref`/`unref`, and minimal `stdout`/`stderr`/`stdin` shims with
+  `isTTY`/`fd`/`columns` that `node:stream` can replace. `src/process/native.ts`
+  is the import and one install call. **Documented deviations**: `process.env` is
+  accessor-backed rather than a `Proxy`, because the Proxy `ownKeys` trap never
+  fires here and `Object.keys(process.env)` would come back empty
+  ([zun#6](https://github.com/UrubuCode/zun/issues/6)); the uncaught-exception
+  capture callback sees only what this library catches on a callback boundary,
+  because the engine has no uncaught hook; `process` is an object literal, so it
+  has no `EventEmitter`-derived prototype; `versions` names only `node` and
+  `zun`, because no V8, libuv, OpenSSL or ICU is embedded. Table in
+  `test/process/README.md`.
 
 ### Module keys and host dispatch
 

@@ -42,6 +42,12 @@ windows-sys = { version = "0.61", features = [
     "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
     "Win32_Security",
+    "Win32_System_Console",
+    # `node:process` needs the process-wide Win32 facts libuv reads:
+    # `CreateToolhelp32Snapshot` for the parent pid, `GetProcessMemoryInfo` for
+    # the resident set size and `PeakWorkingSetSize`, and the console title.
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_ProcessStatus",
     "Win32_System_Registry",
     # `node:fs` needs the file APIs `std` does not cover: the per-file
     # `dev`/`ino`/`nlink` of `stat` (`GetFileInformationByHandle`), the

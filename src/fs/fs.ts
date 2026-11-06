@@ -192,6 +192,17 @@ class ERR_FS_CP_NON_DIR_TO_DIR extends NodeError {
   }
 }
 
+// `ERR_METHOD_NOT_IMPLEMENTED` used to be declared here. It lives with the
+// error bases in `src/events/events.ts` now, because four files raise it and
+// three of them are *conditional*: this one (`fs.glob`, `fs.watch`,
+// `fs.createReadStream`, ...), `src/stream/stream.ts` (`_read`, `_write`,
+// `_transform`) and `src/child_process/child_process.ts`, while
+// `src/process/process.ts` (`process.chdir`, `process.kill`) is inlined into
+// every bundle. `events.ts` is inlined into every bundle too, and ahead of
+// all of them, so it is the one home that cannot collide: two top-level
+// declarations of one name are a compile error in a single Zun program, and a
+// test that requires both `fs` and `stream` is exactly such a program.
+
 class ERR_INVALID_FILE_URL_SCHEME extends NodeTypeError {
   constructor() {
     super(

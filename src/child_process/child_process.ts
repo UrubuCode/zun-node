@@ -110,9 +110,12 @@ class ChildProcessError extends Error {
 }
 
 // `ERR_METHOD_NOT_IMPLEMENTED` is built from `NodeError` directly rather than
-// declared as a class of its own: `src/fs/fs.ts` already declares a class of
-// that name, and a bundle that requires both modules would then have two
-// top-level declarations of one name, which a single Zun program cannot have.
+// declared as a class of its own: the class is declared once, with the error
+// bases in `src/events/events.ts`, because `fs`, `stream`, `process` and this
+// module all raise it and a bundle that inlines two of them would otherwise
+// have two top-level declarations of one name, which a single Zun program
+// cannot have. This helper *returns* the error rather than throwing it, which
+// is why it stays a function here.
 function __cpNotImplemented(name: string): any {
   return new NodeError(
     "ERR_METHOD_NOT_IMPLEMENTED",
@@ -187,11 +190,13 @@ const __CP_SIGNAL_NUMBERS: number[] = [
   20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 29, 29, 30, 29, 31, 31, 21,
 ];
 
-class ERR_UNKNOWN_SIGNAL extends NodeTypeError {
-  constructor(signal: any) {
-    super("ERR_UNKNOWN_SIGNAL", "Unknown signal: " + inspect(signal));
-  }
-}
+// `ERR_UNKNOWN_SIGNAL` used to be declared here, with an `inspect`ed signal in
+// its message. It is in `src/process/process.ts` now — `process.kill` resolves
+// signal names in every bundle, while this file is in only some of them, and
+// two top-level declarations of one name are a compile error in a single Zun
+// program. The message moved to Node's own `%s` formatting at the same time, so
+// an unknown signal *name* is reported bare (`Unknown signal: SIGNOTREAL`)
+// rather than quoted, which is what Node prints.
 
 function __cpSignalIndexOfName(name: string): number {
   const count: number = Number(__CP_SIGNAL_NAMES.length);

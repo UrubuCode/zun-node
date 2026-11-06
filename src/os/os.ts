@@ -368,19 +368,11 @@ const __osConstantsWin32: any = {
       WSA_E_CANCELLED: 10111,
       WSAEREFUSED: 10112,
     },
-    signals: {
-      SIGHUP: 1,
-      SIGINT: 2,
-      SIGQUIT: 3,
-      SIGILL: 4,
-      SIGABRT: 22,
-      SIGFPE: 8,
-      SIGKILL: 9,
-      SIGSEGV: 11,
-      SIGTERM: 15,
-      SIGBREAK: 21,
-      SIGWINCH: 28,
-    },
+    // The one signal table, which `src/process/process.ts` owns because
+    // `process.kill` needs it in every bundle and `os` is in only some of
+    // them. Node shares it the same way: `os.constants.signals` and
+    // `process.kill` both read the `constants` binding's table.
+    signals: __processSignalsWin32,
     priority: {
       PRIORITY_LOW: 19,
       PRIORITY_BELOW_NORMAL: 10,
@@ -481,41 +473,9 @@ const __osConstantsPosix: any = {
       EWOULDBLOCK: 11,
       EXDEV: 18,
     },
-    signals: {
-      SIGHUP: 1,
-      SIGINT: 2,
-      SIGQUIT: 3,
-      SIGILL: 4,
-      SIGTRAP: 5,
-      SIGABRT: 6,
-      SIGIOT: 6,
-      SIGBUS: 7,
-      SIGFPE: 8,
-      SIGKILL: 9,
-      SIGUSR1: 10,
-      SIGSEGV: 11,
-      SIGUSR2: 12,
-      SIGPIPE: 13,
-      SIGALRM: 14,
-      SIGTERM: 15,
-      SIGCHLD: 17,
-      SIGSTKFLT: 16,
-      SIGCONT: 18,
-      SIGSTOP: 19,
-      SIGTSTP: 20,
-      SIGTTIN: 21,
-      SIGTTOU: 22,
-      SIGURG: 23,
-      SIGXCPU: 24,
-      SIGXFSZ: 25,
-      SIGVTALRM: 26,
-      SIGPROF: 27,
-      SIGWINCH: 28,
-      SIGIO: 29,
-      SIGPOLL: 29,
-      SIGPWR: 30,
-      SIGSYS: 31,
-    },
+    // See the note on the win32 table above: one table, owned by
+    // `src/process/process.ts`.
+    signals: __processSignalsPosix,
     priority: {
       PRIORITY_LOW: 19,
       PRIORITY_BELOW_NORMAL: 10,
@@ -1043,18 +1003,12 @@ __osInstallToPrimitive(os.version, function (): string {
   return __osVersion;
 });
 
-// `process.pid`, which is not part of Node's `os` surface at all.
-//
-// It is corrected from here because this is the only module in the library with
-// a native that can answer it: `zun:core`'s host surface reports no pid, so
-// `src/process/process.ts` — which has no extension of its own and must keep
-// compiling without `--ext`, for the `path` and `events` bundles — falls back
-// to a placeholder. Whenever `os` is loaded the real pid is available, and a
-// wrong `process.pid` is not something to leave standing: Node's
-// `test-os-process-priority.js` sets and reads the priority of
-// `process.pid` itself. The line moves into `process` the moment `process` has
-// a native of its own.
-process.pid = Number(__osNative.pid());
+// `process.pid` used to be patched in from this module's own `pid` native,
+// because `src/process/process.ts` had none and `zun:core` reports no pid. It
+// has one now (`procFacts`), and any bundle that inlines this file is run with
+// `--ext` and therefore inlines `src/process/native.ts` too — so the bridge is
+// gone rather than setting the same value twice. The `pid` native stays
+// registered: it is an operating-system fact of exactly this module's kind.
 
 // `node:os` module object for the bundler's `require` rewriting.
 const __node_os: any = os;

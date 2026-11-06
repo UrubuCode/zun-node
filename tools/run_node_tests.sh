@@ -97,6 +97,11 @@ case "$MODULE" in
   diagnostics_channel)
           KIND="zun-ts";     PATTERNS="test-diagnostics-channel";         PATTERN="test-diagnostics-channel";;
   console) KIND="zun-ts";    PATTERNS="test-console";                     PATTERN="test-console";;
+  # `process` is TS over natives too, and the one module every other bundle
+  # stands on: src/process/process.ts is inlined everywhere, its natives live in
+  # src/process/*.rs, and src/process/native.ts -- the only file that imports
+  # them -- is inlined by the bundler just for the bundles that get `--ext`.
+  process) KIND="zun-ts+ext"; PATTERNS="test-process-";                   PATTERN="test-process-";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 
@@ -113,6 +118,15 @@ case "$KIND" in
       exit 2
     fi;;
 esac
+
+# The bundler inlines `src/process/native.ts` -- the one file that imports the
+# `node:process` extension -- only for a bundle that will actually be run with
+# one. Every bundle inlines `src/process/process.ts`, and the `zun-ts` kinds run
+# without `--ext`, so the gate cannot live in the module table; see
+# EXT_FILES in tools/bundle_node_test.sh.
+if [ -n "$EXT" ]; then
+  export ZUN_NODE_EXT="$EXT"
+fi
 
 LIST="$ROOT/test/$MODULE/NODE_TESTS.txt"
 # Some corpora open files from Node's `test/fixtures/` rather than only

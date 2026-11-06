@@ -547,6 +547,24 @@ const __node_tty: any = {
   },
 };
 
+// `node:worker_threads`. This runtime has one thread and no `Worker`, so
+// `isMainThread` is `true` and `threadId` is `0` — which is the honest answer,
+// and the same one Node gives on its own main thread. Nineteen files in the
+// `process` corpus require this module for `isMainThread` alone, to take a
+// `common.skip` branch inside a worker; with no binding at all they failed to
+// *bundle*, which hid whatever their real blocker was. `Worker` is absent
+// rather than stubbed, so a test that tries to spawn one fails on the missing
+// constructor instead of on a fabricated one that does nothing.
+const __node_worker_threads: any = {
+  isMainThread: true,
+  threadId: 0,
+  Worker: undefined,
+  parentPort: null,
+  workerData: null,
+  resourceLimits: {},
+  SHARE_ENV: undefined,
+};
+
 // `node:vm` is required by `test-querystring.js`, which uses
 // `vm.runInNewContext('({"foo": ["bar", "baz"]})')` to obtain a plain object
 // from *another realm* and check that `querystring.stringify` handles it. A
