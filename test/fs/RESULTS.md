@@ -13,12 +13,12 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-fs-access.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-access.js: |
-| `test-fs-append-file.js` | ❌ type error | bundles/test-fs-append-file.ts:20190:44: error: [SEM0001] 'Buffer.byteLength' expects a string |
+| `test-fs-access.js` | ❌ type error | bundles/test-fs-access.ts:24946:37: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, fou |
+| `test-fs-append-file.js` | ❌ type error | bundles/test-fs-append-file.ts:22726:44: error: [SEM0001] 'Buffer.byteLength' expects a string |
 | `test-fs-append-file-flush.js` | ❌ assertion | AssertionError [throws]: Missing expected exception. |
-| `test-fs-append-file-sync.js` | ❌ parse | bundles/test-fs-append-file-sync.ts:20190:38: error: [SEM0001] 'Buffer.byteLength' expects a string |
+| `test-fs-append-file-sync.js` | ❌ parse | bundles/test-fs-append-file-sync.ts:22726:38: error: [SEM0001] 'Buffer.byteLength' expects a string |
 | `test-fs-assert-encoding-error.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
-| `test-fs-buffer.js` | ❌ type error | bundles/test-fs-buffer.ts:20158:23: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, fou |
+| `test-fs-buffer.js` | ❌ type error | bundles/test-fs-buffer.ts:22694:23: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, fou |
 | `test-fs-buffertype-writesync.js` | ✅ pass | |
 | `test-fs-chmod.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-chmod-mask.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -27,10 +27,10 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-fs-close.js` | ✅ pass | |
 | `test-fs-close-errors.js` | ✅ pass | |
 | `test-fs-constants.js` | ✅ pass | |
-| `test-fs-copyfile.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-copyfile.js: |
+| `test-fs-copyfile.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-fs-copyfile-respect-permissions.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-fs-cp-sync-dereference.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-fs-error-messages.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-error-messages.js: |
+| `test-fs-error-messages.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-exists.js` | ❌ parse | Mismatched function call: expected warning DeprecationWarning was never emitted |
 | `test-fs-existssync-false.js` | ❌ parse | Mismatched function call: mustSucceed received an error: ENOENT: no such file or directory, access 'C:\Users\< |
 | `test-fs-existssync-memleak-longpath.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-existssync-memleak-longpath.js: |
@@ -52,12 +52,12 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-fs-mkdir-mode-mask.js` | ❌ runtime | bundles/test-fs-mkdir-mode-mask.ts: error: parse error: "A 'return' statement can only be used within a functi |
 | `test-fs-mkdir-recursive-eaccess.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-mkdir-rmdir.js` | ✅ pass | |
-| `test-fs-mkdtemp.js` | ❌ type error | bundles/test-fs-mkdtemp.ts:20172:40: error: [SEM0001] 'Buffer.byteLength' expects a string |
+| `test-fs-mkdtemp.js` | ❌ type error | bundles/test-fs-mkdtemp.ts:22708:40: error: [SEM0001] 'Buffer.byteLength' expects a string |
 | `test-fs-mkdtemp-prefix-check.js` | ✅ pass | |
 | `test-fs-non-number-arguments-throw.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-null-bytes.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
-| `test-fs-open.js` | ❌ type error | bundles/test-fs-open.ts:20084:31: error: [SEM0001] spread arguments are not lowered yet |
-| `test-fs-opendir.js` | ❌ type error | bundles/test-fs-opendir.ts:20177:25: error: [SEM0001] right operand of 'instanceof' must be a class name |
+| `test-fs-open.js` | ❌ type error | bundles/test-fs-open.ts:22620:31: error: [SEM0001] spread arguments are not lowered yet |
+| `test-fs-opendir.js` | ❌ type error | bundles/test-fs-opendir.ts:22713:25: error: [SEM0001] right operand of 'instanceof' must be a class name |
 | `test-fs-open-flags.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-open-flags.js: |
 | `test-fs-open-mode-mask.js` | ✅ pass | |
 | `test-fs-open-no-close.js` | ✅ pass | |
@@ -72,22 +72,22 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-fs-promises-file-handle-close-errors.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-promises-file-handle-close-errors.js: |
 | `test-fs-promises-file-handle-dispose.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-fs-promises-file-handle-op-errors.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-promises-file-handle-op-errors.js: |
-| `test-fs-promises-file-handle-read.js` | ❌ type error | bundles/test-fs-promises-file-handle-read.ts:20171:30: error: [SEM0001] 'Buffer.from' expects a string, array  |
+| `test-fs-promises-file-handle-read.js` | ❌ type error | bundles/test-fs-promises-file-handle-read.ts:22707:30: error: [SEM0001] 'Buffer.from' expects a string, array  |
 | `test-fs-promises-file-handle-read-worker.js` | ✅ pass | |
 | `test-fs-promises-file-handle-stat.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-fs-promises-file-handle-stream.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-fs-promises-file-handle-sync.js` | ✅ pass | |
 | `test-fs-promises-file-handle-truncate.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-fs-promises-file-handle-write.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-promises-readfile.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-promises-readfile.js: |
+| `test-fs-promises-readfile.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-promises-readfile-empty.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-promises-readfile-with-fd.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-fs-promises-watch.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-fs-promises-watch-iterator.js` | ❌ parse | bundles/test-fs-promises-watch-iterator.ts:20169:9: error: [SEM0001] async functions must declare a Promise re |
+| `test-fs-promises-watch-iterator.js` | ❌ parse | bundles/test-fs-promises-watch-iterator.ts:22705:9: error: [SEM0001] async functions must declare a Promise re |
 | `test-fs-promises-writefile.js` | ❌ assertion | AssertionError [rejects]: Missing expected rejection (AbortError). |
-| `test-fs-promises-writefile-typedarray.js` | ❌ type error | bundles/test-fs-promises-writefile-typedarray.ts:20166:35: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-fs-promises-writefile-typedarray.js` | ❌ type error | bundles/test-fs-promises-writefile-typedarray.ts:22702:35: error: [SEM0001] type BufferView(U8) has no fields |
 | `test-fs-promises-writefile-with-fd.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-promises-write-optional-params.js` | ❌ type error | bundles/test-fs-promises-write-optional-params.ts:20221:15: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-fs-promises-write-optional-params.js` | ❌ type error | bundles/test-fs-promises-write-optional-params.ts:22757:15: error: [SEM0001] type BufferView(U8) has no fields |
 | `test-fs-promisified.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-fs-read.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-fs-readdir.js` | ❌ assertion | AssertionError [throws]: The input did not match the regular expression /Error: ENOTDIR: not a directory/. Inp |
@@ -95,11 +95,11 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-fs-readdir-pipe.js` | ✅ pass | |
 | `test-fs-readdir-recursive.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-readdir-recursive.js: |
 | `test-fs-readdir-stack-overflow.js` | ❌ timeout |  |
-| `test-fs-readdir-types.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-readdir-types.js: |
+| `test-fs-readdir-types.js` | ❌ type error | bundles/test-fs-readdir-types.ts:24760:30: error: [SEM0001] right operand of 'instanceof' must be a class name |
 | `test-fs-readdir-types-symlinks.js` | ✅ pass | |
-| `test-fs-readdir-ucs2.js` | ❌ type error | bundles/test-fs-readdir-ucs2.ts:20176:38: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffe |
-| `test-fs-read-empty-buffer.js` | ❌ type error | bundles/test-fs-read-empty-buffer.ts:20027:16: error: [SEM0001] 'Uint8Array' expects at least a buffer |
-| `test-fs-readfile.js` | ❌ type error | bundles/test-fs-readfile.ts:20047:35: error: [SEM0001] Buffer size must be an integer |
+| `test-fs-readdir-ucs2.js` | ❌ type error | bundles/test-fs-readdir-ucs2.ts:22712:38: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffe |
+| `test-fs-read-empty-buffer.js` | ❌ type error | bundles/test-fs-read-empty-buffer.ts:22563:16: error: [SEM0001] 'Uint8Array' expects at least a buffer |
+| `test-fs-readfile.js` | ❌ type error | bundles/test-fs-readfile.ts:22583:35: error: [SEM0001] Buffer size must be an integer |
 | `test-fs-read-file-assert-encoding.js` | ✅ pass | |
 | `test-fs-readfile-empty.js` | ✅ pass | |
 | `test-fs-readfile-eof.js` | ❌ runtime | bundles/test-fs-readfile-eof.ts: error: parse error: "A 'return' statement can only be used within a function  |
@@ -112,12 +112,12 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-fs-readfilesync-enoent.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-fs-read-file-sync-hostname.js` | ✅ pass | |
 | `test-fs-readfilesync-pipe-large.js` | ❌ parse | bundles/test-fs-readfilesync-pipe-large.ts: error: parse error: "A 'return' statement can only be used within  |
-| `test-fs-readfile-unlink.js` | ❌ type error | bundles/test-fs-readfile-unlink.ts:20180:26: error: [SEM0001] Buffer size must be an integer |
+| `test-fs-readfile-unlink.js` | ❌ type error | bundles/test-fs-readfile-unlink.ts:22716:26: error: [SEM0001] Buffer size must be an integer |
 | `test-fs-readfile-zero-byte-liar.js` | ✅ pass | |
 | `test-fs-readlink-type-check.js` | ✅ pass | |
 | `test-fs-read-offset-null.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-fs-read-optional-params.js` | ❌ type error | bundles/test-fs-read-optional-params.ts:20032:29: error: [SEM0001] spread arguments are not lowered yet |
-| `test-fs-read-promises-optional-params.js` | ❌ type error | bundles/test-fs-read-promises-optional-params.ts:20029:43: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-fs-read-optional-params.js` | ❌ type error | bundles/test-fs-read-optional-params.ts:22568:29: error: [SEM0001] spread arguments are not lowered yet |
+| `test-fs-read-promises-optional-params.js` | ❌ type error | bundles/test-fs-read-promises-optional-params.ts:22565:43: error: [SEM0001] type BufferView(U8) has no fields |
 | `test-fs-read-stream.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-read-stream-concurrent-reads.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-read-stream-double-close.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -132,10 +132,10 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-fs-read-stream-resume.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-read-stream-throw-type-error.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-read-type.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (RangeError). |
-| `test-fs-readv.js` | ❌ type error | bundles/test-fs-readv.ts:20166:31: error: [SEM0001] Buffer size must be an integer |
-| `test-fs-readv-promises.js` | ❌ type error | bundles/test-fs-readv-promises.ts:20167:31: error: [SEM0001] Buffer size must be an integer |
+| `test-fs-readv.js` | ❌ type error | bundles/test-fs-readv.ts:22702:31: error: [SEM0001] Buffer size must be an integer |
+| `test-fs-readv-promises.js` | ❌ type error | bundles/test-fs-readv-promises.ts:22703:31: error: [SEM0001] Buffer size must be an integer |
 | `test-fs-readv-promisify.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
-| `test-fs-readv-sync.js` | ❌ parse | bundles/test-fs-readv-sync.ts:20168:31: error: [SEM0001] Buffer size must be an integer |
+| `test-fs-readv-sync.js` | ❌ parse | bundles/test-fs-readv-sync.ts:22704:31: error: [SEM0001] Buffer size must be an integer |
 | `test-fs-ready-event-stream.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-read-zero-length.js` | ✅ pass | |
 | `test-fs-realpath.js` | ❌ assertion | start tests |
@@ -150,27 +150,27 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-fs-rmdir-throws-on-file.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-fs-rmdir-type-check.js` | ✅ pass | |
 | `test-fs-sir-writes-alot.js` | ❌ assertion | Error [ERR_METHOD_NOT_IMPLEMENTED]: The fs.createReadStream method is not implemented |
-| `test-fs-stat.js` | ❌ type error | bundles/test-fs-stat.ts:20175:3: error: [SEM0001] type Any has no methods |
-| `test-fs-stat-bigint.js` | ❌ type error | bundles/test-fs-stat-bigint.ts:20181:51: error: [SEM0001] 'BigInt' expects a string or number argument |
+| `test-fs-stat.js` | ❌ type error | bundles/test-fs-stat.ts:22711:3: error: [SEM0001] type Any has no methods |
+| `test-fs-stat-bigint.js` | ❌ type error | bundles/test-fs-stat-bigint.ts:22717:51: error: [SEM0001] 'BigInt' expects a string or number argument |
 | `test-fs-statfs.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-fs-stream-construct-compat-error-read.js` | ❌ type error | bundles/test-fs-stream-construct-compat-error-read.ts:20161:30: error: [SEM0001] spread arguments are not lowe |
-| `test-fs-stream-construct-compat-error-write.js` | ❌ type error | bundles/test-fs-stream-construct-compat-error-write.ts:20167:31: error: [SEM0001] spread arguments are not low |
-| `test-fs-stream-construct-compat-graceful-fs.js` | ❌ type error | bundles/test-fs-stream-construct-compat-graceful-fs.ts:20162:30: error: [SEM0001] spread arguments are not low |
-| `test-fs-stream-construct-compat-old-node.js` | ❌ type error | bundles/test-fs-stream-construct-compat-old-node.ts:20162:30: error: [SEM0001] spread arguments are not lowere |
+| `test-fs-stream-construct-compat-error-read.js` | ❌ type error | bundles/test-fs-stream-construct-compat-error-read.ts:22697:30: error: [SEM0001] spread arguments are not lowe |
+| `test-fs-stream-construct-compat-error-write.js` | ❌ type error | bundles/test-fs-stream-construct-compat-error-write.ts:22703:31: error: [SEM0001] spread arguments are not low |
+| `test-fs-stream-construct-compat-graceful-fs.js` | ❌ type error | bundles/test-fs-stream-construct-compat-graceful-fs.ts:22698:30: error: [SEM0001] spread arguments are not low |
+| `test-fs-stream-construct-compat-old-node.js` | ❌ type error | bundles/test-fs-stream-construct-compat-old-node.ts:22698:30: error: [SEM0001] spread arguments are not lowere |
 | `test-fs-stream-destroy-emit-error.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-stream-double-close.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-stream-fs-options.js` | ❌ assertion | AssertionError [throws]: createWriteStream options.fs.open should throw if isn't a function |
 | `test-fs-stream-options.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-fs-symlink.js` | ✅ pass | |
-| `test-fs-symlink-buffer-path.js` | ❌ type error | bundles/test-fs-symlink-buffer-path.ts:20190:28: error: [SEM0001] 'Buffer.from' expects a string, array or Arr |
+| `test-fs-symlink-buffer-path.js` | ❌ type error | bundles/test-fs-symlink-buffer-path.ts:22726:28: error: [SEM0001] 'Buffer.from' expects a string, array or Arr |
 | `test-fs-symlink-dir.js` | ✅ pass | |
 | `test-fs-symlink-dir-junction.js` | ❌ parse | Mismatched function call: mustSucceed received an error: EPERM: operation not permitted, symlink 'C:\Users\<us |
 | `test-fs-symlink-dir-junction-relative.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-symlink-longpath.js` | ❌ parse | Mismatched function call: mustSucceed received an error: EPERM: operation not permitted, symlink 'C:\Users\<us |
-| `test-fs-sync-fd-leak.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-sync-fd-leak.js: |
+| `test-fs-sync-fd-leak.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-syncwritestream.js` | ❌ parse | bundles/test-fs-syncwritestream.ts: error: parse error: "A 'return' statement can only be used within a functi |
 | `test-fs-timestamp-parsing-error.js` | ✅ pass | |
-| `test-fs-truncate.js` | ❌ type error | bundles/test-fs-truncate.ts:20177:27: error: [SEM0001] Buffer size must be an integer |
+| `test-fs-truncate.js` | ❌ type error | bundles/test-fs-truncate.ts:22713:27: error: [SEM0001] Buffer size must be an integer |
 | `test-fs-truncate-clear-file-zero.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-truncate-sync.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-unlink-type-check.js` | ✅ pass | |
@@ -181,7 +181,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-fs-watch-abort-signal.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-watch-close-when-destroyed.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-watch-encoding.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-fs-watch-enoent.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-watch-enoent.js: |
+| `test-fs-watch-enoent.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-fs-watchfile.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-fs-watchfile-bigint.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-fs-watchfile-bigint.js: |
 | `test-fs-watch-file-enoent-after-deletion.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -205,19 +205,19 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-fs-watch-stop-sync.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-whatwg-url.js` | ❌ assertion | AssertionError [==]: false == true |
 | `test-fs-write.js` | ❌ assertion | AssertionError [notStrictEqual]: Expected "actual" to be strictly unequal to: |
-| `test-fs-write-buffer.js` | ❌ type error | bundles/test-fs-write-buffer.ts:20309:31: error: [SEM0001] type BufferView(U8) has no fields |
-| `test-fs-write-buffer-large.js` | ❌ type error | bundles/test-fs-write-buffer-large.ts:20162:28: error: [SEM0001] Buffer size must be an integer |
-| `test-fs-write-file.js` | ❌ type error | bundles/test-fs-write-file.ts:20183:42: error: [SEM0001] 'Buffer.byteLength' expects a string |
-| `test-fs-write-file-buffer.js` | ❌ type error | bundles/test-fs-write-file-buffer.ts:20192:8: error: [SEM0001] cannot assign String to Array |
+| `test-fs-write-buffer.js` | ❌ type error | bundles/test-fs-write-buffer.ts:22845:31: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-fs-write-buffer-large.js` | ❌ type error | bundles/test-fs-write-buffer-large.ts:22698:28: error: [SEM0001] Buffer size must be an integer |
+| `test-fs-write-file.js` | ❌ type error | bundles/test-fs-write-file.ts:22719:42: error: [SEM0001] 'Buffer.byteLength' expects a string |
+| `test-fs-write-file-buffer.js` | ❌ type error | bundles/test-fs-write-file-buffer.ts:22728:8: error: [SEM0001] cannot assign String to Array |
 | `test-fs-write-file-flush.js` | ❌ assertion | AssertionError [throws]: Missing expected exception. |
 | `test-fs-write-file-invalid-path.js` | ❌ assertion | AssertionError [throws]: failed with '<' |
-| `test-fs-write-file-sync.js` | ❌ parse | bundles/test-fs-write-file-sync.ts:20261:66: error: [SEM0001] 'Math.random' is not supported yet |
-| `test-fs-write-file-typedarrays.js` | ❌ type error | bundles/test-fs-write-file-typedarrays.ts:20162:33: error: [SEM0001] 'Buffer.from' expects a string, array or  |
+| `test-fs-write-file-sync.js` | ❌ parse | bundles/test-fs-write-file-sync.ts:22797:66: error: [SEM0001] 'Math.random' is not supported yet |
+| `test-fs-write-file-typedarrays.js` | ❌ type error | bundles/test-fs-write-file-typedarrays.ts:22698:33: error: [SEM0001] 'Buffer.from' expects a string, array or  |
 | `test-fs-writefile-with-fd.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-write-negativeoffset.js` | ❌ assertion | AssertionError [throws]: Missing expected exception. |
 | `test-fs-write-no-fd.js` | ✅ pass | |
-| `test-fs-write-optional-params.js` | ❌ type error | bundles/test-fs-write-optional-params.ts:20217:15: error: [SEM0001] type BufferView(U8) has no fields |
-| `test-fs-write-reuse-callback.js` | ❌ type error | bundles/test-fs-write-reuse-callback.ts:20182:28: error: [SEM0001] Buffer size must be an integer |
+| `test-fs-write-optional-params.js` | ❌ type error | bundles/test-fs-write-optional-params.ts:22753:15: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-fs-write-reuse-callback.js` | ❌ type error | bundles/test-fs-write-reuse-callback.ts:22718:28: error: [SEM0001] Buffer size must be an integer |
 | `test-fs-write-sigxfsz.js` | ✅ pass | |
 | `test-fs-write-stream.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-write-stream-autoclose-option.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -236,7 +236,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-fs-write-stream-throw-type-error.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-fs-write-sync.js` | ✅ pass | |
 | `test-fs-writesync-crash.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
-| `test-fs-write-sync-optional-params.js` | ❌ parse | bundles/test-fs-write-sync-optional-params.ts:20172:30: error: [SEM0001] spread arguments are not lowered yet |
-| `test-fs-writev.js` | ❌ type error | bundles/test-fs-writev.ts:20175:47: error: [SEM0001] type BufferView(U8) has no fields |
-| `test-fs-writev-promises.js` | ❌ type error | bundles/test-fs-writev-promises.ts:20168:47: error: [SEM0001] type BufferView(U8) has no fields |
-| `test-fs-writev-sync.js` | ❌ parse | bundles/test-fs-writev-sync.ts:20172:45: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-fs-write-sync-optional-params.js` | ❌ parse | bundles/test-fs-write-sync-optional-params.ts:22708:30: error: [SEM0001] spread arguments are not lowered yet |
+| `test-fs-writev.js` | ❌ type error | bundles/test-fs-writev.ts:22711:47: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-fs-writev-promises.js` | ❌ type error | bundles/test-fs-writev-promises.ts:22704:47: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-fs-writev-sync.js` | ❌ parse | bundles/test-fs-writev-sync.ts:22708:45: error: [SEM0001] type BufferView(U8) has no fields |

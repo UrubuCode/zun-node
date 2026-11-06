@@ -15,7 +15,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 |---|---|---|
 | `test-event-emitter-add-listeners.js` | ❌ assertion | AssertionError [strictEqual]: Expected "actual" to be reference-equal to "expected": |
 | `test-event-emitter-check-listener-leaks.js` | ❌ assertion | AssertionError [==]: false == true |
-| `test-event-emitter-emit-context.js` | ❌ type error | bundles/test-event-emitter-emit-context.ts:17776:24: error: [SEM0001] argument type DynamicObject does not mat |
+| `test-event-emitter-emit-context.js` | ❌ type error | bundles/test-event-emitter-emit-context.ts:19868:24: error: [SEM0001] argument type DynamicObject does not mat |
 | `test-event-emitter-error-monitor.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-event-emitter-errors.js` | ✅ pass | |
 | `test-event-emitter-get-max-listeners.js` | ✅ pass | |
@@ -37,7 +37,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-event-emitter-remove-listeners.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-event-emitter-set-max-listeners-side-effects.js` | ❌ assertion | AssertionError [==]: false == true |
 | `test-event-emitter-special-event-names.js` | ✅ pass | |
-| `test-event-emitter-subclass.js` | ❌ type error | bundles/test-event-emitter-subclass.ts:17800:18: error: [SEM0001] unknown class 'MyEE' |
+| `test-event-emitter-subclass.js` | ❌ type error | bundles/test-event-emitter-subclass.ts:19892:18: error: [SEM0001] unknown class 'MyEE' |
 | `test-event-emitter-symbols.js` | ✅ pass | |
 | `test-events-add-abort-listener.mjs` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-events-customevent.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-events-customevent.js: |
@@ -45,6 +45,6 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-events-list.js` | ✅ pass | |
 | `test-events-listener-count-with-listener.js` | ✅ pass | |
 | `test-events-on-async-iterator.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-events-on-async-iterator.js: |
-| `test-events-once.js` | ❌ type error | bundles/test-events-once.ts:17921:6: error: [SEM0001] no field or setter 'addEventListener' on this type |
+| `test-events-once.js` | ❌ type error | bundles/test-events-once.ts:20013:6: error: [SEM0001] no field or setter 'addEventListener' on this type |
 | `test-events-static-geteventlisteners.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-events-static-geteventlisteners.js: |
 | `test-events-uncaught-exception-stack.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
