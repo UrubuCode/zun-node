@@ -62,6 +62,7 @@ done
 case "$MODULE" in
   path)   KIND="zun-ts";     PATTERNS="test-path";                        PATTERN="test-path";;
   util)   KIND="zun-ts";     PATTERNS="test-util";                        PATTERN="test-util";;
+  assert) KIND="zun-ts";     PATTERNS="test-assert";                      PATTERN="test-assert";;
   events) KIND="zun-ts";     PATTERNS="test-event-emitter- test-events-"; PATTERN="test-event-emitter-*|test-events-";;
   os)     KIND="zun-ts+ext"; PATTERNS="test-os";                          PATTERN="test-os";;
   buffer) KIND="zun-ts";     PATTERNS="test-buffer";                      PATTERN="test-buffer";;

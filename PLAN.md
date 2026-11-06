@@ -593,22 +593,48 @@ gets deleted; nothing else in the tracker changes.
   class has no constructor body, so `new URL(...)` fills its fields
   positionally and the lazy parser short-circuits). Table in
   `test/url/README.md`.
-- **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
-  `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
-  `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,
-  `fail`, `AssertionError` with Node's `code`/`actual`/`expected`/`operator`.
-  `assert.throws(fn, Ctor)` handles the eight standard error constructors by
-  matching `expected` against each one's identity and spelling the `instanceof`
-  against the literal class, which is the only form the engine resolves.
-  **`assert` is a function carrying the methods**, the shape Node exports
-  (`lib/assert.js` ends with `module.exports = assert = ok`), so the bare
-  `assert(value, message)` form Node's own tests use works. It was a plain object
-  until the engine could express a callable with callable properties
-  ([zun#14](https://github.com/UrubuCode/zun/issues/14)); that turned
-  `test-path-parse-format.js` into a pass and took the same blocker off
-  `test-os.js` and `test-event-emitter-listeners-side-effects.js`, which are now
-  blocked one layer in (zun#36 and zun#26 respectively).
-  Not the finished module: it is what the corpus asserts with.
+- **`node:assert`: implemented in `src/assert/assert.ts`, measured against the
+  full Node corpus.** The whole Node 25 module, not a harness slice any more:
+  the callable module object, `ok`, `equal`/`notEqual` (loose, with Node 25's
+  `NaN == NaN` rule), `strictEqual`/`notStrictEqual` (`Object.is`, so `0` and
+  `-0` differ), `deepEqual`/`notDeepEqual` — **loose** deep equality, which was
+  wrongly aliased to the strict comparison before —
+  `deepStrictEqual`/`notDeepStrictEqual`, `partialDeepStrictEqual`,
+  `throws`/`doesNotThrow`, `rejects`/`doesNotReject`, `match`/`doesNotMatch`,
+  `fail`, `ifError`, `assert.strict`, `require('assert/strict')` and Node 25's
+  `assert.Assert` class with its `{ diff, strict, skipPrototype }` options.
+  `AssertionError` carries `code`/`actual`/`expected`/`operator`/
+  `generatedMessage`/`diff` and composes **Node's own generated messages**: the
+  `kReadableOperator` headers, the `+ actual - expected` Myers line diff with
+  its `...`/"Skipped lines" collapsing (a port of
+  `lib/internal/assert/myers_diff.js`, also exported as
+  `internal/assert/myers_diff` because Node's own test file requires it), the
+  short `a !== b` form and the stacked form with its `^` indicator. The
+  `throws`/`rejects` validation forms — RegExp against `String(err)`,
+  constructor, validation object, error instance, predicate — each raise Node's
+  message, including `ERR_AMBIGUOUS_ARGUMENT`, `ERR_INVALID_ARG_TYPE`,
+  `ERR_INVALID_RETURN_VALUE` and `ERR_MISSING_ARGS` where Node does.
+  `assert.throws(fn, Ctor)` matches the eight standard error constructors by
+  identity and spells the `instanceof` against the literal class, which is the
+  only form the engine resolves; any other constructor is matched by
+  `constructor` identity, and a class value never reaches the predicate path
+  because *calling* one aborts the program uncatchably.
+  **`assert` is a function carrying the methods**, the shape Node exports, so
+  the bare `assert(value, message)` form Node's own tests use works. It was a
+  plain object until the engine could express a callable with callable
+  properties ([zun#14](https://github.com/UrubuCode/zun/issues/14)); that
+  turned `test-path-parse-format.js` into a pass and took the same blocker off
+  `test-os.js` and `test-event-emitter-listeners-side-effects.js`.
+  **Not done, by capability:** `assert.CallTracker` and `fail`'s legacy
+  four-argument form with DEP0094 do not exist — Node 25 removed both, so there
+  is nothing to implement. `ifError` cannot splice the original error's frames
+  onto the `AssertionError` (`err.stack` has no setter), and a destructured
+  `Assert` method cannot fall back to the defaults because a class method
+  cannot be read as a value at all
+  ([zun#19](https://github.com/UrubuCode/zun/issues/19)). The corpus's dominant
+  blocker is new: `err instanceof assert.AssertionError` does not compile,
+  because the right operand of `instanceof` must be a literal class name.
+  Table in `test/assert/README.md`.
 - **`node:process` (harness slice): `src/process/process.ts`.** `cwd()`, `env`,
   `platform`, `argv`, `exit()`, `stdout`/`stderr`, over `zun:core`'s `host`, plus
   the **EventEmitter surface** Node's `process` has

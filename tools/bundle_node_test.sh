@@ -100,7 +100,9 @@ util/types __node_util_types -
 internal/util __node_internal_util -
 events __node_events EventEmitter
 process __node_process process
-assert __node_assert assert
+assert __node_assert assert,Assert,strict
+assert/strict __node_assert_strict -
+internal/assert/myers_diff __node_internal_assert_myers_diff myersDiff
 path __node_path path
 os __node_os os
 buffer __node_buffer Buffer
@@ -115,6 +117,7 @@ child_process __node_child_process -
 domain __node_domain -
 stream __node_stream -
 vm __node_vm -
+crypto __node_crypto -
 test __node_test test
 tty __node_tty -
 "
@@ -244,29 +247,40 @@ trap 'rm -f "$REWRITE"' EXIT
     [ -n "${name:-}" ] || continue
     pat="require('\\(node:\\)\\{0,1\\}$name')"
 
+    # A module may have SEVERAL canonical bindings, comma-separated: `assert`
+    # is bound three times over -- as the callable module object (`assert`), as
+    # the `Assert` class and as the `strict` surface -- because all three are
+    # top-level declarations in src/assert/assert.ts and all three are spellings
+    # Node's own test files use. The rules below are emitted once per binding;
+    # the generic `require(...)` -> object rewrite is emitted after the whole
+    # list, so a later binding's rules still see the original `require` call.
     if [ "$canon" != "-" ]; then
+      for one in $(printf '%s' "$canon" | tr ',' ' '); do
       # `const <canon> = require('<name>');`  -> the binding already exists.
       printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}%s[[:space:]]*=[[:space:]]*%s[[:space:]]*;[[:space:]]*\$##
-" "$canon" "$pat"
+" "$one" "$pat"
       # `const <canon> = require('<name>').<canon>;`  (events' two spellings).
       printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}%s[[:space:]]*=[[:space:]]*%s\.%s[[:space:]]*;[[:space:]]*\$##
-" "$canon" "$pat" "$canon"
+" "$one" "$pat" "$one"
       # A destructuring that names the canonical binding keeps that name bound
       # to the existing one; drop it from the brace list -- wherever it sits in
-      # the list -- and let the rest come from the module object.
-      printf "/%s/{ s#,[[:space:]]*%s[[:space:]]*,#,#; }
-" "$pat" "$canon"
-      printf "/%s/{ s#{[[:space:]]*%s[[:space:]]*,[[:space:]]*#{ #; }
-" "$pat" "$canon"
-      printf "/%s/{ s#,[[:space:]]*%s[[:space:]]*}# }#; }
-" "$pat" "$canon"
-      printf "/%s/{ s#{[[:space:]]*%s[[:space:]]*}#{}#; }
-" "$pat" "$canon"
+      # the list -- and let the rest come from the module object. The address is
+      # delimited with `%` rather than `/` because a specifier may contain a
+      # slash (`internal/assert/myers_diff`).
+      printf "\%%%s%%{ s#,[[:space:]]*%s[[:space:]]*,#,#; }
+" "$pat" "$one"
+      printf "\%%%s%%{ s#{[[:space:]]*%s[[:space:]]*,[[:space:]]*#{ #; }
+" "$pat" "$one"
+      printf "\%%%s%%{ s#,[[:space:]]*%s[[:space:]]*}# }#; }
+" "$pat" "$one"
+      printf "\%%%s%%{ s#{[[:space:]]*%s[[:space:]]*}#{}#; }
+" "$pat" "$one"
       # `const { } = require(...)` after that removal is a no-op line.
       printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}{}[[:space:]]*=[[:space:]]*%s[[:space:]]*;[[:space:]]*\$##
 " "$pat"
       printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}{[[:space:]]*}[[:space:]]*=[[:space:]]*%s[[:space:]]*;[[:space:]]*\$##
 " "$pat"
+      done
     fi
 
     # A bare `require('<name>');` for its side effects only.

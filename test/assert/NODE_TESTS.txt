@@ -1,0 +1,14 @@
+test-assert.js
+test-assert-async.js
+test-assert-checktag.js
+test-assert-class.js
+test-assert-class-destructuring.js
+test-assert-deep.js
+test-assert-deep-with-error.js
+test-assert-esm-cjs-message-verify.js
+test-assert-fail.js
+test-assert-first-line.js
+test-assert-if-error.js
+test-assert-myers-diff.js
+test-assert-partial-deep-equal.js
+test-assert-typedarray-deepequal.js
