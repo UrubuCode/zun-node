@@ -82,6 +82,12 @@ json_string() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"
 # stands on events (for its ERR_* classes) and process (for `env`, which
 # `os.tmpdir()` reads), and the harness stands on all of them.
 #
+# querystring is pure string computation with no dependency of its own, punycode
+# likewise, and url stands on all four of events (its `ERR_*` bases), path (for
+# `fileURLToPath`/`pathToFileURL` on both platforms), querystring (`url.parse`'s
+# `parseQueryString`) and punycode (`domainToASCII`/`domainToUnicode`), so it is
+# inlined last of the library modules.
+#
 # `os` is the first module whose bundle also needs `--ext`: the Node-shaped API
 # is this TypeScript file, but the facts underneath it are syscalls in the
 # `node:os` extension, which `src/os/os.ts` reaches with
@@ -99,9 +105,14 @@ path __node_path path
 os __node_os os
 buffer __node_buffer Buffer
 string_decoder __node_string_decoder StringDecoder
+querystring __node_querystring -
+punycode __node_punycode -
+url __node_url -
+internal/url __node_internal_url -
 child_process __node_child_process -
 domain __node_domain -
 stream __node_stream -
+vm __node_vm -
 test __node_test test
 tty __node_tty -
 "
@@ -113,13 +124,25 @@ src/events/events.ts
 src/process/process.ts
 src/assert/assert.ts
 src/path/path.ts
+src/querystring/querystring.ts
+src/punycode/punycode.ts
+src/url/url.ts
 "
 
-# Modules inlined **only when the test actually requires them**, because their
-# source calls into the native extension and so makes the bundle need `--ext`.
-# Inlining `os` unconditionally would make every `path` and `events` bundle fail
-# to compile without a cdylib, which is exactly the coupling PLAN.md's principle
-# 2 keeps out of a pure-computation module.
+# Modules inlined **only when the test actually requires them**.
+#
+# Two reasons put a file here. The first is the native extension: `os`'s source
+# calls into the cdylib, so inlining it unconditionally would make every `path`
+# and `events` bundle fail to compile without one, which is exactly the coupling
+# PLAN.md's principle 2 keeps out of a pure-computation module.
+#
+# The second is a **load-time side effect**. `punycode` emits its DEP0040
+# deprecation warning when the module is first required (Node does it at the top
+# of `lib/punycode.js`), and `test-punycode.js` asserts the warning with
+# `common.expectWarning`. The algorithms themselves are always inlined, because
+# `src/url/url.ts` stands on them for `domainToASCII`/`domainToUnicode`; only the
+# `process.emitWarning` call is conditional, so requiring `node:url` does not
+# emit a `punycode` warning — just as it does not in Node.
 #
 # `buffer` and `string_decoder` are conditional for a different reason: they
 # need no `--ext`, but inlining them into every `path`/`events`/`util` bundle
@@ -138,6 +161,7 @@ string_decoder src/buffer/buffer.ts
 string_decoder src/string_decoder/string_decoder.ts
 test tools/harness/node_test.ts
 tty tools/harness/node_test.ts
+punycode src/punycode/deprecation.ts
 "
 
 # The harness, which stands on everything above it.

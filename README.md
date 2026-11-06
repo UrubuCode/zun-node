@@ -15,6 +15,11 @@ A Node module lands here in whichever form fits what it actually does:
   run by the engine like any other program. This is for modules that are pure
   computation: `path` (`src/path/path.ts`) is string manipulation end to end, so
   there is nothing to gain from crossing the ABI, and no `--ext` is involved.
+  `querystring` (`src/querystring/querystring.ts`), `punycode`
+  (`src/punycode/punycode.ts`) and `url` (`src/url/url.ts`) are the same kind;
+  `url` stands on the other two plus `path`, and re-exports the engine's
+  prelude `URL`/`URLSearchParams`, which is the relationship `node:url` has with
+  the globals in Node.
 - **Zun TypeScript over natives** — both, with the seam drawn where the
   capability changes. `os` is the first: the facts it reports are syscalls
   (`src/os/`, Rust), while the module *Node* exposes is objects, arrays,
@@ -58,9 +63,10 @@ Because the engine has no CommonJS `require` or module resolution
 ([zun#4](https://github.com/UrubuCode/zun/issues/4)), a Zun TypeScript module's
 tests are first passed through
 [`tools/bundle_node_test.sh`](tools/bundle_node_test.sh), which inlines the
-util/events/process/assert/path modules, the modules the test actually
-requires (`os`, `buffer`, `string_decoder`) and the `common` harness ahead of
-the test body, rewrites its `require` lines to the one object each
+util/events/process/assert/path/querystring/punycode/url modules, the modules
+the test actually requires (`os`, `buffer`, `string_decoder`) and the
+`common` harness (plus `node:test` when the test requires it) ahead of the test body,
+rewrites its `require` lines to the one object each
 inlined module exposes (`__node_events`, `__node_assert`, …), and appends the
 statement that settles the event loop and verifies the `common.mustCall` counts;
 the resulting single file runs as `zun run <bundle.ts>`. Extension modules keep
@@ -274,6 +280,94 @@ the direct `zun run --ext <lib> <test.js>` path.
 > none of them in the decoder. Table in
 > [`test/string_decoder/README.md`](test/string_decoder/README.md), breakdown in
 > [`test/string_decoder/RESULTS.md`](test/string_decoder/RESULTS.md).
+
+<!-- node-querystring:start -->
+### Node.js v25 `querystring` compatibility
+
+`████████████░░░░░░░░░░░░` **50.0%** — 2 / 4 Node `test-querystring*` tests passing
+<!-- node-querystring:end -->
+
+> `querystring` is implemented end to end — `parse`/`decode`, `stringify`/`encode`,
+> `escape`, `unescape`, `unescapeBuffer`, `maxKeys`, custom `sep`/`eq` of any
+> length, and the `decodeURIComponent`/`encodeURIComponent` options — following
+> Node's own scanner instruction for instruction, including the quirks its tests
+> pin (which empty segment spends a `maxKeys` slot, that `parse('a=b', [])`
+> drops the value, that `escape` consumes the code unit after a high surrogate
+> and masks it). Results are null-prototype objects, so a `__proto__=1` query
+> yields an own key (through `Object.defineProperty`, because
+> [zun#47](https://github.com/UrubuCode/zun/issues/47) makes a plain
+> `__proto__` assignment rewrite the prototype instead) and never reaches
+> `Object.prototype`, and nothing in the
+> module builds a RegExp — which is the structural reason `querystring` has no
+> CVEs of its own in Node's history. The two failures are not in
+> `querystring.ts`: both of Node's remaining files open their `check()` with the
+> bare callable form `assert(!(actual instanceof Object))`, which needs an
+> `assert` that is a function *and* carries methods
+> ([zun#14](https://github.com/UrubuCode/zun/issues/14)) and an `instanceof
+> Object` that answers `false` for a null-prototype object
+> ([zun#26](https://github.com/UrubuCode/zun/issues/26)); `test-querystring.js`
+> additionally needs a second realm (`vm.runInNewContext`). The blocker table is
+> in [`test/querystring/README.md`](test/querystring/README.md), the per-test
+> breakdown in [`test/querystring/RESULTS.md`](test/querystring/RESULTS.md).
+
+<!-- node-punycode:start -->
+### Node.js v25 `punycode` compatibility
+
+`████████████████████████` **100.0%** — 1 / 1 Node `test-punycode*` tests passing
+<!-- node-punycode:end -->
+
+> `punycode` passes its whole corpus: `encode`, `decode`, `toASCII`,
+> `toUnicode`, `ucs2.decode`/`ucs2.encode` and `version`, verified against all
+> nineteen RFC 3492 test vectors plus the surrogate and email-address cases, and
+> the DEP0040 deprecation warning that Node emits when the module is required —
+> which is why the `process.emitWarning` call lives in its own
+> `src/punycode/deprecation.ts`, inlined by the bundler only for a test that
+> actually requires `punycode` (`src/url/url.ts` uses the algorithms without
+> being a `punycode` require). Getting there needed `assert.throws(fn, regexp)`
+> fixed to match `String(err)` the way Node's does, and the Bootstring state
+> variables annotated `number`: a conditional whose branches mix an
+> integer-typed constant with a float-typed expression yields an `Any`, and
+> passing that to a `number` parameter panics the interpreter (new bug, found by
+> this work). Details in [`test/punycode/README.md`](test/punycode/README.md).
+
+<!-- node-url:start -->
+### Node.js v25 `url` compatibility
+
+`█████████░░░░░░░░░░░░░░░` **41.1%** — 7 / 17 Node `test-url*` tests passing
+<!-- node-url:end -->
+
+> `url` is implemented end to end — the legacy `parse` (with `parseQueryString`
+> and `slashesDenoteHost`), `format` (string, object and `URL` forms, plus
+> `format(URL, options)`), `resolve`, `resolveObject` and the `Url` class, the
+> WHATWG re-exports, `domainToASCII`/`domainToUnicode`,
+> `fileURLToPath`/`pathToFileURL` for both platforms, and `urlToHttpOptions` —
+> following Node's `lib/url.js` and `lib/internal/url.js` instruction for
+> instruction, because `url.parse` is explicitly not standardized (that is what
+> DEP0169 says) and its behaviour simply *is* that code. Every CVE guard is
+> reproduced rather than simplified: the scheme is lower-cased before any
+> protocol-set decision (CVE-2018-12123), the hostname is re-checked against the
+> forbidden set **after** IDNA so a NUL can neither be accepted nor truncated
+> away (the CVE-2026-48930 class), an empty post-IDNA hostname throws
+> `ERR_INVALID_URL`, and `parse(url, true)` hands back a null-prototype query.
+> Node's eight regular expressions here are eight hand-written scans, so the
+> parser owns no backtracking engine. Because four of the seventeen files are
+> ICU skips and two cannot be expressed on this engine at all, the module was
+> checked directly against Node's own expectation tables: 89 `parseTests` cases
+> (all twelve fields, the whitespace-trimmed re-parse and `format(expected)`),
+> 29 `formatTests` cases in both their string and object forms, all 194
+> `relativeTests2` and 31 `relativeTests` resolve cases, and the 51
+> `pathToFileURL` / 43 `fileURLToPath` cases with their error paths — 447 of
+> Node's own expectation rows and 1 695 individual comparisons, **zero
+> divergences**. `test-url-relative.js` therefore fails on the
+> engine, not on `url.ts`: the run corrupts a long-lived array of strings after
+> roughly 250 `url.parse` calls (new engine bug, reported with this work). The rest are the prelude `URL`'s own limits
+> (`new URL('file:///C:/foo')` throws there, so `pathToFileURL` builds its
+> `URL` instances from components instead), `URLPattern` (a separate WHATWG
+> specification Node implements in C++, and unreachable from a test here in any
+> case), a callable `assert`, `new` on a member expression, `child_process` and
+> spread into a built-in. The blocker-by-blocker table is in
+> [`test/url/README.md`](test/url/README.md), the per-test breakdown in
+> [`test/url/RESULTS.md`](test/url/RESULTS.md).
 
 ## Running the tracker locally
 

@@ -7,12 +7,12 @@
 # run time by tools/run_node_tests.sh.
 #
 # All three module kinds are measured (see ../../PLAN.md):
-#   * `util`, `path`, `events`, `buffer` and `string_decoder` are Zun
-#     TypeScript, so they need only the `zun` binary: each test is bundled by
-#     tools/bundle_node_test.sh and run as `zun run <bundle.ts>`, with no
-#     --ext. (`buffer` is TypeScript although `Buffer` itself is an engine
-#     realm global: the module is the surface around that global, not a second
-#     Buffer — see test/buffer/README.md.)
+#   * `util`, `path`, `events`, `buffer`, `string_decoder`, `querystring`,
+#     `punycode` and `url` are Zun TypeScript, so they need only the `zun`
+#     binary: each test is bundled by tools/bundle_node_test.sh and run as
+#     `zun run <bundle.ts>`, with no --ext. (`buffer` is TypeScript although
+#     `Buffer` itself is an engine realm global: the module is the surface
+#     around that global, not a second Buffer — see test/buffer/README.md.)
 #   * `fs` is a Rust zun_abi cdylib, so it also needs this repo built and is run
 #     as `zun run --ext <lib> <test.js>`.
 #   * `os` is Zun TypeScript *over* that cdylib, so it needs both: the bundle
@@ -29,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       module:
-        description: Node module to measure (util, path, events, os, buffer, string_decoder, fs, … or "all")
+        description: Node module to measure (util, path, events, buffer, string_decoder, querystring, punycode, url, os, fs, … or "all")
         default: all
       limit:
         description: Only the first N tests (0 = all)
@@ -87,7 +87,7 @@ jobs:
           ZUN="$PWD/target/debug/zun"
           EXT="$PWD/zun-node/target/debug/libzun_node.so"
           case "$MODULE" in
-            all) MODULES="util path events os buffer string_decoder fs";;
+            all) MODULES="util path events buffer string_decoder querystring punycode url os fs";;
             *)   MODULES="$MODULE";;
           esac
           test -f "$EXT" || { echo "extension cdylib missing: $EXT" >&2; exit 1; }
@@ -96,7 +96,7 @@ jobs:
             # needs it, and so does a TypeScript-over-natives module (`os`),
             # whose bundle calls into the cdylib.
             case "$m" in
-              util|path|events|buffer|string_decoder) EXT_ARGS="";;
+              util|path|events|buffer|string_decoder|querystring|punycode|url) EXT_ARGS="";;
               *)           EXT_ARGS="--ext $EXT";;
             esac
             bash zun-node/tools/run_node_tests.sh \
