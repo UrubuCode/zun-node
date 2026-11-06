@@ -58,8 +58,9 @@ Because the engine has no CommonJS `require` or module resolution
 ([zun#4](https://github.com/UrubuCode/zun/issues/4)), a Zun TypeScript module's
 tests are first passed through
 [`tools/bundle_node_test.sh`](tools/bundle_node_test.sh), which inlines the
-util/events/process/assert/path modules and the `common`/`node:test` harness
-ahead of the test body, rewrites its `require` lines to the one object each
+util/events/process/assert/path modules, the modules the test actually
+requires (`os`, `buffer`, `string_decoder`) and the `common` harness ahead of
+the test body, rewrites its `require` lines to the one object each
 inlined module exposes (`__node_events`, `__node_assert`, …), and appends the
 statement that settles the event loop and verifies the `common.mustCall` counts;
 the resulting single file runs as `zun run <bundle.ts>`. Extension modules keep
@@ -213,6 +214,66 @@ the direct `zun run --ext <lib> <test.js>` path.
 > number above was measured on Windows. The blocker-by-blocker table is in
 > [`test/os/README.md`](test/os/README.md), the per-test breakdown in
 > [`test/os/RESULTS.md`](test/os/RESULTS.md).
+
+<!-- node-buffer:start -->
+### Node.js v25 `buffer` compatibility
+
+`░░░░░░░░░░░░░░░░░░░░░░░░` **1.5%** — 1 / 64 Node `test-buffer*` tests passing
+<!-- node-buffer:end -->
+
+> `buffer` is the first module whose central object is **the engine's**, not
+> this library's: Node's `Buffer` is a `Uint8Array` subclass, and Zun's is a
+> nominal alias for the `Uint8Array` byte-view floor — a realm global with its
+> statics recognised by receiver name in the checker and its instance methods
+> lowered to the `nodeBuffer` intrinsics (NUCLEUS #21). Node's `buffer.Buffer`
+> and `globalThis.Buffer` are the same object, so `src/buffer/buffer.ts` is the
+> module *surface* around that global and never a second Buffer: `Buffer` is
+> this module's canonical binding in the bundler, the way `EventEmitter` is
+> `events`'. That surface is complete — `kMaxLength`, `kStringMaxLength`,
+> `constants`, `INSPECT_MAX_BYTES`, a strict WHATWG `atob`/`btoa`, `isUtf8`,
+> `isAscii`, `transcode`, `Blob`, `File`, `resolveObjectURL` (there is no
+> `SlowBuffer`: Node removed it in v25). The number is low because **every
+> remaining failure is an engine gap**, and the biggest one is a single rule:
+> the `nodeBuffer` intrinsics take machine integers, so a plain `number` is
+> rejected at the call site (`Buffer.alloc(n)` where `n` is a parameter does not
+> compile), which costs 28 of the 64 tests on their first line. Behind it:
+> `compare`/`toJSON`/`entries`/`buffer`/`byteOffset`/`parent`/`isEncoding`/`of`/
+> `allocUnsafeSlow` are absent and absent *at compile time*, a byte view is
+> opaque through `any`, `util.inspect` of one prints `{}`, and — the serious one
+> — **the GC frees a live Buffer's backing `ArrayBuffer`**, reproducibly on the
+> 256th class instance, because a view object carries type RID 0 and the mark
+> phase has no reference slots for it. The four historical Buffer CVEs were
+> checked one by one; two are unreachable rather than fixed, one (UCS-2 `write`
+> near the end) writes a *partial code unit* though never past the end, and a
+> fifth hazard turned up: `Buffer.alloc(-1)` panics the interpreter. The
+> per-test blocker table, with a standalone repro for each group, is in
+> [`test/buffer/README.md`](test/buffer/README.md); the per-test breakdown in
+> [`test/buffer/RESULTS.md`](test/buffer/RESULTS.md).
+
+<!-- node-string_decoder:start -->
+### Node.js v25 `string_decoder` compatibility
+
+`░░░░░░░░░░░░░░░░░░░░░░░░` **0.0%** — 0 / 3 Node `test-string-decoder*` tests passing
+<!-- node-string_decoder:end -->
+
+> `StringDecoder` is implemented end to end over the global `Buffer` —
+> `write`, `end`, `text`, `lastChar`/`lastNeed`/`lastTotal`, for utf8, utf16le,
+> ucs2, base64, base64url, hex, latin1 and ascii — following Node's own
+> pure-JavaScript decoder (there is no `internalBinding('string_decoder')` to
+> wrap), with the two places Node 25's C++ decoder diverges from it handled: one
+> U+FFFD per *maximal subpart* of an aborted sequence, and Node 25's shape for
+> the legacy `text(buf, offset)`. Since all three corpus files fail to compile,
+> it is verified the way `os` is — a **differential run against Node** over
+> `test-string-decoder.js`'s own driver (33 byte sequences × every possible
+> split across successive `write()` calls × 8 encodings = **1216 cases**,
+> including every invalid-UTF-8 vector in the file and both nodejs/node#22626
+> regressions) plus all 32 `testEnd` vectors of
+> `test-string-decoder-end.js`: **zero divergences**. The three failures are
+> `Buffer.from`/`Buffer.of` with an `any` argument, `Math.random`, and a
+> function called with one more argument than it declares — all engine gaps,
+> none of them in the decoder. Table in
+> [`test/string_decoder/README.md`](test/string_decoder/README.md), breakdown in
+> [`test/string_decoder/RESULTS.md`](test/string_decoder/RESULTS.md).
 
 ## Running the tracker locally
 

@@ -178,7 +178,8 @@ The runner knows all three module kinds:
 - **extension modules** run as `zun run --ext <lib> <test.js>`; `--ext` is
   required for them.
 - **Zun TypeScript modules** are bundled first and run as `zun run <bundle.ts>`,
-  with no `--ext`. `util`, `path` and `events` are this kind.
+  with no `--ext`. `util`, `path`, `events`, `buffer` and `string_decoder` are
+  this kind.
 - **Zun TypeScript over natives** (`zun-ts+ext`) are bundled first *and* need
   `--ext`: `zun run --ext <lib> <bundle.ts>`. `os` is this kind.
 
@@ -207,6 +208,22 @@ to the class, while the other destructured names come from `__node_events`. An
 unknown module makes the bundle fail with a named diagnostic, so a missing
 harness module is never mistaken for an engine bug.
 
+Two modules are inlined **only when the test requires them**, through the
+bundler's `CONDITIONAL_FILES`: `os`, because its source calls into the native
+extension and inlining it unconditionally would make every pure-computation
+bundle need a cdylib; and `buffer`/`string_decoder`, because fifty of the
+sixty-four `test-buffer*` files use the global `Buffer` alone and need no library
+code at all. `string_decoder` lists `src/buffer/buffer.ts` as well as its own
+file, the way Node's `lib/string_decoder.js` does `require('buffer')`, and a
+file already queued is not appended twice.
+
+`buffer` is also the first module whose **canonical binding is an engine realm
+global** rather than a library declaration. `Buffer` is the engine's — a nominal
+alias for the `Uint8Array` byte-view floor, statics recognised by receiver name
+in the checker (NUCLEUS #21) — and Node's `buffer.Buffer` is the same object as
+`globalThis.Buffer`, so `const { Buffer } = require('buffer')` leaves the name
+bound to the global exactly as `EventEmitter` does for `events`.
+
 `node:test` is the one module in the table that is harness code rather than
 library code (`tools/harness/node_test.ts`): it is not a module zun-node
 implements, it is the language several of Node's newer test files are *written
@@ -214,6 +231,11 @@ in*, so without it those files cannot be bundled at all and the public API they
 exercise never gets measured. Its canonical binding is the **function** `test`,
 because Node's files spell both `const test = require('node:test')` — where the
 module object is itself callable — and `const { test } = require('node:test')`.
+It is conditional too, for a reason specific to that name: `test` is also what
+several of Node's own test files call their local helper, and two top-level
+declarations of one name are a compile error in a single Zun program, so
+inlining it unconditionally reported `duplicate function declaration` for files
+whose real blocker was something else.
 
 Exit verification is the harness's other job. The VM drains its unified event
 loop after the main script returns but exposes no "about to exit" hook, so the
@@ -363,6 +385,54 @@ gets deleted; nothing else in the tracker changes.
   right of an `instanceof`
   ([#17](https://github.com/UrubuCode/zun/issues/17)). 28 crate tests green on
   both platforms (`cargo test`).
+- **`node:buffer`: the module surface is complete, in `src/buffer/buffer.ts`;
+  `Buffer` itself is the engine's.** This is the first module whose central
+  object already exists in the VM: Node's `Buffer` is a `Uint8Array` subclass,
+  Zun's is a nominal alias for the `Uint8Array` byte-view floor (a realm global,
+  statics by receiver name, instance methods lowered to the `nodeBuffer`
+  intrinsics — NUCLEUS #21), and `buffer.Buffer === globalThis.Buffer` in Node,
+  so **this library never introduces a second Buffer**. What it owns is the
+  module surface, and all of it is there: `kMaxLength`, `kStringMaxLength`,
+  `constants`, `INSPECT_MAX_BYTES`, a strict WHATWG `atob`/`btoa` (the engine
+  globals are lenient where Node throws), `isUtf8`, `isAscii`, `transcode`,
+  `Blob`, `File` and `resolveObjectURL`. **No `SlowBuffer`:** Node removed
+  DEP0030 in v25 and `test-buffer-slow.js` now tests
+  `Buffer.allocUnsafeSlow`. **Not done, and not doable from here:** every gap in
+  the engine's `Buffer`. A method the checker does not know on a
+  `BufferView(U8)` receiver is a *compile error*, there is no prototype to
+  extend, and a byte view is opaque through `any` — so `compare`, `toJSON`,
+  `entries`/`keys`/`values`, `buffer`/`byteOffset`/`parent` as properties,
+  `Buffer.compare`, `isEncoding`, `of`, `allocUnsafeSlow` and `poolSize` are
+  engine work. The dominant blocker is narrower than any of them: the
+  `nodeBuffer` intrinsics take machine integers, so a plain `number` is rejected
+  at the call site, which stops 28 of the 64 tests on their first line. The
+  worst is a GC bug this track found — **a live Buffer's backing `ArrayBuffer`
+  is freed at the first young collection**, reproducibly on the 256th class
+  instance, because a view object carries type RID 0 and the mark phase has no
+  reference slots for it. The four historical Buffer CVEs were each checked:
+  `alloc` never returns non-zeroed memory, the `alloc(size, fill, encoding)` and
+  `write(string, offset, length, encoding)` forms are unreachable rather than
+  unsafe, and the UCS-2 `write` near the end of a buffer stays in bounds but
+  writes a *partial code unit*. Table in `test/buffer/README.md`.
+- **`node:string_decoder`: complete, in
+  `src/string_decoder/string_decoder.ts`.** `write`, `end`, the legacy
+  `text(buf, offset)` and `lastChar`/`lastNeed`/`lastTotal`, for utf8, utf16le,
+  ucs2, base64, base64url, hex, latin1 and ascii. There is no
+  `internalBinding('string_decoder')` to wrap, so it follows Node's own
+  pure-JavaScript decoder, with the two points where Node 25's C++ decoder
+  diverges from it reproduced: one U+FFFD per *maximal subpart* of an aborted
+  multi-byte sequence (nodejs/node#22626), and Node 25's shape for `text`. Two
+  codecs are decoded in the library rather than through the engine, because the
+  engine's disagree with V8: UTF-16, which replaces an unpaired surrogate with
+  U+FFFD where a stream decoder must carry it across the chunk boundary, and
+  `ascii`, whose decoder must mask the high bit. Verified by a **differential
+  run against Node** — `test-string-decoder.js`'s own driver over 33 byte
+  sequences × every possible split across successive `write()` calls × 8
+  encodings (1216 cases) plus all 32 `testEnd` vectors of
+  `test-string-decoder-end.js`: **zero divergences**. All three corpus files
+  fail to compile on engine gaps (`Buffer.from`/`Buffer.of` with an `any`
+  argument, `Math.random`, a call with one more argument than the function
+  declares); table in `test/string_decoder/README.md`.
 - **`node:util`: complete, in `src/util/util.ts`, measured against the full
   Node corpus.** The whole Node 25 public surface is there — `format`,
   `formatWithOptions`, `inspect` with every documented option (`depth`,

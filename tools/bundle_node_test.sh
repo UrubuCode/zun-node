@@ -97,6 +97,8 @@ process __node_process process
 assert __node_assert assert
 path __node_path path
 os __node_os os
+buffer __node_buffer Buffer
+string_decoder __node_string_decoder StringDecoder
 child_process __node_child_process -
 domain __node_domain -
 stream __node_stream -
@@ -119,16 +121,39 @@ src/path/path.ts
 # to compile without a cdylib, which is exactly the coupling PLAN.md's principle
 # 2 keeps out of a pure-computation module.
 #
+# `buffer` and `string_decoder` are conditional for a different reason: they
+# need no `--ext`, but inlining them into every `path`/`events`/`util` bundle
+# would put two more files in front of tests that never mention them. A module
+# may list several files -- `string_decoder` reads `ERR_UNKNOWN_ENCODING` and
+# `__bufNormalizeEncoding` out of `src/buffer/buffer.ts`, exactly as Node's
+# `lib/string_decoder.js` does `require('buffer')` -- and a file already queued
+# is not appended twice, so a test that requires both gets one copy of each.
+#
 # One line per module: `<specifier> <file>`. The files are appended in this
 # order, after BUNDLE_FILES and before the harness.
 CONDITIONAL_FILES="
 os src/os/os.ts
+buffer src/buffer/buffer.ts
+string_decoder src/buffer/buffer.ts
+string_decoder src/string_decoder/string_decoder.ts
+test tools/harness/node_test.ts
+tty tools/harness/node_test.ts
 "
 
 # The harness, which stands on everything above it.
+#
+# `tools/harness/node_test.ts` is *not* here: it declares a top-level
+# `function test(...)`, which is the name several of Node's own test files give
+# their local helper (`test-buffer-tostring-rangeerror.js`,
+# `test-buffer-constructor-node-modules-paths.js`, `test-string-decoder.js`),
+# and two top-level declarations of one name are a compile error in a single
+# Zun program. Inlining it unconditionally therefore reported "duplicate
+# function declaration" for tests whose real blocker is something else
+# entirely. It is in CONDITIONAL_FILES above instead, under both names it
+# provides (`test` and `tty`), so only a test that actually requires one of
+# them gets it.
 HARNESS_FILES="
 tools/harness/common.ts
-tools/harness/node_test.ts
 "
 
 obj_of() { printf '%s\n' "$MODULE_SPECS" | awk -v m="$1" '$1 == m { print $2 }'; }
@@ -148,8 +173,11 @@ FILES="$BUNDLE_FILES"
 while read -r name file; do
   [ -n "${name:-}" ] || continue
   if requires_module "$name"; then
-    FILES="$FILES$file
-"
+    case "$FILES" in
+      *"$file"*) ;;
+      *) FILES="$FILES$file
+";;
+    esac
   fi
 done <<EOF_CONDITIONAL
 $CONDITIONAL_FILES
