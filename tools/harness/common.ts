@@ -205,9 +205,12 @@ const common: any = {
         (typeof name === "string" && name !== "" ? name : "Object")
       );
     }
-    let inspected =
-      typeof input === "string" ? JSON.stringify(input) : String(input);
-    if (Number(inspected.length) > 25) {
+    // `inspect`, not `JSON.stringify`: Node's own helper inspects, so a string
+    // is reported in single quotes (`Received type string ('')`) and that is
+    // the text the corpus compares an `ERR_INVALID_ARG_TYPE` message against.
+    // The 28/25 truncation is Node's too.
+    let inspected: string = inspect(input, { colors: false });
+    if (Number(inspected.length) > 28) {
       inspected = inspected.slice(0, 25) + "...";
     }
     return " Received type " + typeof input + " (" + inspected + ")";
@@ -327,6 +330,17 @@ const common: any = {
 
   allowGlobals(): void {},
 
+  // `common.canCreateSymLink()`. On POSIX anyone may create a symlink; on
+  // Windows it needs the SeCreateSymbolicLinkPrivilege (an elevated shell or
+  // Developer Mode), which Node detects by shelling out to `whoami`. There is
+  // no `child_process` here, so the answer is `true` and the `fs` corpus's
+  // symlink tests fail on an unprivileged Windows with the `EPERM` the
+  // extension reports — which is also what Node does when its own detection is
+  // wrong. On Linux (where CI runs) the answer is simply correct.
+  canCreateSymLink(): boolean {
+    return process.platform !== "win32";
+  },
+
   // `common.hasFipsCrypto` and friends are read as plain flags by a few tests.
   hasFipsCrypto: false,
   hasOpenSSL3: false,
@@ -353,32 +367,70 @@ function __checkWarning(warning: any): void {
   );
 }
 
-// `test/common/fixtures`. The path tests only compute over the returned string,
-// never open it, so the directory is synthesized from the current working
-// directory rather than pointing into a Node checkout.
-const fixtures: any = {
-  fixturesDir: path.join(process.cwd(), "test", "fixtures"),
+// `test/common/fixtures`.
+//
+// The directory is `<test file's directory>/../fixtures`, which is exactly what
+// Node's own test/common/fixtures.js computes (`path.join(__dirname, "..",
+// "fixtures")`) and is the only base that can be right for both kinds of
+// consumer: the `path` and `util` tests only ever *compute* over the string,
+// but an `fs` test opens the file, so the base has to be the directory the
+// runner actually downloaded the fixtures into.
+// `tools/run_node_tests.sh` populates it from
+// `test/<module>/NODE_FIXTURES.txt` beside the downloaded test file; see
+// ../../test/fs/README.md.
+//
+// It is computed **per call**, not once into a `const`: `__dirname` is emitted
+// by the bundler *after* every harness file (it is the test's own location), and
+// a top-level `const` initialized from it runs before that declaration and
+// throws.
+function __fixturesDir(): string {
+  return path.join(__dirname, "..", "fixtures");
+}
 
+function __fixturesJoin(segments: any[]): string {
   // Built with repeated two-argument joins. The argument-shifting half of
   // https://github.com/UrubuCode/zun/issues/1 is fixed, so `apply` would pass
   // the right arguments now, but `path.join` is an object-literal method and a
   // call on an `any` receiver still fails to compile past six arguments
   // (https://github.com/UrubuCode/zun/issues/10), which a fixtures path can
   // easily exceed. The fold has no such ceiling.
+  let result: string = __fixturesDir();
+  for (const segment of segments) result = path.join(result, String(segment));
+  return result;
+}
+
+const fixtures: any = {
   path(...segments: any[]): string {
-    let result = path.join(process.cwd(), "test", "fixtures");
-    for (const segment of segments) result = path.join(result, segment);
-    return result;
+    return __fixturesJoin(segments);
   },
 
+  // Node returns a `URL`; this returns the three members every consumer here
+  // reads off one (`href`, `pathname`, `protocol`), which is also what `fs`'s
+  // `getValidatedPath` needs to turn one back into a path.
   fileURL(...segments: any[]): any {
-    return "file://" + path.join(process.cwd(), "test", "fixtures");
+    let pathname: string = __fixturesJoin(segments).split("\\").join("/");
+    if (pathname.charAt(0) !== "/") pathname = "/" + pathname;
+    return { href: "file://" + pathname, pathname: pathname, protocol: "file:" };
   },
 
+  // Not `__node_fs.readFileSync`: this file is inlined into every bundle,
+  // including the `path`/`events`/`util` ones that do not inline `node:fs` and
+  // must keep compiling without `--ext`. A test that reads a fixture requires
+  // `fs` itself.
   readSync(): string {
     throw new Error("fixtures.readSync is not available in the zun harness");
   },
 };
+
+// `fixtures.fixturesDir` is a getter for the same reason `__fixturesDir` is a
+// function: its value is not knowable until `__dirname` exists.
+Object.defineProperty(fixtures, "fixturesDir", {
+  configurable: true,
+  enumerable: true,
+  get(): string {
+    return __fixturesDir();
+  },
+});
 
 // `child_process` is required by `test-path-resolve.js`, whose Windows-only tail
 // spawns the runtime on a fixture. A real `spawnSync` belongs to the
@@ -399,6 +451,19 @@ const __node_child_process: any = {
 const __node_domain: any = {
   create(): any {
     throw new Error("domain is not available in the zun harness");
+  },
+};
+
+// `node:tty`. The runtime has no TTY facility, so `WriteStream`/`ReadStream` are
+// absent and `common.getTTYfd()` answers -1 — which is a legitimate outcome in
+// Node's own `common` too (it returns -1 when it cannot open `/dev/tty`), so a
+// test that needs a real TTY takes its `common.skip` branch rather than a
+// fabricated one.
+const __node_tty: any = {
+  WriteStream: undefined,
+  ReadStream: undefined,
+  isatty(): boolean {
+    return false;
   },
 };
 

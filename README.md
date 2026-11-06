@@ -9,8 +9,9 @@ A Node module lands here in whichever form fits what it actually does:
 
 - **Native extension modules** — a Rust `cdylib` that exports `zun_register_v1`
   and publishes its functions through the stable `zun_abi` contract. This is for
-  modules that need the operating system: `fs` (`src/fs/`) needs syscalls, so it
-  is Rust and is loaded with `zun run --ext <lib>`.
+  modules that need the operating system, and it is how the *lower half* of
+  `fs` and `os` is written (`src/fs/`, `src/os/`): a syscall cannot be expressed
+  in the language, so it is Rust and is loaded with `zun run --ext <lib>`.
 - **Zun TypeScript modules** — written in the language the platform compiles, and
   run by the engine like any other program. This is for modules that are pure
   computation: `path` (`src/path/path.ts`) is string manipulation end to end, so
@@ -20,11 +21,15 @@ A Node module lands here in whichever form fits what it actually does:
   (`src/os/`, Rust), while the module *Node* exposes is objects, arrays,
   `constants`, validation and `ERR_*` errors (`src/os/os.ts`, Zun TypeScript),
   which reaches the natives with `import * as native from "node:os"`. Its tests
-  are bundled like a TypeScript module **and** run with `--ext`. This is the
-  shape `fs` takes once its Node-API shaping is written, which is why `os`
-  establishes it: ABI v1 carries one scalar word per value, so `os` also fixes
-  how a structured result crosses — one status-prefixed, separator-delimited
-  string per call, documented in [`src/os/mod.rs`](src/os/mod.rs).
+  are bundled like a TypeScript module **and** run with `--ext`. ABI v1 carries
+  one scalar word per value, so `os` also fixes how a structured result
+  crosses — one status-prefixed, separator-delimited string per call,
+  documented in [`src/os/mod.rs`](src/os/mod.rs). **`fs` is the same shape**:
+  `src/fs/*.rs` for the syscalls and the descriptor table,
+  [`src/fs/fs.ts`](src/fs/fs.ts) for the Node API, with one addition `os` did
+  not need — a file's *bytes* cannot ride a NUL-terminated string carrier, so
+  they cross base64 and the TypeScript side turns them into the engine's
+  prelude `Buffer`.
 
 Support slices exist to run Node's own tests, and are Zun TypeScript for the
 same reason: `src/assert/assert.ts` (the strict-mode `assert` surface the tests
@@ -68,14 +73,23 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-fs:start -->
 ### Node.js v25 `fs` compatibility
 
-`░░░░░░░░░░░░░░░░░░░░░░░░` **0.0%** — 0 / 227 Node `test-fs-*` tests passing
+`████░░░░░░░░░░░░░░░░░░░░` **17.6%** — 40 / 227 Node `test-fs-*` tests passing
 <!-- node-fs:end -->
 
-> The `fs` number is near zero by design: running Node's `fs` tests needs the
-> Node-API shaping over the low-level extension functions (Buffers, file
-> descriptors, callbacks and promises, a full `Stats`), `node:test`, and the
-> `test/fixtures/` tree. Those are the next work; this number is how we watch it
-> land. Per-test breakdown: [`test/fs/RESULTS.md`](test/fs/RESULTS.md).
+> `fs` is implemented as **TS over natives**, the `os` kind: `src/fs/*.rs` holds
+> the syscalls and the descriptor table, [`src/fs/fs.ts`](src/fs/fs.ts) holds
+> the Node module — the whole synchronous surface with Node's option shapes,
+> `Stats`/`BigIntStats`/`Dirent`/`Dir`/`StatsFs`, `fs.constants`, the `ERR_*`
+> and libuv-shaped errors, the callback API and `fs.promises`. Streams, `watch`
+> and `glob` are named gaps (they need `node:stream`, a loop event source and a
+> path matcher). What caps the number is not the library but two engine limits:
+> a `Buffer` is opaque through `any`
+> ([zun#38](https://github.com/UrubuCode/zun/issues/38)), so a test file cannot
+> call a method on one this module returns, and the bare `assert(value)` form
+> ([zun#14](https://github.com/UrubuCode/zun/issues/14)) is used by 51 of the
+> 227 files. Per-test breakdown and the full blocker table:
+> [`test/fs/README.md`](test/fs/README.md),
+> [`test/fs/RESULTS.md`](test/fs/RESULTS.md).
 
 <!-- node-util:start -->
 ### Node.js v25 `util` compatibility

@@ -1,0 +1,14 @@
+test/fixtures/a.js
+test/fixtures/baz.js
+test/fixtures/cycles/folder/foo.js
+test/fixtures/cycles/root.js
+test/fixtures/elipses.txt
+test/fixtures/empty.js
+test/fixtures/empty.txt
+test/fixtures/keys/agent1-key.pem
+test/fixtures/loop.js
+test/fixtures/nested-index/one/hello.js
+test/fixtures/nested-index/one/index.js
+test/fixtures/readfile_pipe_test.txt
+test/fixtures/test-fs-readfile-error.js
+test/fixtures/x.txt

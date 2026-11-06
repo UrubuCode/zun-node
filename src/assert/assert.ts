@@ -176,10 +176,11 @@ function __expectationMatches(error: any, boxedExpected: any): boolean {
   const expected: any = __unboxFn(boxedExpected);
   if (expected === undefined) return true;
   if (expected instanceof RegExp) {
-    return __regexTest(
-      expected,
-      String(error && error.message ? error.message : error),
-    );
+    // Node tests the pattern against `String(actual)`, not against the message
+    // (`lib/assert.js`'s `expectedException`), so `assert.throws(fn, /TypeError/)`
+    // matches on the *name* the stringification carries — which is exactly how
+    // several of Node's own `fs` tests spell the expectation.
+    return __regexTest(expected, String(error));
   }
   const kind = typeof expected;
   if (kind === "function") {

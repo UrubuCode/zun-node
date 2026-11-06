@@ -83,10 +83,12 @@ typed read of one of its own members, `err.name` included, throws
 `err.name` and `err.code` constantly, through
 `assert.throws(fn, { code, name })`.
 
-### TS over natives (the `os` pattern, and the one `fs` will take)
+### TS over natives (the `os` pattern, which `fs` now also follows)
 
 `os` is the first module written as **Zun TypeScript on top of extension
-natives**, and the split is deliberate rather than incidental:
+natives**, and `fs` is the second (`src/fs/*.rs` for the syscalls,
+`src/fs/fs.ts` for the Node API). The split is deliberate rather than
+incidental:
 
 - **The extension answers only what needs the kernel.** `src/os/{facts,stats,net,user}.rs`
   are thin ABI wrappers over `src/os/sys/{unix,windows}.rs`, which is where the
@@ -115,17 +117,28 @@ natives**, and the split is deliberate rather than incidental:
 - **Keys are unique across modules.** Those four readers are `node:fs`'s
   `lastError*` functions under different names, because the checker rejects a
   program as soon as a single function *name* is registered by two modules,
-  even when every use site is a namespace member access naming its module.
+  even when every use site is a namespace member access naming its module. The
+  same rule is why every `node:fs` key is `fs`-prefixed (`fsOpen`, `fsStat`, …).
+- **Bytes cross as base64.** `fs` adds one thing `os` did not need: file
+  contents. The `Str` carrier is a NUL-terminated C string, so it can carry
+  neither a NUL byte nor non-UTF-8 data; the read/write payloads are therefore
+  base64, and `src/fs/fs.ts` turns them into the engine's prelude `Buffer`
+  (`Buffer.from(text, "base64")`) and back. base64 over hex because it is 4/3
+  rather than 2× the byte count, and over a latin1 passthrough because that
+  cannot carry NUL; both codecs are native in the engine's `Buffer`, so neither
+  side hand-rolls one.
 
 The tracker knows this as a third module kind, `zun-ts+ext`: bundle the test
-like a TypeScript module, then run the bundle with `--ext`.
+like a TypeScript module, then run the bundle with `--ext`. `os` and `fs` are
+both of that kind.
 
 - **`src/lib.rs`** — `zun_register_v1`, the ABI carrier helpers (`abi` module), the
   shared `Descriptor` type, and shared error retrieval. Extension modules only.
 - **`src/<module>/`** — one folder per Node module (Node's modules are large).
   - An extension module has a `mod.rs` with the module's `DESCRIPTORS` table and
-    submodules by area; e.g. `src/fs/{mod,rw,dirs,meta,links}.rs`. Each function
-    is a `zun_abi::ZunInvoke` over `std`.
+    submodules by area; e.g. `src/fs/{mod,rw,dirs,fd,meta,links,consts,base64,sys}.rs`.
+    Each function is a `zun_abi::ZunInvoke` over `std` (plus `libc` /
+    `windows-sys` for what `std` does not cover, behind `sys.rs`).
   - A Zun TypeScript module is `<name>.ts` in the same place; e.g.
     `src/path/path.ts`. It depends on the engine only through `zun:core`
     (`src/process/process.ts` is the only one that does so today, for `cwd`/`env`).
@@ -254,17 +267,29 @@ gets deleted; nothing else in the tracker changes.
   rather than worked around. The full table is in `test/path/README.md`. A security pass against Node's path CVEs (CVE-2025-23084,
   CVE-2025-27210 and their follow-ups, `toNamespacedPath`, `\\?\` roots) found
   the current implementation matches fixed Node on all 389 attack inputs.
-- **`node:fs` (sync surface): in progress, split across `src/fs/`.** Implemented:
-  existsSync, accessSync, readFileSync (utf8), writeFileSync, appendFileSync,
-  truncateSync, mkdirSync, rmdirSync, unlinkSync, rmSync, readdirSync, mkdtempSync,
-  statSync/lstatSync (kind/size/mtimeMs/atimeMs/birthtimeMs), realpathSync,
-  renameSync, copyFileSync, linkSync, symlinkSync, readlinkSync, plus
-  lastErrorCode/lastErrorMessage. 8 crate tests green (`cargo test`). **Not done:**
-  the acceptance bar is 100% of Node 25's `test-fs-*` suite (227 files — see
-  `test/fs/`), which also needs Buffers, fds, callbacks/promises, streams, watch,
-  Dirent, and the full `Stats`; those land in their own `src/fs/` submodules. Its
-  tracker number stays near 0% until the Node-API shaping and the
-  `test/fixtures/` tree exist.
+- **`node:fs`: TS over natives (the `os` kind), measured against the full Node
+  corpus.** `src/fs/*.rs` holds the syscalls — `open`/`close`/`read`/`write`,
+  `stat`/`fstat`/`statfs`, `readdir` with `UV_DIRENT_*` tags, `mkdir`
+  (reporting the first directory a recursive call created), `rm`, the links,
+  `chmod`/`chown`/`utimes`, `access`, `mkdtemp`, `realpath`, `copyfile`, and the
+  platform `O_*`/`S_*` table — behind a process-wide descriptor registry;
+  `src/fs/fs.ts` is the Node module over them: the whole **sync** surface with
+  Node's option shapes, `Stats`/`BigIntStats`/`StatsFs`/`Dirent`/`Dir`,
+  `fs.constants` (null-prototype), the flag strings, the `ERR_*` validation
+  errors and libuv-shaped `uvException`s, the recursive `cp`, then the
+  **callback** API (argument errors thrown synchronously, operation errors
+  delivered on a later tick) and **`fs.promises`** including `FileHandle`.
+  50 crate tests green (`cargo test`). **Not done:** `createReadStream`/
+  `createWriteStream` (needs `node:stream`), `watch`/`watchFile` (needs a
+  filesystem-event source in the VM loop), `glob`/`globSync` (needs a path
+  matcher), `openAsBlob` (needs `node:buffer`'s `Blob`); each throws
+  `ERR_METHOD_NOT_IMPLEMENTED` rather than being absent. The acceptance bar is
+  100% of Node 25's `test-fs-*` suite (227 files); the per-test blocker table is
+  in `test/fs/README.md`, and the two engine bugs that cap it are
+  [#38](https://github.com/UrubuCode/zun/issues/38) (a `Buffer` is opaque
+  through `any`, so a test body cannot call a method on one this module returns)
+  and [#14](https://github.com/UrubuCode/zun/issues/14) (the bare
+  `assert(value)` form).
 - **`node:events`: implemented in `src/events/events.ts`, measured against the
   full Node corpus.** The whole `EventEmitter` surface is there —
   `on`/`addListener`, `prependListener`, `once`, `prependOnceListener`,

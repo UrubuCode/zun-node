@@ -1,15 +1,19 @@
-//! `node:fs` move/copy and links: renameSync, copyFileSync, linkSync (hard
-//! link), symlinkSync, readlinkSync.
+//! `node:fs` move and links: `fsRename`, `fsLink` (hard link), `fsSymlink`,
+//! `fsReadlink`.
 
 use std::fs;
 
 use zun_abi::ZunValue;
 
-use super::{fs_fail, fs_fail2};
-use crate::abi::{arg_str, ok, ret_str};
+use super::{fail_io, fail_io2, ok, ok_one, sys};
+use crate::abi::{arg_i64, arg_str, ret_str};
 
-/// `fs.renameSync(from, to)`.
-pub(crate) unsafe extern "C" fn rename_sync(args: *const ZunValue, n: usize, _out: *mut ZunValue) -> i32 {
+/// `fsRename(from, to)` — `uv_fs_rename`.
+pub(crate) unsafe extern "C" fn fs_rename(
+    args: *const ZunValue,
+    n: usize,
+    out: *mut ZunValue,
+) -> i32 {
     let from = match unsafe { arg_str(args, n, 0) } {
         Ok(from) => from,
         Err(status) => return status,
@@ -18,30 +22,19 @@ pub(crate) unsafe extern "C" fn rename_sync(args: *const ZunValue, n: usize, _ou
         Ok(to) => to,
         Err(status) => return status,
     };
-    match fs::rename(from, to) {
+    let payload = match fs::rename(from, to) {
         Ok(()) => ok(),
-        Err(err) => fs_fail2(&err, "rename", from, to),
-    }
+        Err(err) => fail_io2("rename", &err, from, to),
+    };
+    unsafe { ret_str(out, &payload) }
 }
 
-/// `fs.copyFileSync(src, dest)`.
-pub(crate) unsafe extern "C" fn copy_file_sync(args: *const ZunValue, n: usize, _out: *mut ZunValue) -> i32 {
-    let src = match unsafe { arg_str(args, n, 0) } {
-        Ok(src) => src,
-        Err(status) => return status,
-    };
-    let dest = match unsafe { arg_str(args, n, 1) } {
-        Ok(dest) => dest,
-        Err(status) => return status,
-    };
-    match fs::copy(src, dest) {
-        Ok(_) => ok(),
-        Err(err) => fs_fail2(&err, "copyfile", src, dest),
-    }
-}
-
-/// `fs.linkSync(existingPath, newPath)` — a hard link.
-pub(crate) unsafe extern "C" fn link_sync(args: *const ZunValue, n: usize, _out: *mut ZunValue) -> i32 {
+/// `fsLink(existingPath, newPath)` — `uv_fs_link`, a hard link.
+pub(crate) unsafe extern "C" fn fs_link(
+    args: *const ZunValue,
+    n: usize,
+    out: *mut ZunValue,
+) -> i32 {
     let existing = match unsafe { arg_str(args, n, 0) } {
         Ok(existing) => existing,
         Err(status) => return status,
@@ -50,16 +43,25 @@ pub(crate) unsafe extern "C" fn link_sync(args: *const ZunValue, n: usize, _out:
         Ok(new_path) => new_path,
         Err(status) => return status,
     };
-    match fs::hard_link(existing, new_path) {
+    let payload = match fs::hard_link(existing, new_path) {
         Ok(()) => ok(),
-        Err(err) => fs_fail2(&err, "link", existing, new_path),
-    }
+        Err(err) => fail_io2("link", &err, existing, new_path),
+    };
+    unsafe { ret_str(out, &payload) }
 }
 
-/// `fs.symlinkSync(target, path)` — a symbolic link. On Windows this creates a
-/// file symlink (Node's default `type` when omitted); directory symlinks are a
-/// follow-up that threads the explicit `type` argument.
-pub(crate) unsafe extern "C" fn symlink_sync(args: *const ZunValue, n: usize, _out: *mut ZunValue) -> i32 {
+/// `fsSymlink(target, path, flags)` — `uv_fs_symlink`.
+///
+/// `flags` is the `UV_FS_SYMLINK_DIR` / `UV_FS_SYMLINK_JUNCTION` pair, which
+/// the TS layer has already resolved from Node's `type` argument (including
+/// Node's own rule that an omitted `type` on Windows is decided by `stat`ing
+/// the target). POSIX has one kind of symlink and ignores the flags, exactly as
+/// libuv does.
+pub(crate) unsafe extern "C" fn fs_symlink(
+    args: *const ZunValue,
+    n: usize,
+    out: *mut ZunValue,
+) -> i32 {
     let target = match unsafe { arg_str(args, n, 0) } {
         Ok(target) => target,
         Err(status) => return status,
@@ -68,29 +70,27 @@ pub(crate) unsafe extern "C" fn symlink_sync(args: *const ZunValue, n: usize, _o
         Ok(path) => path,
         Err(status) => return status,
     };
-    #[cfg(unix)]
-    let result = std::os::unix::fs::symlink(target, path);
-    #[cfg(windows)]
-    let result = std::os::windows::fs::symlink_file(target, path);
-    #[cfg(not(any(unix, windows)))]
-    let result = Err(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "symlink unsupported on this platform",
-    ));
-    match result {
+    let kind = unsafe { arg_i64(args, n, 2) };
+    let payload = match sys::symlink(target, path, kind) {
         Ok(()) => ok(),
-        Err(err) => fs_fail2(&err, "symlink", target, path),
-    }
+        Err(err) => fail_io2("symlink", &err, target, path),
+    };
+    unsafe { ret_str(out, &payload) }
 }
 
-/// `fs.readlinkSync(path)` — the target a symbolic link points to.
-pub(crate) unsafe extern "C" fn readlink_sync(args: *const ZunValue, n: usize, out: *mut ZunValue) -> i32 {
+/// `fsReadlink(path)` — `uv_fs_readlink`, the target a symbolic link holds.
+pub(crate) unsafe extern "C" fn fs_readlink(
+    args: *const ZunValue,
+    n: usize,
+    out: *mut ZunValue,
+) -> i32 {
     let path = match unsafe { arg_str(args, n, 0) } {
         Ok(path) => path,
         Err(status) => return status,
     };
-    match fs::read_link(path) {
-        Ok(target) => unsafe { ret_str(out, &target.to_string_lossy()) },
-        Err(err) => fs_fail(&err, "readlink", path),
-    }
+    let payload = match fs::read_link(path) {
+        Ok(target) => ok_one(&target.to_string_lossy()),
+        Err(err) => fail_io("readlink", &err, path),
+    };
+    unsafe { ret_str(out, &payload) }
 }

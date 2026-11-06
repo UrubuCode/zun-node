@@ -172,16 +172,3 @@ const __node_test: any = {
   beforeEach: __testBox(__testHook),
   afterEach: __testBox(__testHook),
 };
-
-// `node:tty`. The runtime has no TTY facility, so `WriteStream`/`ReadStream` are
-// absent and `common.getTTYfd()` answers -1 — which is a legitimate outcome in
-// Node's own `common` too (it returns -1 when it cannot open `/dev/tty`), so a
-// test that needs a real TTY takes its `common.skip` branch rather than a
-// fabricated one.
-const __node_tty: any = {
-  WriteStream: undefined,
-  ReadStream: undefined,
-  isatty(): boolean {
-    return false;
-  },
-};

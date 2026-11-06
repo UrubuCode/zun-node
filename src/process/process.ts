@@ -156,6 +156,11 @@ __processEmitter.setMaxListeners(0);
 
 const __tickQueue: any = { items: [], scheduled: false };
 
+// Process-wide state `process`'s own methods read and write. `umask` is the
+// only entry today; see `process.umask` for why it is a remembered value
+// rather than a syscall.
+const __processState: any = { umask: __isWindowsHost ? 0 : 0o022 };
+
 function __processPendingTicks(): number {
   return Number(__tickQueue.items.length);
 }
@@ -392,6 +397,21 @@ const process: any = {
   },
   emitWarning(warning: any, type?: any, code?: any): void {
     __processEmitWarning(warning, type, code);
+  },
+  // `process.umask([mask])`. Reading the real umask is a syscall and this
+  // module has no extension of its own (it has to keep compiling without
+  // `--ext`, for the `path` and `events` bundles), so the value is the
+  // platform's own default — 0 on Windows, where there is no umask and Node
+  // reports 0, and 0o022 on POSIX, which is the default every mainstream
+  // distribution and CI image sets. A program that *changes* it is remembered,
+  // so `umask(m)` followed by `umask()` is consistent. The moment `process`
+  // gets a native, this reads the real value.
+  umask(mask?: any): number {
+    const previous: number = Number(__processState.umask);
+    if (mask !== undefined && mask !== null) {
+      __processState.umask = Number(mask);
+    }
+    return previous;
   },
   hrtime(): any[] {
     return [0, 0];
