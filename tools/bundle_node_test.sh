@@ -278,8 +278,22 @@ canon_of() { printf '%s\n' "$MODULE_SPECS" | awk -v m="$1" '$1 == m { print $3 }
 # only, which is exactly what the rewriting rules above match — if that ever
 # grows, this grows with it, and until then a double-quoted require fails the
 # unresolved-require check at the end rather than silently losing a module.
+#
+# A plain name is tested in-shell against the source read once (a `grep` per
+# conditional file cost ~3 s per bundle on Windows); a name written as a regex
+# (`[.][.]/common/tmpdir`) still goes through grep.
+SRC_TEXT="$(<"$SRC")"
+module_required() {
+  case "$SRC_TEXT" in
+    *"require('$1')"*|*"require('node:$1')"*|*"require('$1.js')"*) return 0;;
+  esac
+  return 1
+}
 requires_module() {
-  grep -Eq "require\('(node:)?$1(\.js)?'\)" "$SRC"
+  case "$1" in
+    *[][*?\\]*) grep -Eq "require\('(node:)?$1(\.js)?'\)" "$SRC";;
+    *) module_required "$1";;
+  esac
 }
 
 # The final file list: the always-inlined modules, then the extension-backed
@@ -335,6 +349,13 @@ FILES="$FILES$HARNESS_FILES"
 REWRITE="$(mktemp)"
 LATE="$(mktemp)"
 trap 'rm -f "$REWRITE" "$LATE"' EXIT
+
+# Every per-module rule below matches only that module's own `require(...)`
+# call, so a module the test never requires contributes nothing;
+# `module_required` (defined with `requires_module` above) skips it with an
+# in-shell string test. The rule generation spawns `sed`, `sort` and `tr` per
+# module, which costs ~0.6 s each on Windows and made the bundler, not the
+# engine, the slowest step of every tracker run.
 
 {
   # Strip the CommonJS strict-mode pragma: the bundle is one program and the
@@ -413,6 +434,7 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
 
   printf '%s\n' "$MODULE_SPECS" | while read -r name obj canons; do
     [ -n "${name:-}" ] || continue
+    module_required "$name" || continue
     pat="require('\\(node:\\)\\{0,1\\}$name')"
 
     # The canonical-binding column is a comma-separated **list**, because a
@@ -497,6 +519,7 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
   # must keep `path.join` as it is).
   printf '%s\n' "$MODULE_SPECS" | while read -r name obj canons; do
     [ -n "${name:-}" ] || continue
+    module_required "$name" || continue
     [ "${canons:-}" != "-" ] || continue
     aliases="$(sed -n "s%^[[:space:]]*\(const\|let\|var\)[[:space:]]\{1,\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=[[:space:]]*require('\(node:\)\{0,1\}$name')[[:space:]]*;.*\$%\2%p" "$SRC" | sort -u)"
     for alias in $aliases; do
@@ -521,10 +544,14 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
 # ---------------------------------------------------------------------------
 {
   echo "// ==== zun-node bundle of $(basename "$SRC") ===="
-  printf '%s\n' "$FILES" | while read -r file; do
-    [ -n "${file:-}" ] || continue
-    cat "$ROOT/$file"
-  done
+  # One `cat` over the whole list (a `cat` per file was ~1.7 s on Windows).
+  set --
+  while read -r file; do
+    [ -n "${file:-}" ] && set -- "$@" "$ROOT/$file"
+  done <<EOF_FILES
+$FILES
+EOF_FILES
+  cat "$@"
   echo "const __filename: string = $(json_string "$TEST_PATH");"
   echo "const __dirname: string = $(json_string "$TEST_DIR");"
   echo "// ==== test body ===="

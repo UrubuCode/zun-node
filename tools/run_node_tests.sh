@@ -41,6 +41,7 @@ set -u
 
 ZUN=""; EXT=""; TAG="v25.0.0"; MODULE="fs"; LIMIT=0; TIMEOUT=20
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+JOBS="${JOBS:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --zun) ZUN="$2"; shift 2;;
@@ -49,9 +50,14 @@ while [ $# -gt 0 ]; do
     --module) MODULE="$2"; shift 2;;
     --limit) LIMIT="$2"; shift 2;;
     --timeout) TIMEOUT="$2"; shift 2;;
+    --jobs) JOBS="$2"; shift 2;;
     *) echo "unknown argument: $1" >&2; exit 2;;
   esac
 done
+if [ -z "$JOBS" ]; then
+  cores="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+  JOBS=$(( cores / 2 )); [ "$JOBS" -ge 1 ] || JOBS=1
+fi
 
 # How this module is implemented, and the Node file-name prefix(es) that select
 # its tests. A corpus is not always one prefix: `path`'s includes `test-path.js`
@@ -177,6 +183,7 @@ note_of() {
     | tr -d '\r' \
     | grep -m1 . \
     | sed -e "s|$WORK_NATIVE/||g" -e "s|$WORK/||g" -e "s|$ROOT/||g" \
+          -e 's/0x[0-9a-fA-F]\{6,\}/0x…/g' \
           ${HOST_NAME:+-e "s|$HOST_NAME|<hostname>|g"} \
           ${USER_NAME:+-e "s|$USER_NAME|<user>|g"} \
           -e 's/OxcDiagnostic *{ *inner: *OxcDiagnosticInner *{ *message: /parse error: /' \
@@ -198,25 +205,27 @@ fi
 TOTAL=${#NAMES[@]}
 [ "$TOTAL" -gt 0 ] || { echo "no tests matching $PATTERN in $LIST" >&2; exit 2; }
 
-PASS=0
-ROWS=""
-i=0
-for name in "${NAMES[@]}"; do
-  i=$((i + 1))
+# Each test runs in its own job and writes one result file; the rows are joined
+# in corpus order afterwards, so RESULTS.md is identical to a serial run. JOBS
+# defaults to half the cores (each run is single-threaded, and the timeout must
+# not fire just because the machine is oversubscribed); --jobs 1 is serial.
+mkdir -p "$WORK/rows"
+run_one() {
+  local i="$1" name="$2" src bundle bundle_err err code low short
   src="$WORK/test/parallel/$name"
   if ! curl -fsSL --max-time "$TIMEOUT" "$RAW/$name" -o "$src" 2>/dev/null; then
-    ROWS+="| \`$name\` | ⚠️ download failed | $RAW/$name |"$'\n'
+    printf 'fail\t| `%s` | ⚠️ download failed | %s |\n' "$name" "$RAW/$name" > "$WORK/rows/$i"
     echo "[$i/$TOTAL] $name: download failed" >&2
-    continue
+    return
   fi
 
   case "$KIND" in
     zun-ts|zun-ts+ext)
       bundle="$WORK/bundles/${name%.*}.ts"
       if ! bundle_err="$(bash "$BUNDLER" "$src" "$bundle" 2>&1 >/dev/null)"; then
-        ROWS+="| \`$name\` | ❌ bundle failed | $(note_of "$bundle_err") |"$'\n'
+        printf 'fail\t| `%s` | ❌ bundle failed | %s |\n' "$name" "$(note_of "$bundle_err")" > "$WORK/rows/$i"
         echo "[$i/$TOTAL] $name: bundle failed" >&2
-        continue
+        return
       fi
       # A `zun-ts+ext` module is TypeScript whose own facts are syscalls in the
       # extension, so its bundle needs the bundler *and* --ext.
@@ -230,8 +239,8 @@ for name in "${NAMES[@]}"; do
   esac
 
   if [ "$code" -eq 0 ]; then
-    PASS=$((PASS + 1)); short="pass"
-    ROWS+="| \`$name\` | ✅ pass | |"$'\n'
+    short="pass"
+    printf 'pass\t| `%s` | ✅ pass | |\n' "$name" > "$WORK/rows/$i"
   else
     low="$(printf '%s' "$err" | tr '[:upper:]' '[:lower:]')"
     case "$low" in
@@ -243,9 +252,28 @@ for name in "${NAMES[@]}"; do
       *) short="runtime";;
     esac
     [ "$code" -eq 124 ] && short="timeout"
-    ROWS+="| \`$name\` | ❌ $short | $(note_of "$err") |"$'\n'
+    printf 'fail\t| `%s` | ❌ %s | %s |\n' "$name" "$short" "$(note_of "$err")" > "$WORK/rows/$i"
   fi
   echo "[$i/$TOTAL] $name: $short" >&2
+}
+
+i=0
+for name in "${NAMES[@]}"; do
+  i=$((i + 1))
+  while [ "$(jobs -rp | wc -l)" -ge "$JOBS" ]; do wait -n 2>/dev/null || true; done
+  run_one "$i" "$name" &
+done
+wait
+
+PASS=0
+ROWS=""
+i=0
+while [ "$i" -lt "$TOTAL" ]; do
+  i=$((i + 1))
+  [ -f "$WORK/rows/$i" ] || continue
+  IFS=$'\t' read -r status row < "$WORK/rows/$i"
+  [ "$status" = "pass" ] && PASS=$((PASS + 1))
+  ROWS+="$row"$'\n'
 done
 
 # Percentage to one decimal and a 24-cell bar, with integer arithmetic.
