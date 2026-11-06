@@ -915,6 +915,60 @@ gets deleted; nothing else in the tracker changes.
   discarded (zun#78), and every regular expression is a hand-written scan,
   because a `RegExp` read out of a module-level `const` inside a function has
   lost its methods (zun#7). Table in `test/readline/README.md`.
+- **`node:v8`: complete, `src/v8/v8.ts`.** V8's `ValueSerializer` wire format
+  (version 15) escrito do zero e **byte-identical ao Node**: o cabeçalho
+  `ff 0f`, o alfabeto de tags de um byte, varints zigzag, doubles IEEE-754
+  little-endian, strings de um e de dois bytes com a regra de `kPadding`, o
+  split denso/esparso de arrays, a numeração de `kObjectReference`, `Map`,
+  `Set`, `Date`, `RegExp` com os bits de flag, `BigInt` em dígitos de 64 bits,
+  `Error` com os tags de protótipo, e os views como *host objects* pelos hooks
+  que o Node acrescenta (`DefaultSerializer`/`DefaultDeserializer`,
+  `_writeHostObject`/`_readHostObject`, `_getDataCloneError`,
+  `writeUint32`/`writeUint64`/`writeDouble`/`writeRawBytes`,
+  `transferArrayBuffer`, `getWireFormatVersion`). As 53 linhas da tabela de
+  `test/v8/README.md` foram conferidas contra o hex que o `node` imprime.
+  A outra metade do módulo é o *isolate*, que não existe aqui: espaços de
+  heap, profiler de amostragem, stream de eventos de GC e grafo de heap são
+  facilidades do V8. Essas leituras são **shape-true e content-empty** — as
+  chaves, os tipos e os formatos de arquivo são os do Node, os números são o
+  que o host observa (`getHeapStatistics` tira três valores de
+  `process.memoryUsage()` e zera os outros onze; `getHeapSpaceStatistics` dá
+  os treze nomes de espaço do V8 com tamanho zero; `getHeapSnapshot()`
+  devolve um `.heapsnapshot` válido e vazio; `startCpuProfile().stop()` um
+  `.cpuprofile` válido sem amostras; `cachedDataVersionTag()` um hash da
+  versão da engine mais as flags vistas até ali, que é por que ele muda depois
+  de `setFlagsFromString`). Quatro entradas não podem ser respondidas assim e
+  lançam com o motivo nomeado — `queryObjects`, `writeHeapSnapshot`,
+  `promiseHooks` e, na escrita, qualquer `ArrayBufferView` que não seja
+  `Uint8Array`/`Buffer`, porque a *largura do elemento* de um view é invisível
+  através de um `any` (zun#38) e adivinhá-la seria pior que recusar. Duas
+  descobertas novas de engine saíram daqui, com repro em
+  `test/v8/README.md`: uma função atribuída a uma instância de classe é
+  perdida (mesma raiz de zun#78) e um `const x: DataView` de topo não é um
+  `DataView` dentro de uma função. Tabela em `test/v8/README.md`, resultado
+  por teste em `test/v8/RESULTS.md`.
+- **`node:tty`: completo, `src/tty/tty.ts`.** `isatty(fd)` de verdade (o
+  predicado que `src/process/process.ts` já responde), `ReadStream` e
+  `WriteStream` como `Duplex` sobre os fds 0–2 com `ERR_INVALID_FD` e
+  `ERR_TTY_INIT_FAILED` exatos, `getColorDepth`/`hasColors` com a tabela de
+  ambiente inteira de `lib/internal/tty.js` na ordem do Node (`FORCE_COLOR` e
+  seu aviso único, `NO_COLOR`/`NODE_DISABLE_COLORS`/`TERM=dumb`, o build do
+  Windows, `TMUX`, Azure DevOps, os oito fornecedores de CI, o regexp de
+  versão do TeamCity, `TERM_PROGRAM`, `COLORTERM`, os regexps de `TERM` e a
+  tabela do `dircolors`), `getWindowSize`, e os quatro métodos de cursor
+  delegando às funções do `readline` **pelo objeto de módulo**, porque essa
+  indireção é observável. Substitui o stub `__node_tty` que vivia em
+  `tools/harness/common.ts`, e com ele `common.getTTYfd()` passa a procurar
+  nos fds 0–2 em vez de responder -1 sempre. Três lacunas, nomeadas no
+  arquivo: tamanho de janela e modo raw não têm capacidade embaixo (não há
+  `uv_tty_get_winsize` nem `uv_tty_set_mode`), e o refinamento Windows de
+  `getColorDepth` para 256/16m precisa de `os.release()` — `node:os` é
+  extensão nativa e um bundle de `node:tty` roda sem `--ext`, porque o corpus
+  do `console` exige `node:tty`. Uma descoberta nova de engine: recursão
+  profunda estoura a pilha **nativa** (`thread '<unknown>' has overflowed its
+  stack`) em vez de levantar `RangeError`, o que derruba
+  `test-ttywrap-stack.js`. Tabela em `test/tty/README.md`, resultado por teste
+  em `test/tty/RESULTS.md`.
 - **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
   `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
   `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,

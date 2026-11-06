@@ -164,7 +164,9 @@ internal/util/inspect __node_internal_util_inspect -
 vm __node_vm -
 crypto __node_crypto -
 test __node_test test
-tty __node_tty -
+v8 __node_v8 Serializer,Deserializer,DefaultSerializer,DefaultDeserializer,GCProfiler
+tty __node_tty ReadStream,WriteStream
+internal/tty __node_internal_tty -
 worker_threads __node_worker_threads -
 perf_hooks __node_perf_hooks PerformanceEntry,PerformanceMark,PerformanceMeasure,PerformanceObserver,PerformanceObserverEntryList,PerformanceResourceTiming,Performance,createHistogram,monitorEventLoopDelay
 "
@@ -244,6 +246,20 @@ src/process/native.ts
 # readline tests push lines into. It stands on `Stream`, so it is listed after
 # `stream`'s own files.
 #
+# `tty` stands on `stream` (its two terminal streams are `Duplex`es) and on
+# `readline` — `lib/tty.js` lazily requires `readline` for `cursorTo`,
+# `moveCursor`, `clearLine` and `clearScreenDown`, and reaching them *through*
+# the module object is observable behaviour (`test-tty-backwards-api.js`
+# replaces them). Only `src/readline/readline.ts` is listed, which is the file
+# that holds those four functions and `__node_readline`; the `Interface` half
+# (`callback.ts` / `promises.ts`) comes along only when the test requires
+# `readline` itself, and the `readline` block above is listed first so that a
+# test requiring both gets one copy in dependency order.
+#
+# `v8` stands on `stream` for one member: `getHeapSnapshot()` answers a
+# `Readable`. The serializer itself is pure computation over the engine's
+# `Buffer` and a `DataView`.
+#
 # One line per module: `<specifier> <file>`. The files are appended in this
 # order, after BUNDLE_FILES and before the harness.
 CONDITIONAL_FILES="
@@ -306,6 +322,20 @@ internal/util/inspect src/readline/readline.ts
 [.][.]/common/arraystream src/string_decoder/string_decoder.ts
 [.][.]/common/arraystream src/stream/stream.ts
 [.][.]/common/arraystream tools/harness/arraystream.ts
+tty src/buffer/buffer.ts
+tty src/string_decoder/string_decoder.ts
+tty src/stream/stream.ts
+tty src/readline/readline.ts
+tty src/tty/tty.ts
+internal/tty src/buffer/buffer.ts
+internal/tty src/string_decoder/string_decoder.ts
+internal/tty src/stream/stream.ts
+internal/tty src/readline/readline.ts
+internal/tty src/tty/tty.ts
+v8 src/buffer/buffer.ts
+v8 src/string_decoder/string_decoder.ts
+v8 src/stream/stream.ts
+v8 src/v8/v8.ts
 "
 
 # The harness, which stands on everything above it.
@@ -317,9 +347,8 @@ internal/util/inspect src/readline/readline.ts
 # and two top-level declarations of one name are a compile error in a single
 # Zun program. Inlining it unconditionally therefore reported "duplicate
 # function declaration" for tests whose real blocker is something else
-# entirely. It is in CONDITIONAL_FILES above instead, under both names it
-# provides (`test` and `tty`), so only a test that actually requires one of
-# them gets it.
+# entirely. It is in CONDITIONAL_FILES above instead, under the one name it
+# provides (`test`), so only a test that actually requires it gets it.
 HARNESS_FILES="
 tools/harness/common.ts
 "

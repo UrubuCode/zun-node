@@ -9,7 +9,8 @@
 # All three module kinds are measured (see ../../PLAN.md):
 #   * `util`, `assert`, `path`, `events`, `buffer`, `string_decoder`,
 #     `querystring`, `punycode`, `url`, `timers`, `stream`,
-#     `diagnostics_channel`, `console` and `perf_hooks` are Zun TypeScript, so
+#     `diagnostics_channel`, `console`, `perf_hooks`, `v8` and `tty` are Zun
+#     TypeScript, so
 #     they need only
 #     the `zun` binary: each test is bundled by tools/bundle_node_test.sh and run as
 #     `zun run <bundle.ts>`, with no --ext. (`buffer` is TypeScript although
@@ -34,7 +35,7 @@ on:
   workflow_dispatch:
     inputs:
       module:
-        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, stream, diagnostics_channel, console, perf_hooks, readline, process, os, fs, child_process, zlib, … or "all")
+        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, stream, diagnostics_channel, console, perf_hooks, v8, tty, readline, process, os, fs, child_process, zlib, … or "all")
         default: all
       limit:
         description: Only the first N tests (0 = all)
@@ -92,7 +93,7 @@ jobs:
           ZUN="$PWD/target/debug/zun"
           EXT="$PWD/zun-node/target/debug/libzun_node.so"
           case "$MODULE" in
-            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks readline process os fs child_process zlib";;
+            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks v8 tty readline process os fs child_process zlib";;
             *)   MODULES="$MODULE";;
           esac
           test -f "$EXT" || { echo "extension cdylib missing: $EXT" >&2; exit 1; }
@@ -102,7 +103,7 @@ jobs:
             # whose bundle calls into the cdylib -- and `readline`, which calls
             # into no native itself but whose corpus reads input from files.
             case "$m" in
-              util|assert|path|events|buffer|string_decoder|querystring|punycode|url|timers|stream|diagnostics_channel|console|perf_hooks) EXT_ARGS="";;
+              util|assert|path|events|buffer|string_decoder|querystring|punycode|url|timers|stream|diagnostics_channel|console|perf_hooks|v8|tty) EXT_ARGS="";;
               *)           EXT_ARGS="--ext $EXT";;
             esac
             bash zun-node/tools/run_node_tests.sh \
