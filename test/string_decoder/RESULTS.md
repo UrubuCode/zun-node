@@ -13,6 +13,6 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-string-decoder-end.js` | ❌ type error | bundles/test-string-decoder-end.ts:9273:55: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuf |
-| `test-string-decoder-fuzz.js` | ❌ type error | bundles/test-string-decoder-fuzz.ts:9253:26: error: [SEM0001] 'Math.random' is not supported yet |
-| `test-string-decoder.js` | ❌ type error | bundles/test-string-decoder.ts:9522:26: error: [SEM0001] 'writeSequences' expects 0 to 3 argument(s), found 4 |
+| `test-string-decoder-end.js` | ❌ type error | bundles/test-string-decoder-end.ts:18481:55: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBu |
+| `test-string-decoder-fuzz.js` | ❌ type error | bundles/test-string-decoder-fuzz.ts:18461:26: error: [SEM0001] 'Math.random' is not supported yet |
+| `test-string-decoder.js` | ❌ type error | bundles/test-string-decoder.ts:18730:26: error: [SEM0001] 'writeSequences' expects 0 to 3 argument(s), found 4 |

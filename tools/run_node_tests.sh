@@ -130,7 +130,10 @@ esac
 # one. Every bundle inlines `src/process/process.ts`, and the `zun-ts` kinds run
 # without `--ext`, so the gate cannot live in the module table; see
 # EXT_FILES in tools/bundle_node_test.sh.
-if [ -n "$EXT" ]; then
+# Only for a kind that actually runs with `--ext`: a `zun-ts` module given an
+# `--ext` (convenient when looping over every module) must still bundle and run
+# without the extension.
+if [ -n "$EXT" ] && [ "$KIND" != "zun-ts" ]; then
   export ZUN_NODE_EXT="$EXT"
 fi
 

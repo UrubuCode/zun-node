@@ -14,8 +14,8 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | Test | Result | Why |
 |---|---|---|
 | `test-diagnostics-channel-bind-store.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-diagnostics-channel-gc-maintains-subcriptions.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x192fdc29d30)) |
-| `test-diagnostics-channel-gc-race-condition.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x220ff25d0c0)) |
+| `test-diagnostics-channel-gc-maintains-subcriptions.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-diagnostics-channel-gc-race-condition.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-diagnostics-channel-has-subscribers.js` | ✅ pass | |
 | `test-diagnostics-channel-http-server-start.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-diagnostics-channel-http-server-start.js: |
 | `test-diagnostics-channel-http.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-diagnostics-channel-http.js: |
@@ -46,12 +46,12 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-diagnostics-channel-symbol-named.js` | ✅ pass | |
 | `test-diagnostics-channel-sync-unsubscribe.js` | ✅ pass | |
 | `test-diagnostics-channel-tracing-channel-args-types.js` | ✅ pass | |
-| `test-diagnostics-channel-tracing-channel-callback-early-exit.js` | ❌ engine panic | thread '<unnamed>' (5784) panicked at crates\zun_interp\src\value.rs:228:22: |
+| `test-diagnostics-channel-tracing-channel-callback-early-exit.js` | ❌ engine panic | thread '<unnamed>' (44692) panicked at crates\zun_interp\src\value.rs:228:22: |
 | `test-diagnostics-channel-tracing-channel-callback-error.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-diagnostics-channel-tracing-channel-callback-run-stores.js` | ✅ pass | |
-| `test-diagnostics-channel-tracing-channel-callback.js` | ❌ type error | bundles/test-diagnostics-channel-tracing-channel-callback.ts:16398:1: error: [SEM0001] type Any has no methods |
+| `test-diagnostics-channel-tracing-channel-callback.js` | ❌ type error | bundles/test-diagnostics-channel-tracing-channel-callback.ts:18148:1: error: [SEM0001] type Any has no methods |
 | `test-diagnostics-channel-tracing-channel-has-subscribers.js` | ✅ pass | |
-| `test-diagnostics-channel-tracing-channel-promise-early-exit.js` | ❌ engine panic | thread '<unnamed>' (39264) panicked at crates\zun_interp\src\value.rs:228:22: |
+| `test-diagnostics-channel-tracing-channel-promise-early-exit.js` | ❌ engine panic | thread '<unnamed>' (36364) panicked at crates\zun_interp\src\value.rs:228:22: |
 | `test-diagnostics-channel-tracing-channel-promise-error.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-diagnostics-channel-tracing-channel-promise-run-stores.js` | ✅ pass | |
 | `test-diagnostics-channel-tracing-channel-promise-unhandled.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
@@ -61,4 +61,4 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-diagnostics-channel-tracing-channel-sync-run-stores.js` | ✅ pass | |
 | `test-diagnostics-channel-tracing-channel-sync.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-diagnostics-channel-udp.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-diagnostics-channel-udp.js: |
-| `test-diagnostics-channel-worker-threads.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-diagnostics-channel-worker-threads.js: |
+| `test-diagnostics-channel-worker-threads.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |

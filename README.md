@@ -116,7 +116,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-fs:start -->
 ### Node.js v25 `fs` compatibility
 
-`████░░░░░░░░░░░░░░░░░░░░` **18.5%** — 42 / 227 Node `test-fs-*` tests passing
+`████░░░░░░░░░░░░░░░░░░░░` **19.8%** — 45 / 227 Node `test-fs-*` tests passing
 <!-- node-fs:end -->
 
 > `fs` is implemented as **TS over natives**, the `os` kind: `src/fs/*.rs` holds
@@ -321,7 +321,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-buffer:start -->
 ### Node.js v25 `buffer` compatibility
 
-`░░░░░░░░░░░░░░░░░░░░░░░░` **3.1%** — 2 / 64 Node `test-buffer*` tests passing
+`█░░░░░░░░░░░░░░░░░░░░░░░` **6.2%** — 4 / 64 Node `test-buffer*` tests passing
 <!-- node-buffer:end -->
 
 > `buffer` is the first module whose central object is **the engine's**, not
@@ -469,7 +469,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-timers:start -->
 ### Node.js v25 `timers` compatibility
 
-`██████████░░░░░░░░░░░░░░` **44.8%** — 26 / 58 Node `test-timers*` tests passing
+`█████████████░░░░░░░░░░░` **56.8%** — 33 / 58 Node `test-timers*` tests passing
 <!-- node-timers:end -->
 
 > `timers` is the first module whose *substance* was already in the engine: the
@@ -512,7 +512,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-process:start -->
 ### Node.js v25 `process` compatibility
 
-`██████████░░░░░░░░░░░░░░` **43.7%** — 42 / 96 Node `test-process-*` tests passing
+`███████████░░░░░░░░░░░░░` **45.8%** — 44 / 96 Node `test-process-*` tests passing
 <!-- node-process:end -->
 
 > `process` is the module every other bundle in this library stands on, and the
@@ -532,7 +532,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-child_process:start -->
 ### Node.js v25 `child_process` compatibility
 
-`░░░░░░░░░░░░░░░░░░░░░░░░` **2.7%** — 3 / 109 Node `test-child-process*` tests passing
+`░░░░░░░░░░░░░░░░░░░░░░░░` **3.6%** — 4 / 109 Node `test-child-process*` tests passing
 <!-- node-child_process:end -->
 
 > `child_process` is **TS over natives** (the `os` kind) and deliberately **half
@@ -576,7 +576,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-stream:start -->
 ### Node.js v25 `stream` compatibility
 
-`█████████░░░░░░░░░░░░░░░` **38.7%** — 79 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
+`█████████░░░░░░░░░░░░░░░` **39.7%** — 81 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
 <!-- node-stream:end -->
 
 > `stream` is the largest module here by a wide margin — 204 Node files against
@@ -717,5 +717,5 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-console:start -->
 ### Node.js v25 `console` compatibility
 
-`███████░░░░░░░░░░░░░░░░░` **31.8%** — 7 / 22 Node `test-console*` tests passing
+`████████░░░░░░░░░░░░░░░░` **36.3%** — 8 / 22 Node `test-console*` tests passing
 <!-- node-console:end -->

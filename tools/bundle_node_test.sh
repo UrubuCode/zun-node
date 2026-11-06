@@ -434,7 +434,7 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
 
   printf '%s\n' "$MODULE_SPECS" | while read -r name obj canons; do
     [ -n "${name:-}" ] || continue
-    module_required "$name" || continue
+    requires_module "$name" || continue
     pat="require('\\(node:\\)\\{0,1\\}$name')"
 
     # The canonical-binding column is a comma-separated **list**, because a
@@ -519,7 +519,7 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
   # must keep `path.join` as it is).
   printf '%s\n' "$MODULE_SPECS" | while read -r name obj canons; do
     [ -n "${name:-}" ] || continue
-    module_required "$name" || continue
+    requires_module "$name" || continue
     [ "${canons:-}" != "-" ] || continue
     aliases="$(sed -n "s%^[[:space:]]*\(const\|let\|var\)[[:space:]]\{1,\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=[[:space:]]*require('\(node:\)\{0,1\}$name')[[:space:]]*;.*\$%\2%p" "$SRC" | sort -u)"
     for alias in $aliases; do

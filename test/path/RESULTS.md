@@ -19,14 +19,14 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-path-extname.js` | ✅ pass | |
 | `test-path-glob.js` | ✅ pass | |
 | `test-path-isabsolute.js` | ✅ pass | |
-| `test-path-join.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x14046ceaa00)) |
+| `test-path-join.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-path-makelong.js` | ✅ pass | |
 | `test-path-normalize.js` | ✅ pass | |
 | `test-path-parse-format.js` | ✅ pass | |
 | `test-path-posix-exists.js` | ✅ pass | |
 | `test-path-posix-relative-on-windows.js` | ✅ pass | |
 | `test-path-relative.js` | ✅ pass | |
-| `test-path-resolve.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x21ff9cf18b0)) |
+| `test-path-resolve.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-path-win32-exists.js` | ✅ pass | |
 | `test-path-win32-normalize-device-names.js` | ✅ pass | |
 | `test-path-zero-length-strings.js` | ✅ pass | |

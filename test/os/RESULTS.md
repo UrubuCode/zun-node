@@ -18,5 +18,5 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-os-eol.js` | ✅ pass | |
 | `test-os-fast.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-os-fast.js: |
 | `test-os-homedir-no-envvar.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-os-process-priority.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x1cdd162c7e0)) |
+| `test-os-process-priority.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-os-userinfo-handles-getter-errors.js` | ✅ pass | |
