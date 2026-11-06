@@ -343,13 +343,39 @@ gets deleted; nothing else in the tracker changes.
   through `process.emitWarning`, and `captureRejections` — plus the module
   statics `once`, `on`, `getEventListeners`, `getMaxListeners`,
   `setMaxListeners`, `listenerCount`, `addAbortListener`, `errorMonitor`,
-  `captureRejectionSymbol`, `defaultMaxListeners`, `usingDomains`. Listener
-  storage is null-prototype-safe, so a `__proto__` event name works. A
+  `captureRejectionSymbol`, `defaultMaxListeners`, `usingDomains` — and
+  **`EventEmitter.prototype`** as Node's own object: `constructor`, the three
+  bookkeeping defaults (`_events`, `_eventsCount`, `_maxListeners`) and every
+  instance method, each one reachable *and callable with a receiver*, with `on`
+  aliasing `addListener` and `off` aliasing `removeListener` the way
+  `lib/events.js` assigns them. The engine's class prototype carries neither
+  `constructor` nor the class's methods
+  ([#51](https://github.com/UrubuCode/zun/issues/51)), but the object itself is
+  real and writable, and an **object-literal method** is the one callable the
+  engine threads a receiver into — `m.call(recv, a, b)` binds `this` *and*
+  passes the arguments, where a plain function value loses `this`
+  ([#1](https://github.com/UrubuCode/zun/issues/1)) and a function held in a
+  class static field cannot be called at all. Every prototype entry is therefore
+  an object-literal method forwarding `this` to the same free function the class
+  method calls, so the two spellings are one implementation. Listener
+  storage is null-prototype-safe, so a `__proto__` event name works, and an
+  event name that is not a symbol goes through ToPropertyKey (`ee.on(123, fn)`
+  occupies the slot `"123"`), which this engine does not do for a function value
+  under a numeric key. A
   differential self-test over every method, both meta-events, the error paths,
   the warning text and the storage shapes passes clean; **every remaining test
   failure is an engine gap**, catalogued test by test in `test/events/README.md`
-  (member `new`, the remaining half of class statics, no receiver threading,
-  class bases, `internal/` modules). Symbol identity
+  (no receiver threading into a plain function, `instanceof Object` on a
+  null-prototype object, the function-constructor model, a boxed `then` handler,
+  `internal/event_target` over an `EventTarget` a library may not replace).
+  `tools/bundle_node_test.sh` carries one rewrite for this module: the five
+  module statics that share a name with an instance method
+  (`once`, `on`, `listenerCount`, `getMaxListeners`, `setMaxListeners`) are
+  routed from `EventEmitter.<name>(` to `__node_events.<name>(`, which in Node is
+  literally the same function — `module.exports = EventEmitter` with
+  `EventEmitter.once = once` and `exports.once = once` — because the checker will
+  not let one class carry both
+  ([#20](https://github.com/UrubuCode/zun/issues/20)). Symbol identity
   ([#23](https://github.com/UrubuCode/zun/issues/23)) was fixed and
   `test-events-list.js` passes; six workarounds came out with it — `emit` is
   `emit(type, ...args)` again, `prependListener` uses `unshift`,
@@ -374,7 +400,16 @@ gets deleted; nothing else in the tracker changes.
   what cost `test-event-emitter-special-event-names.js` its pass); and
   `events.__proto__ = value` sets the *prototype* of a null-prototype object
   instead of creating an own property for every value but a bare callable, so
-  `Object.defineProperty` installs the rest. The `captureRejections` flag is a
+  `Object.defineProperty` installs the rest. Two more compensations landed with
+  the prototype work: every closure that collects its call arguments takes a
+  real **rest parameter**, because the parser injects a synthetic rest parameter
+  into the enclosing function wherever it finds that word textually
+  ([#40](https://github.com/UrubuCode/zun/issues/40)) and a dynamic call through
+  the module object then aborts with `spread: value is not iterable`; and every
+  slot key passes through `__evKeyOf`, since a *function* stored under a numeric
+  computed key is silently dropped here while the same function under `"123"`
+  round-trips.
+  The `captureRejections` flag is a
   declared field, which is what keeps
   [#37](https://github.com/UrubuCode/zun/issues/37) out of the module. `events.ts`
   also owns the library's three coded-error bases, and their message assembly is
@@ -1082,7 +1117,9 @@ gets deleted; nothing else in the tracker changes.
   shape: the EventEmitter surface, `nextTick`, the `exit`/`exitCode`/`reallyExit`
   ordering (an 'exit' listener that calls `process.exit(0)` wins over the
   `exit(1)` that started it, and does not re-emit), `emitWarning`'s full option
-  grammar with `noDeprecation`/`throwDeprecation`/`traceDeprecation`,
+  grammar with `noDeprecation`/`throwDeprecation`/`traceDeprecation` (and a
+  warning's `code` is `undefined`, not `""`, when none was passed — which is
+  what `test-util-deprecate.js` reads),
   `kill`'s signal table and monkey-patchable `_kill`, `cpuUsage`'s validation
   order, `memoryUsage.rss`/`hrtime.bigint`, `config` (frozen), `features`,
   `release`, `versions`, `allowedNodeEnvironmentFlags` (Node's frozen

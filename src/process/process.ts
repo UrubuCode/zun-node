@@ -775,7 +775,11 @@ function __processReportUncaught(error: any): void {
 // (https://github.com/UrubuCode/zun/issues/37). `name` is a getter over
 // `warningName` because `name` on an `Error` subclass cannot be assigned.
 class ProcessWarning extends Error {
-  code: string = "";
+  // `code` is `any`, not `string`, and defaults to `undefined`: Node leaves a
+  // warning's `code` absent unless one was passed, and
+  // `test-util-deprecate.js` asserts `warning.code === undefined` for a
+  // `util.deprecate()` with no code. A `string` field would read back `""`.
+  code: any = undefined;
   detail: any = undefined;
   warningName: string = "Warning";
   constructor(message: string) {

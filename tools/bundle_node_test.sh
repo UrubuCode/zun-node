@@ -778,6 +778,29 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
     done
   done
 
+  # Engine workaround (https://github.com/UrubuCode/zun/issues/20): five of
+  # `events`' module statics share a name with an `EventEmitter` *instance*
+  # method -- `once`, `on`, `listenerCount`, `getMaxListeners` and
+  # `setMaxListeners` -- and this engine's checker will not let one class carry
+  # both ("duplicate method `once`"), nor resolve `EventEmitter.once(...)` to
+  # anything but the instance method ("instance method `once` must be called
+  # through an object"). In Node the two spellings are *literally the same
+  # function*: `lib/events.js` is `module.exports = EventEmitter` with
+  # `EventEmitter.once = once` and `exports.once = once`, so
+  # `require('events').once === require('events').EventEmitter.once`. The static
+  # spelling is therefore rewritten to the module-object one, which denotes the
+  # same function and only changes the lane the engine takes -- the same move
+  # the `stream.Readable` -> `Readable` rule above makes for zun#18.
+  #
+  # The match requires the call parenthesis immediately after the name, so
+  # `EventEmitter.prototype.on.call(...)` (a different member read, served by
+  # the prototype object `src/events/events.ts` installs) and
+  # `EventEmitter.defaultMaxListeners` (a real class static) are left as
+  # written.
+  if requires_module "events"; then
+    printf '%s\n' "s#\\bEventEmitter\\.\\(once\\|on\\|listenerCount\\|getMaxListeners\\|setMaxListeners\\)(#__node_events.\\1(#g"
+  fi
+
   # The body-wide alias renames, last of all: by this point every
   # `require('<specifier>')` in the body has already become its module object,
   # so a one-letter alias (`R`, `W`, `D`, `EE`, `SD`) can no longer collide

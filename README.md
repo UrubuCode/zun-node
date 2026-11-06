@@ -181,7 +181,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-util:start -->
 ### Node.js v25 `util` compatibility
 
-`█████░░░░░░░░░░░░░░░░░░░` **23.0%** — 6 / 26 Node `test-util*` tests passing
+`██████░░░░░░░░░░░░░░░░░░` **26.9%** — 7 / 26 Node `test-util*` tests passing
 <!-- node-util:end -->
 
 > `util` is implemented end to end — `inspect` with every option Node documents
@@ -213,6 +213,13 @@ the direct `zun run --ext <lib> <test.js>` path.
 > blocker-by-blocker table is in
 > [`test/util/README.md`](test/util/README.md), the per-test breakdown in
 > [`test/util/RESULTS.md`](test/util/RESULTS.md).
+>
+> One file joined the passing set without a line of `util.ts` changing:
+> `test-util-deprecate.js` needed a one-field fix one module over.
+> `ProcessWarning.code` in `src/process/process.ts` was declared `string = ""`,
+> so a warning raised with no code reported `''` where Node reports `undefined`.
+> A warning has a `code` only when one was passed, which is what the field says
+> now (`any = undefined`).
 >
 > One `inspect` bug came out of this engine update and is fixed here: a
 > `functionBox` record reports `typeof === "function"` now rather than
@@ -287,33 +294,49 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **34.2%** — 12 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+`███████████░░░░░░░░░░░░░` **48.5%** — 17 / 35 Node `test-event-emitter-*|test-events-*` tests passing
 <!-- node-events:end -->
 
-> `events` is implemented end to end — the whole `EventEmitter` surface plus every
-> module static — and the number is low because the *tests* reach for engine
-> features that do not exist yet, not because the module is thin. Nine of the
-> thirty-five files open with `new events.EventEmitter()`, which still does not
-> work: it compiles now, but the member read answers `undefined` at run time
-> ([zun#18](https://github.com/UrubuCode/zun/issues/18), with
-> [#20](https://github.com/UrubuCode/zun/issues/20) behind it). Three more
-> need a class static that shares a name with an instance method
-> (`EventEmitter.once`, `EventEmitter.listenerCount` — still ``duplicate method
-> `once` ``; the value-shaped statics `defaultMaxListeners` and `errorMonitor`
-> *are* reachable and are real statics in `events.ts`), five need a bound `this`
-> inside a listener ([zun#1](https://github.com/UrubuCode/zun/issues/1) —
-> `apply`/`call` thread no receiver into a function value, and `apply` shifts its
-> arguments there), and three require Node's `internal/event_target`.
-> `test-event-emitter-special-event-names.js` passes, and it is the one that
-> keeps the storage layer honest: `_events` is a real null-prototype object, so
-> an event named `toString`, `__defineGetter__` or `__proto__` is an ordinary
-> key — which needs both of the engine regressions this update introduced to be
-> compensated (a computed read with a variable key resolves `Object.prototype`'s
-> members on a null-prototype object, and `events.__proto__ = value` sets the
-> prototype instead of creating an own property). The one file now standing on a
-> single line is `test-event-emitter-listeners-side-effects.js`:
-> `Object.create(null) instanceof Object` answers `true`
-> ([zun#26](https://github.com/UrubuCode/zun/issues/26)).
+> `events` is implemented end to end — the whole `EventEmitter` surface, every
+> module static, and now **`EventEmitter.prototype`** as Node's own object:
+> `constructor`, the three bookkeeping defaults and every instance method, each
+> reachable *and* callable with a receiver, so
+> `EventEmitter.prototype.on.call(plainObject, 'x', fn)` and
+> `EventEmitter.prototype.emit.apply(ee, args)` both work and
+> `E.on === E.addListener` holds. That one addition is worth three files
+> (`get-max-listeners`, `method-names`, `once`), and the trick behind it is that
+> an **object-literal method** is the one callable this engine threads a receiver
+> into — `m.call(recv, a, b)` binds `this` *and* passes the arguments, where a
+> plain function value loses `this`
+> ([zun#1](https://github.com/UrubuCode/zun/issues/1)) and a function in a class
+> static field cannot be called at all. Two more files came from the bundler
+> learning that `EventEmitter.once` and `events.once` are literally the same
+> function in Node, which lets it route the five statics that collide with an
+> instance method name through the module object
+> ([zun#20](https://github.com/UrubuCode/zun/issues/20)), and one from coercing
+> every slot key the way ToPropertyKey does: a *function* stored under a
+> **numeric** computed key is silently dropped by this engine, so
+> `ee.on(123, fn)` landed in a slot that `in` and `Object.keys` reported and every
+> read answered `undefined` for.
+>
+> The number is still capped by the *tests* reaching for engine features rather
+> than by the module being thin: five files need a bound `this` inside a listener
+> or on a `.call` (zun#1), two stand on the single line
+> `assert(!(e._events instanceof Object))` — `Object.create(null) instanceof
+> Object` answers `true`
+> ([zun#26](https://github.com/UrubuCode/zun/issues/26)) — three need the
+> function-constructor/prototype model
+> ([zun#25](https://github.com/UrubuCode/zun/issues/25)), and three require
+> Node's `internal/event_target` *and* an `EventTarget` the host does not let a
+> library replace (`class EventTarget` is a `duplicate class`; the prelude's has
+> no listener reader). `test-event-emitter-error-monitor.js` is down to one line,
+> `.then(common.mustCall())`: `then` silently drops a boxed function handler
+> ([zun#71](https://github.com/UrubuCode/zun/issues/71)).
+> `test-event-emitter-special-event-names.js` keeps the storage layer honest —
+> `_events` is a real null-prototype object, so an event named `toString`,
+> `__defineGetter__` or `__proto__` is an ordinary key, which needs both engine
+> regressions ([#46](https://github.com/UrubuCode/zun/issues/46),
+> [#47](https://github.com/UrubuCode/zun/issues/47)) compensated.
 >
 > Six more files came in with `stream`, and none of them needed a line of
 > `events.ts`: the bundler learned to collapse a **renamed alias** of a
