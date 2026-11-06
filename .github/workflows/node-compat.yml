@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       module:
-        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, os, fs, child_process, … or "all")
+        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, diagnostics_channel, console, os, fs, child_process, … or "all")
         default: all
       limit:
         description: Only the first N tests (0 = all)
@@ -85,7 +85,7 @@ jobs:
           ZUN="$PWD/target/debug/zun"
           EXT="$PWD/zun-node/target/debug/libzun_node.so"
           case "$MODULE" in
-            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers os fs child_process";;
+            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers diagnostics_channel console os fs child_process";;
             *)   MODULES="$MODULE";;
           esac
           test -f "$EXT" || { echo "extension cdylib missing: $EXT" >&2; exit 1; }
@@ -94,7 +94,7 @@ jobs:
             # needs it, and so does a TypeScript-over-natives module (`os`),
             # whose bundle calls into the cdylib.
             case "$m" in
-              util|assert|path|events|buffer|string_decoder|querystring|punycode|url|timers) EXT_ARGS="";;
+              util|assert|path|events|buffer|string_decoder|querystring|punycode|url|timers|diagnostics_channel|console) EXT_ARGS="";;
               *)           EXT_ARGS="--ext $EXT";;
             esac
             bash zun-node/tools/run_node_tests.sh \

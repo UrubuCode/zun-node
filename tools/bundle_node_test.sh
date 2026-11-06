@@ -128,6 +128,11 @@ fs/promises __node_fs_promises -
 timers __node_timers setTimeout
 timers/promises __node_timers_promises -
 child_process __node_child_process -
+diagnostics_channel __node_diagnostics_channel Channel,TracingChannel
+async_hooks __node_async_hooks AsyncLocalStorage
+console __node_console Console
+internal/util/debuglog __node_internal_util_debuglog -
+[.][.]/common/hijackstdio __node_harness_hijackstdio -
 domain __node_domain -
 stream __node_stream -
 vm __node_vm -
@@ -147,6 +152,7 @@ src/querystring/querystring.ts
 src/punycode/punycode.ts
 src/url/url.ts
 src/timers/timers.ts
+src/console/console.ts
 "
 
 # Modules inlined **only when the test actually requires them**.
@@ -184,8 +190,12 @@ punycode src/punycode/deprecation.ts
 fs src/fs/fs.ts
 fs/promises src/fs/fs.ts
 child_process src/child_process/child_process.ts
+async_hooks src/async_hooks/async_hooks.ts
+diagnostics_channel src/async_hooks/async_hooks.ts
+diagnostics_channel src/diagnostics_channel/diagnostics_channel.ts
 [.][.]/common/tmpdir src/fs/fs.ts
 [.][.]/common/tmpdir tools/harness/tmpdir.ts
+[.][.]/common/hijackstdio tools/harness/hijackstdio.ts
 "
 
 # The harness, which stands on everything above it.
@@ -232,6 +242,27 @@ $file
 done <<EOF_CONDITIONAL
 $CONDITIONAL_FILES
 EOF_CONDITIONAL
+
+# The global `console`.
+#
+# `src/console/console.ts` is in BUNDLE_FILES because `console` is a *global* in
+# Node and the engine's own prelude `console` has only five of its nineteen
+# methods (and a call to any other is a compile error, not a missing method), so
+# every bundle needs the real one. The two bindings that shadow the prelude are
+# in `src/console/global.ts`, split off for the same reason
+# `tools/harness/node_test.ts` is conditional: `test-console-table.js` and
+# `test-console-log-throw-primitive.js` declare their own top-level
+# `const console = new Console(...)`, and two top-level declarations of one name
+# are a compile error in a single Zun program. Such a test keeps its own
+# binding (renamed, see below) and the global file is left out.
+OWN_CONSOLE=no
+if grep -Eq "^[[:space:]]*(const|let|var)[[:space:]]+console[[:space:]]*=" "$SRC"; then
+  OWN_CONSOLE=yes
+else
+  FILES="${FILES}src/console/global.ts
+"
+fi
+
 FILES="$FILES$HARNESS_FILES"
 
 # ---------------------------------------------------------------------------
@@ -258,6 +289,62 @@ trap 'rm -f "$REWRITE"' EXIT
   # `path/posix` and `path/win32` are bound inside path.ts under those names.
   printf "s|require('\\(node:\\)\\{0,1\\}path/posix')|posix|g\n"
   printf "s|require('\\(node:\\)\\{0,1\\}path/win32')|win32|g\n"
+
+  # `console` as a *receiver* becomes `__zunConsole`.
+  #
+  # The identifier `console` cannot carry a method call in this engine, for two
+  # reasons that compound (both documented, with repros, in
+  # ../test/console/README.md and at the declaration in src/console/global.ts):
+  # eleven of the nineteen method names are intercepted by the checker and
+  # lowered to the prelude's console with no user-declaration guard, and a
+  # module-level `const console` is invisible to `console.<method>` from inside
+  # a function. So `console.log(...)`, `console.table(...)` and
+  # `console[method](...)` are rewritten to the second name
+  # `src/console/global.ts` binds to the very same object — leaving every *other*
+  # use of the word alone, so `const { Console } = console` and
+  # `globalThis.console` still read the name Node programs expect.
+  #
+  # The match requires a method-access or index immediately after the name, and
+  # refuses a quote immediately before it, so a `console.log` that is *data* —
+  # `execNode('-e "console.log(1)"')` in the `child_process` corpus,
+  # `eval('console.log("FOO");…')` in `test-assert.js`, a script written to a
+  # file in `test-fs-realpath.js` — is left as written. The rule is emitted
+  # twice because sed's `g` consumes the character it matched before the name,
+  # so two occurrences sharing one separator would otherwise need a second pass.
+  #
+  # A test that declares its own `console` has that declaration renamed as well
+  # (it owns the name, and `src/console/global.ts` is not in its bundle).
+  # `printf '%s\n'` rather than a format string: a bare `\1` backreference in a
+  # printf *format* is an octal escape, which would emit a U+0001 into the sed
+  # program instead of the backreference.
+  if [ "$OWN_CONSOLE" = yes ]; then
+    printf '%s\n' "s#^\([[:space:]]*\)\(const\|let\|var\)\([[:space:]]\{1,\}\)console\([[:space:]]*=\)#\1\2\3__zunConsole\4#"
+  fi
+  for _pass in 1 2; do
+    printf '%s\n' "s#^console\(\.[A-Za-z_\$]\|\[\)#__zunConsole\1#"
+    printf '%s\n' "s#\([^'\"\`A-Za-z0-9_\$.]\)console\(\.[A-Za-z_\$]\|\[\)#\1__zunConsole\2#g"
+  done
+
+  # A canonical binding recovered from an *aliased* module object.
+  #
+  # The canonical-binding rules below only see the `require(...)` call itself:
+  # `const { Channel } = require('diagnostics_channel')` keeps `Channel` bound to
+  # the top-level class, but `const dc = require('diagnostics_channel'); const
+  # { Channel } = dc;` does not — the second line destructures a local alias, so
+  # `Channel` becomes an `any` holding the class. That matters because
+  # `x instanceof C` is a *runtime* failure in this engine when `C` is an
+  # `any`-typed binding rather than a class name ("call did not resolve to a
+  # method"; zun#72 is the compile-time half of the same gap, for
+  # `x instanceof ns.Ctor`), and two of Node's own tests for this module assert
+  # `channel instanceof Channel` through exactly that alias.
+  #
+  # So the one-name destructuring is dropped as well, leaving `Channel` bound to
+  # the class — the same move the `events`/`EventEmitter` rule makes, one
+  # indirection further along. It is emitted only for a test that actually
+  # requires `diagnostics_channel`, so no other corpus can be touched by it.
+  if requires_module "diagnostics_channel"; then
+    printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}{[[:space:]]*Channel[[:space:]]*}[[:space:]]*=[[:space:]]*[A-Za-z_\$][A-Za-z0-9_\$]*[[:space:]]*;[[:space:]]*\$##\n"
+  fi
 
   printf '%s\n' "$MODULE_SPECS" | while read -r name obj canon; do
     [ -n "${name:-}" ] || continue

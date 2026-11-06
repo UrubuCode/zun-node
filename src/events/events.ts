@@ -265,12 +265,23 @@ function __evReceived(value: any): string {
 // carry: this is simply the correct shape.
 //
 // `name` is not overridden: a subclass of `TypeError` already reports
-// `"TypeError"`, and `toString()` / `${err}` compose it correctly.
+// `"TypeError"`, which is what Node reports too.
+//
+// `toString` **is** overridden, on all three, because Node's is: every error
+// built by `internal/errors`' `E()` carries
+// `toString() { return `${this.name} [${code}]: ${this.message}`; }`, so
+// `String(err)` and `${err}` name the code while `err.name` does not. That is
+// not cosmetic — `assert.throws(fn, /ERR_SOMETHING/)` matches the regular
+// expression against `String(err)`, and Node's own tests use that spelling
+// (`test-diagnostics-channel-symbol-named.js` is one).
 class NodeTypeError extends TypeError {
   code: string = "";
   constructor(code: string, message: string) {
     super(message);
     this.code = code;
+  }
+  toString(): string {
+    return String(this.name) + " [" + this.code + "]: " + String(this.message);
   }
 }
 
@@ -280,6 +291,9 @@ class NodeRangeError extends RangeError {
     super(message);
     this.code = code;
   }
+  toString(): string {
+    return String(this.name) + " [" + this.code + "]: " + String(this.message);
+  }
 }
 
 class NodeError extends Error {
@@ -287,6 +301,9 @@ class NodeError extends Error {
   constructor(code: string, message: string) {
     super(message);
     this.code = code;
+  }
+  toString(): string {
+    return String(this.name) + " [" + this.code + "]: " + String(this.message);
   }
 }
 
