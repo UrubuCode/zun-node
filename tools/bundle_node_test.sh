@@ -40,6 +40,13 @@
 #     the renamed member spelling (`const EE = require('events').EventEmitter`).
 #     The last two are why `events` reads 12/35 rather than 6/35.
 #
+#   * `url`'s canonical binding is the legacy `Url` **class** (not `URL`, which
+#     is a different thing and handled by its own rewrite further down): three
+#     of Node's own files build their expectations with
+#     `Object.assign(new url.Url(), …)`, and `new <object>.Ctor()` does not
+#     reach a constructor in this engine (zun#18), so the member read through
+#     the module alias becomes the top-level class name.
+#
 #   * `util/types` is the *same object* as `util.types`, and `internal/util` is
 #     `util`'s own implementation surface (`sleep`, `emitExperimentalWarning`,
 #     `pendingDeprecate`, `customPromisifyArgs`), which lives in
@@ -131,7 +138,7 @@ buffer __node_buffer Buffer
 string_decoder __node_string_decoder StringDecoder
 querystring __node_querystring -
 punycode __node_punycode -
-url __node_url -
+url __node_url Url
 internal/url __node_internal_url -
 fs __node_fs -
 fs/promises __node_fs_promises -
@@ -186,6 +193,7 @@ src/assert/assert.ts
 src/path/path.ts
 src/querystring/querystring.ts
 src/punycode/punycode.ts
+src/url/whatwg.ts
 src/url/url.ts
 src/timers/timers.ts
 src/console/console.ts
@@ -594,6 +602,51 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
       printf '%s\n' "s#\([^'\"\`A-Za-z0-9_\$.]\)crypto\(\.[A-Za-z_\$]\|\[\)#\1__zunCrypto\2#g"
     done
   fi
+
+  # `URL` / `URLSearchParams` as a *constructor*, a *static receiver*, an
+  # `instanceof` right-hand side or a class base become `NodeURL` /
+  # `NodeURLSearchParams`.
+  #
+  # Those two names are **prelude classes** in this engine
+  # (crates/zun_prelude/builtin/url.zun, url_search_params.zun), and a user
+  # class of the same name is rejected outright with "duplicate class" -- so the
+  # WHATWG spec implementation in src/url/whatwg.ts cannot be *called* `URL`. It
+  # is declared there as `NodeURL`/`NodeURLSearchParams` and exported as
+  # `url.URL`/`url.URLSearchParams`, which is the spelling Node's own tests
+  # reach for (`const { URL } = require('url')`); the three spellings a test
+  # body uses to reach the class itself are rewritten here. That is the same
+  # move the `console`, `performance` and `crypto` rules above make, for the
+  # same reason: a prelude name the checker owns, bound to the real module under
+  # a second name.
+  #
+  # Every *other* appearance of the word is left exactly as written -- a string,
+  # `ERR_INVALID_URL`, `globalThis.URL`, a local called `fileURL` -- because
+  # each rule needs either `new `/`instanceof `/`extends ` before the name or a
+  # member access immediately after it, and the member rule refuses a word
+  # character, a dot or a quote before the name (so `myURL.href`,
+  # `require('url').URL` and `'url.canParse'` are untouched). Audited over the
+  # whole `test-url*` + `test-whatwg-url-*` corpus: the only matches inside a
+  # string literal are in `test-whatwg-url-canparse.js`, which needs `eval` and
+  # V8 natives syntax and cannot run here at all.
+  #
+  # Emitted only for a test whose source mentions the word, so every other
+  # corpus' bundle stays byte-identical. `\b` is what keeps `URL` from matching
+  # the prefix of `URLSearchParams`, and `printf '%s\n'` rather than a format
+  # string, because a bare `\1` in a printf *format* is an octal escape.
+  case "$SRC_TEXT" in *URL*)
+    printf '%s\n' "s#\bnew URLSearchParams\b#new NodeURLSearchParams#g"
+    printf '%s\n' "s#\bnew URL\b#new NodeURL#g"
+    printf '%s\n' "s#\binstanceof URLSearchParams\b#instanceof NodeURLSearchParams#g"
+    printf '%s\n' "s#\binstanceof URL\b#instanceof NodeURL#g"
+    printf '%s\n' "s#\bextends URLSearchParams\b#extends NodeURLSearchParams#g"
+    printf '%s\n' "s#\bextends URL\b#extends NodeURL#g"
+    for _pass in 1 2; do
+      printf '%s\n' "s#^URLSearchParams\(\.[A-Za-z_\$]\)#NodeURLSearchParams\1#"
+      printf '%s\n' "s#\([^'\"\`A-Za-z0-9_\$.]\)URLSearchParams\(\.[A-Za-z_\$]\)#\1NodeURLSearchParams\2#g"
+      printf '%s\n' "s#^URL\(\.[A-Za-z_\$]\)#NodeURL\1#"
+      printf '%s\n' "s#\([^'\"\`A-Za-z0-9_\$.]\)URL\(\.[A-Za-z_\$]\)#\1NodeURL\2#g"
+    done;;
+  esac
 
   # A canonical binding recovered from an *aliased* module object.
   #

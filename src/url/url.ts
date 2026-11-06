@@ -1,9 +1,10 @@
 // node:url — the legacy `url.parse`/`format`/`resolve` API, the `Url` class, the
-// WHATWG re-exports and the file-URL / http-options utilities, in Zun
-// TypeScript.
+// module object (whose `URL`/`URLSearchParams` are `src/url/whatwg.ts`' spec
+// implementation) and the file-URL / http-options utilities, in Zun TypeScript.
 //
 // Behavior is defined by Node.js 25: this module is finished when it passes
-// 100% of Node's own `test/parallel/test-url*.js` files (see ../../test/url/).
+// 100% of Node's own `test/parallel/test-url*.js` **and**
+// `test/parallel/test-whatwg-url-*.js` files (see ../../test/url/).
 // `Url.prototype.parse`, `Url.prototype.format`, `Url.prototype.resolveObject`,
 // `autoEscapeStr` and the file-URL helpers follow Node's `lib/url.js` and
 // `lib/internal/url.js` (MIT, Copyright Joyent, Inc. and other Node
@@ -16,8 +17,10 @@
 // Like `path` and `querystring` (and unlike `fs`), `url` is pure computation, so
 // it is written in the language the platform compiles: no `--ext` library, no
 // syscalls. It stands on `events` (the `ERR_*` bases), `path` (`fileURLToPath`
-// and `pathToFileURL`, both platforms), `querystring` (`parseQueryString`) and
-// `punycode` (`domainToASCII`/`domainToUnicode`). See ../../PLAN.md.
+// and `pathToFileURL`, both platforms), `querystring` (`parseQueryString`),
+// `punycode` (IDNA) and `src/url/whatwg.ts` (the WHATWG parser, which is what
+// `fileURLToPath`, `pathToFileURL`, `isURL` and `domainToASCII` all reach for).
+// See ../../PLAN.md.
 //
 // ---------------------------------------------------------------------------
 // Security posture
@@ -66,40 +69,28 @@
 // by weakening behaviour)
 // ---------------------------------------------------------------------------
 //
-//   * **`URL` and `URLSearchParams` are the engine's prelude classes**, re-
-//     exported here because that is what `node:url` exports in Node (the module
-//     and the global are the same object). The prelude's WHATWG support is
-//     partial by its own documentation (`crates/zun_prelude/builtin/url.zun`):
-//     no `base` argument, no setters, no `URL.canParse`/`URL.parse`, no IDNA, no
-//     dot-segment or percent-encoding normalization, no `file:` URL with an
-//     empty host (`new URL("file:///x")` throws), and a `URLSearchParams` whose
-//     `get` answers `""` rather than `null` and which has no
-//     `forEach`/`sort`/`size`/iterator. A second `URL` cannot be declared here
-//     either — the name is a prelude class, and a user class of the same name is
-//     rejected with "duplicate class" — so this module does not shadow it.
-//     What it *can* do, and does, is build **genuine prelude `URL` instances**
-//     from components: a Zun class has no constructor body, so `new URL(href,
-//     true, scheme, userinfo, host, port, path, query, fragment, params)` fills
-//     the fields positionally with `loaded` already true, which makes the lazy
-//     parser short-circuit and every getter answer what we put there. That is
-//     how `pathToFileURL` returns a real `URL` for `file:///C:/foo` although the
-//     prelude could not have parsed it, and how `fileURLToPath` turns a `file:`
-//     string into one. The resulting object is `instanceof URL`, which is what
-//     `test-url-invalid-file-url-path-input.js` checks.
+//   * **`URL` and `URLSearchParams` live in `src/url/whatwg.ts`**, declared
+//     there as `NodeURL`/`NodeURLSearchParams` because both names are prelude
+//     classes in this engine and a user class of the same name is rejected with
+//     "duplicate class". They are the real WHATWG implementation — parser,
+//     hosts, percent-encode sets, setters, statics, `URLSearchParams` in full —
+//     not the prelude's partial pair, and the module object exports them under
+//     the names Node uses. `tools/bundle_node_test.sh` rewrites `new URL(…)`,
+//     `URL.<static>` and `x instanceof URL` in a test body to the second name;
+//     see that file's header and ../../test/url/README.md.
 //   * **`URLPattern` is not implemented.** It is a separate WHATWG
-//     specification that Node implements in C++ (ada's `url_pattern`), and it is
-//     unreachable from a test here in any case: the files destructure it out of
-//     the module object and `new` on a non-class binding does not compile
-//     (https://github.com/UrubuCode/zun/issues/18). The export is `undefined`
-//     and the gap is declared rather than faked.
-//   * **`domainToASCII`/`domainToUnicode` are punycode, not full UTS#46
-//     IDNA.** Node calls into ICU. `punycode.toASCII`/`toUnicode` agree with it
-//     for every ASCII label (so for every hostname `url.parse` meets in the
-//     corpus) and for a label that is already `xn--`-encoded, and differ on the
-//     mapping/normalization steps ICU performs for raw Unicode. Node's own
-//     `test-url-domain-ascii-unicode.js` is written `{ skip: !hasIntl }`, i.e.
-//     it does not run on an ICU-less build, which is the honest category this
-//     runtime is in.
+//     specification that Node implements in C++ (ada's `url_pattern`). The
+//     export is `undefined` and the gap is declared rather than faked.
+//   * **IDNA is punycode plus a finite slice of UTS#46, not ICU.** See the
+//     header of `src/url/whatwg.ts`: the ignored code points, the
+//     noncharacters and U+FFFD, the fullwidth and space-like mappings, and the
+//     `xn--` decodability check are implemented; the rest of the Unicode
+//     mapping database is not. `url.domainToASCII`/`domainToUnicode` are the
+//     **host parser** (as they are in Node, which delegates them to ada), so
+//     `domainToASCII("[::1]")` is `"[::1]"` and `domainToASCII("0x100000000")`
+//     is `""`. `url.parse`'s own IDNA step stays on `punycode.toASCII`,
+//     because that is what `lib/url.js` calls there and the guards around it
+//     are written against exactly that.
 //   * **`fileURLToPathBuffer` is absent**, because `node:buffer` is not
 //     implemented yet (its own module in PLAN.md's roadmap).
 //   * `__urlUnits()` — `charCodeAt(index)` and `slice(from, to)` are O(n) in the
@@ -1482,14 +1473,14 @@ function __urlResolveObject(source: any, relative: any): any {
 function __urlIsURL(value: any): boolean {
   if (value === null || value === undefined) return false;
   if (typeof value !== "object") return false;
-  return value instanceof URL;
+  return value instanceof NodeURL;
 }
 
-// Build a genuine prelude `URL` from components. A Zun class has no constructor
-// body, so `new URL(...)` fills the declared fields in order — `input`,
-// `loaded`, `scheme`, `userinfo`, `hostName`, `portText`, `path`, `query`,
-// `fragment`, `params` — and passing `loaded` as `true` makes the lazy parser
-// short-circuit, so every getter answers what we put there. See the header note.
+// Build a `URL` from components, without going back through the parser. What
+// is handed in here is already in serialized form: `query` and `fragment`
+// carry their leading `?`/`#` or are the empty string — which is the spelling
+// `url.parse`'s side of this file uses — and `pathname` is already
+// percent-encoded. The record and the wrapper are `src/url/whatwg.ts`'.
 function __urlMakeURL(
   scheme: string,
   userinfo: string,
@@ -1499,13 +1490,20 @@ function __urlMakeURL(
   query: string,
   fragment: string,
 ): any {
-  const params: any = new URLSearchParams(query);
-  const href: string =
-    scheme + "://" + (userinfo === "" ? "" : userinfo + "@") +
-    hostValue + (port === "" ? "" : ":" + port) + pathname + query + fragment;
-  return new URL(
-    href, true, scheme, userinfo, hostValue, port, pathname, query, fragment, params,
+  const colon = Number(userinfo.indexOf(":"));
+  const username: string = colon < 0 ? userinfo : userinfo.slice(0, colon);
+  const password: string = colon < 0 ? "" : userinfo.slice(colon + 1);
+  const rec: any = __wuRecordFrom(
+    scheme,
+    username,
+    password,
+    hostValue,
+    port === "" ? null : Number(port),
+    pathname,
+    query === "" ? null : query.slice(1),
+    fragment === "" ? null : fragment.slice(1),
   );
+  return __wuWrapRecord(rec);
 }
 
 // The percent-encode set `pathToFileURL` applies to a file path, taken from the
@@ -1575,100 +1573,6 @@ function __urlEncodeFilePath(pathname: string): string {
     i = i + 1;
   }
   return out.join("");
-}
-
-// A WHATWG parse of a `file:` URL string, answering a prelude `URL`.
-//
-// The prelude's own parser cannot do this one: it requires a non-empty
-// authority, so `new URL("file:///C:/foo")` throws there. Only what
-// `fileURLToPath` needs is implemented — leading/trailing C0-and-space trim,
-// removal of embedded tab/newline/carriage return, the host, the path with its
-// dot segments removed, the query and the fragment — and the result is a
-// genuine `URL` built from those components.
-function __urlParseFileURL(input: string): any {
-  // Trim leading and trailing C0 controls and spaces.
-  const raw: any = __urlUnits(input);
-  let from = 0;
-  let to = __urlALen(raw);
-  while (from < to && __urlCode(raw[from]) <= 0x20) from = from + 1;
-  while (to > from && __urlCode(raw[to - 1]) <= 0x20) to = to - 1;
-  const kept: string[] = [];
-  for (let i = from; i < to; i++) {
-    const code = __urlCode(raw[i]);
-    if (code === 9 || code === 10 || code === 13) continue;
-    kept.push(raw[i] as string);
-  }
-  let rest: string = kept.join("");
-
-  // The scheme.
-  const colon = Number(rest.indexOf(":"));
-  if (colon < 0) throw new ERR_INVALID_URL(input);
-  const scheme: string = rest.slice(0, colon).toLowerCase();
-  rest = rest.slice(colon + 1);
-
-  // The fragment, then the query.
-  let fragment = "";
-  const hashAt = Number(rest.indexOf("#"));
-  if (hashAt >= 0) {
-    fragment = "#" + rest.slice(hashAt + 1);
-    if (fragment === "#") fragment = "";
-    rest = rest.slice(0, hashAt);
-  }
-  let query = "";
-  const qAt = Number(rest.indexOf("?"));
-  if (qAt >= 0) {
-    query = "?" + rest.slice(qAt + 1);
-    if (query === "?") query = "";
-    rest = rest.slice(0, qAt);
-  }
-
-  // The authority, when the remainder opens with `//`.
-  let hostValue = "";
-  let pathname = rest;
-  if (__urlLen(rest) >= 2 && rest.slice(0, 2) === "//") {
-    const afterSlashes: string = rest.slice(2);
-    const slashAt = Number(afterSlashes.indexOf("/"));
-    if (slashAt < 0) {
-      hostValue = afterSlashes;
-      pathname = "";
-    } else {
-      hostValue = afterSlashes.slice(0, slashAt);
-      pathname = afterSlashes.slice(slashAt);
-    }
-    // `file://localhost/x` is `file:///x`.
-    if (hostValue.toLowerCase() === "localhost") hostValue = "";
-    hostValue = hostValue.toLowerCase();
-  }
-
-  if (pathname === "") pathname = "/";
-  pathname = __urlRemoveDotSegments(pathname);
-
-  return __urlMakeURL(scheme, "", hostValue, "", pathname, query, fragment);
-}
-
-// WHATWG "shorten"/dot-segment removal over an absolute path.
-function __urlRemoveDotSegments(pathname: string): string {
-  if (__urlLen(pathname) === 0) return pathname;
-  const parts: any = pathname.split("/");
-  // `any`-typed, because the checker demands an integer literal for the start
-  // index of a *typed* array's `splice` (same family as issue #3).
-  const outParts: any = [];
-  const n = __urlALen(parts);
-  for (let i = 0; i < n; i++) {
-    const segment: string = parts[i] as string;
-    if (segment === "." || segment.toLowerCase() === "%2e") {
-      if (i === n - 1) outParts.push("");
-      continue;
-    }
-    if (segment === "..") {
-      if (__urlALen(outParts) > 1) outParts.splice(__urlALen(outParts) - 1, 1);
-      if (i === n - 1) outParts.push("");
-      continue;
-    }
-    outParts.push(segment);
-  }
-  const joined: string = outParts.join("/");
-  return __urlLen(joined) === 0 ? "/" : joined;
 }
 
 // ---------------------------------------------------------------------------
@@ -1742,7 +1646,12 @@ function __urlFileURLToPath(input: any, options?: any): string {
   // `__urlResolveObjectFrom`.
   let target: any = input;
   if (typeof input === "string") {
-    target = __urlParseFileURL(input);
+    // The real WHATWG parser (src/url/whatwg.ts), which handles the empty
+    // authority of `file:///C:/foo`, the dot segments and the percent-encoding
+    // that this function then has to undo.
+    const rec: any = __wuBasicParse(input, null, 0, null);
+    if (rec === null) throw new ERR_INVALID_URL(input);
+    target = __wuWrapRecord(rec);
   } else if (!__urlIsURL(input)) {
     throw new ERR_INVALID_ARG_TYPE("path", ["string", "URL"], input);
   }
@@ -1918,12 +1827,26 @@ function __urlToHttpOptions(url: any): any {
 // domainToASCII / domainToUnicode
 // ---------------------------------------------------------------------------
 
+// Node delegates both of these to ada (`bindingUrl.domainToASCII` /
+// `domainToUnicode`), which is the **host parser**, not bare punycode: it
+// lower-cases, applies IDNA, serializes an IPv4 or IPv6 literal, and answers
+// the empty string for anything that is not a host at all. So
+// `domainToASCII('[::1]')` is `'[::1]'`, `domainToASCII('0x100000000')` is `''`
+// (that host would be an out-of-range IPv4 address) and `domainToASCII('xn--')`
+// is `''`. `src/url/whatwg.ts`' `__wuParseHost` is that parser.
+//
+// `url.parse`'s own IDNA step above stays on `__pcToASCII`, because that is
+// what `lib/url.js` calls there and its surrounding guards -- the empty-host
+// and forbidden-character re-checks -- are written against exactly that.
 function __urlDomainToASCII(domain: any): string {
-  return __pcToASCII(String(domain));
+  const hostValue: any = __wuParseHost(String(domain), false);
+  return hostValue === null ? "" : (hostValue as string);
 }
 
 function __urlDomainToUnicode(domain: any): string {
-  return __pcToUnicode(String(domain));
+  const ascii: string = __urlDomainToASCII(domain);
+  if (ascii === "") return "";
+  return __pcToUnicode(ascii);
 }
 
 // ---------------------------------------------------------------------------
@@ -1952,11 +1875,13 @@ const url: any = {
     return __urlFormat(rest[0], rest[1]);
   },
 
-  // The WHATWG API. `URL` and `URLSearchParams` are the engine's prelude
-  // classes, which is the same relationship `node:url` has with the globals in
-  // Node. `URLPattern` is a declared gap; see the header note.
-  URL: URL,
-  URLSearchParams: URLSearchParams,
+  // The WHATWG API. `URL` and `URLSearchParams` are the spec implementation in
+  // `src/url/whatwg.ts`, declared there as `NodeURL`/`NodeURLSearchParams`
+  // because those two names are prelude classes in this engine and a user class
+  // of the same name is a "duplicate class" error; see that file's header.
+  // `URLPattern` is a declared gap, also documented there.
+  URL: NodeURL,
+  URLSearchParams: NodeURLSearchParams,
   URLPattern: undefined,
   domainToASCII: function (...rest: any[]): string {
     if (__urlALen(rest) < 1) throw new ERR_MISSING_ARGS("domain");
@@ -1987,8 +1912,8 @@ const __node_url: any = url;
 // `test-url-is-url-internal.js` can ask for `isURL` under
 // `--expose-internals`.
 const __node_internal_url: any = {
-  URL: URL,
-  URLSearchParams: URLSearchParams,
+  URL: NodeURL,
+  URLSearchParams: NodeURLSearchParams,
   URLPattern: undefined,
   isURL: function (...rest: any[]): boolean {
     return __urlIsURL(rest[0]);
