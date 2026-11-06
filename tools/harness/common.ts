@@ -339,7 +339,24 @@ const common: any = {
       for (const key of Object.keys(name)) {
         const value: any = name[key];
         if (Array.isArray(value)) {
-          for (const entry of value) wanted.push({ name: key, message: entry });
+          // A list of messages, or of `[message, code]` pairs -- the shape
+          // `test-crypto-hash.js` uses for its two DEP0179/DEP0198 entries.
+          for (const entry of value) {
+            if (Array.isArray(entry)) {
+              wanted.push({ name: key, message: entry[0], code: entry[1] });
+            } else {
+              wanted.push({ name: key, message: entry });
+            }
+          }
+        } else if (typeof value === "object" && value !== null) {
+          // Node's `code -> message` map:
+          // `expectWarning({ DeprecationWarning: { DEP0198: '...' } })`, which
+          // `test/common/index.js` turns into `[message, code]` pairs. Without
+          // this branch the whole map was taken as one expected *message*, so
+          // the warning that did arrive was reported as unexpected.
+          for (const code of Object.keys(value)) {
+            wanted.push({ name: key, message: value[code], code: code });
+          }
         } else {
           wanted.push({ name: key, message: value });
         }
@@ -581,17 +598,11 @@ const __node_vm: any = {
   },
 };
 
-// `node:crypto` is required by `test-assert-deep.js` and
-// `test-assert-partial-deep-equal.js`, both of which guard every use with
-// `common.hasCrypto` — which is `false` here. That is a shape Node itself has:
-// a `--without-ssl` build reports `hasCrypto === false` and `require('crypto')`
-// throws "Node.js is not compiled with OpenSSL support". The stub says the same
-// thing, so the guarded blocks are skipped exactly as they are in that build
-// and the bundler, whose unresolved-`require` check is textual, stops failing
-// the whole file over a branch that never runs.
-const __node_crypto: any = {
-  createSecretKey(): any {
-    throw new Error("crypto is not available in the zun harness");
-  },
-  KeyObject: undefined,
-};
+// `node:crypto` used to be stubbed here, throwing, with `common.hasCrypto`
+// left `false` — the shape a `--without-ssl` Node build has. It is a real
+// module now (`src/crypto/crypto.ts`), inlined by the bundler for any test
+// that requires it, and `tools/harness/crypto_flag.ts` flips `hasCrypto` to
+// `true` for exactly those bundles. So the stub is gone: a second declaration
+// of `__node_crypto` in one program is a compile error, and the guarded blocks
+// in `test-assert-deep.js` and `test-assert-partial-deep-equal.js` now run
+// against the real thing.

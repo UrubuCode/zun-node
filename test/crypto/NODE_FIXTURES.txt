@@ -1,0 +1,2 @@
+test/fixtures/sample.png
+test/fixtures/utf8_test_text.txt

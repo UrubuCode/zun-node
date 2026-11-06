@@ -372,8 +372,15 @@ fn kill_rejects_an_out_of_range_pid() {
     assert_eq!(last_code(&reg), "EINVAL");
 }
 
+// The working directory is process-global and `cargo test` runs tests on
+// several threads, so the two tests that read or move it take this lock; without
+// it one test could observe the other's `chdir` (flaky failures under parallel
+// runs).
+static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn chdir_failure_carries_both_paths_node_reports() {
+    let _cwd = CWD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let reg = registry();
     let before = std::env::current_dir().unwrap();
     let missing = CString::new("zun-node-no-such-directory-ffff").unwrap();
@@ -390,6 +397,7 @@ fn chdir_failure_carries_both_paths_node_reports() {
 
 #[test]
 fn chdir_moves_the_process_and_is_reversible() {
+    let _cwd = CWD_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let reg = registry();
     let before = std::env::current_dir().unwrap();
     let parent = before.parent().map(|path| path.to_path_buf());

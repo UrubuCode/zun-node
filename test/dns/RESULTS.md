@@ -23,13 +23,13 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-dns-default-order-verbatim.js` | ❌ parse | (zun-node) internal/test/binding: These APIs are for internal testing only. Do not use them. |
 | `test-dns-get-server.js` | ✅ pass | |
 | `test-dns-lookup.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-dns-lookup-promises.js` | ❌ type error | bundles/test-dns-lookup-promises.ts:19501:13: error: [SEM0001] 'getaddrinfoPositive' expects 0 to 1 argument(s |
+| `test-dns-lookup-promises.js` | ❌ type error | bundles/test-dns-lookup-promises.ts:19512:13: error: [SEM0001] 'getaddrinfoPositive' expects 0 to 1 argument(s |
 | `test-dns-lookup-promises-options-deprecated.js` | ✅ pass | |
 | `test-dns-lookupService.js` | ❌ parse | (zun-node) internal/test/binding: These APIs are for internal testing only. Do not use them. |
 | `test-dns-lookupService-promises.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-dns-memory-error.js` | ❌ runtime | zun: runtime error: call did not resolve to a method at <main> [757744..757755] |
+| `test-dns-memory-error.js` | ❌ runtime | zun: runtime error: call did not resolve to a method at <main> [758472..758483] |
 | `test-dns-multi-channel.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-dns-multi-channel.js: |
-| `test-dns-perf_hooks.js` | ❌ type error | bundles/test-dns-perf_hooks.ts:21318:16: error: [SEM0001] spread arguments are not lowered yet |
+| `test-dns-perf_hooks.js` | ❌ type error | bundles/test-dns-perf_hooks.ts:21329:16: error: [SEM0001] spread arguments are not lowered yet |
 | `test-dns-promises-exists.js` | ✅ pass | |
 | `test-dns-resolve-promises.js` | ❌ parse | (zun-node) internal/test/binding: These APIs are for internal testing only. Do not use them. |
 | `test-dns-resolveany.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-dns-resolveany.js: |

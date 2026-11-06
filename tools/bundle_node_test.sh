@@ -162,7 +162,8 @@ internal/readline/callbacks __node_internal_readline_callbacks -
 internal/util/inspect __node_internal_util_inspect -
 [.][.]/common/arraystream __node_harness_arraystream ArrayStream
 vm __node_vm -
-crypto __node_crypto -
+crypto __node_crypto Hash,Hmac,Cipheriv,Decipheriv,KeyObject
+[.][.]/common/crypto __node_harness_crypto -
 test __node_test test
 v8 __node_v8 Serializer,Deserializer,DefaultSerializer,DefaultDeserializer,GCProfiler
 tty __node_tty ReadStream,WriteStream
@@ -290,6 +291,15 @@ _stream_readable src/stream/stream.ts
 internal/streams/add-abort-signal src/buffer/buffer.ts
 internal/streams/add-abort-signal src/string_decoder/string_decoder.ts
 internal/streams/add-abort-signal src/stream/stream.ts
+crypto src/buffer/buffer.ts
+crypto src/string_decoder/string_decoder.ts
+crypto src/stream/stream.ts
+crypto src/crypto/crypto.ts
+[.][.]/common/crypto src/buffer/buffer.ts
+[.][.]/common/crypto src/string_decoder/string_decoder.ts
+[.][.]/common/crypto src/stream/stream.ts
+[.][.]/common/crypto src/crypto/crypto.ts
+[.][.]/common/crypto tools/harness/crypto_common.ts
 zlib src/buffer/buffer.ts
 zlib src/string_decoder/string_decoder.ts
 zlib src/stream/stream.ts
@@ -454,6 +464,20 @@ fi
 
 FILES="$FILES$HARNESS_FILES"
 
+# `common.hasCrypto`.
+#
+# The flag has to track what this bundle contains rather than what the library
+# can do, and the decision is only known after the conditional loop above has
+# run -- so `tools/harness/crypto_flag.ts` sets it *after* the harness, which
+# is the one position later than `common.ts`' own declaration. See that file.
+case "
+$FILES" in
+  *"
+src/crypto/crypto.ts
+"*) FILES="${FILES}tools/harness/crypto_flag.ts
+";;
+esac
+
 # ---------------------------------------------------------------------------
 # Build the sed program that rewrites the test body.
 # ---------------------------------------------------------------------------
@@ -540,6 +564,33 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
     for _pass in 1 2; do
       printf '%s\n' "s#^performance\(\.[A-Za-z_\$]\|\[\)#__zunPerformance\1#"
       printf '%s\n' "s#\([^'\"\`A-Za-z0-9_\$.]\)performance\(\.[A-Za-z_\$]\|\[\)#\1__zunPerformance\2#g"
+    done
+  fi
+
+  # `crypto` as a *receiver* becomes `__zunCrypto`, for the same reason and by
+  # the same rules as `console` and `performance` above: the engine's prelude
+  # has a `crypto` of its own (`crates/zun_prelude/builtin/crypto.zun`, the
+  # WinterCG `getRandomValues`/`randomUUID` pair), and the checker lowers
+  # `crypto.<member>` to it from inside a function body even when a user
+  # declaration shadows the name. So
+  #
+  #     const crypto = require('crypto');
+  #     function f() { return crypto.createHash('sha1'); }
+  #
+  # answers "createHash is not a function", while the same call at the top
+  # level works. That is the second half of zun#85, filed for `console`, landing
+  # on a second prelude namespace; the standalone repro is in
+  # ../test/crypto/README.md. `src/crypto/crypto.ts` binds the second name to
+  # the very same object; see its note.
+  #
+  # Emitted only for a test that actually requires `crypto`, so every other
+  # corpus' bundle stays byte-identical, and the leading character class keeps
+  # `require('crypto')`, `require('node:crypto')` and a member read such as
+  # `webcrypto.crypto` as written.
+  if requires_module "crypto"; then
+    for _pass in 1 2; do
+      printf '%s\n' "s#^crypto\(\.[A-Za-z_\$]\|\[\)#__zunCrypto\1#"
+      printf '%s\n' "s#\([^'\"\`A-Za-z0-9_\$.]\)crypto\(\.[A-Za-z_\$]\|\[\)#\1__zunCrypto\2#g"
     done
   fi
 

@@ -836,6 +836,56 @@ target/debug/zun run /tmp/bundle.ts
 > [`test/zlib/README.md`](test/zlib/README.md); per-test breakdown:
 > [`test/zlib/RESULTS.md`](test/zlib/RESULTS.md).
 
+<!-- node-crypto:start -->
+### Node.js v25 `crypto` compatibility
+
+`███░░░░░░░░░░░░░░░░░░░░░` **13.0%** — 15 / 115 Node `test-crypto*` tests passing
+<!-- node-crypto:end -->
+
+> `crypto` covers the symmetric half of Node's module end to end: `createHash`
+> and `Hash` (MD5, SHA-1, the whole SHA-2 family with `sha512-224`/`sha512-256`,
+> SHA-3 in four sizes, the two SHAKE XOFs with `options.outputLength`,
+> RIPEMD-160, BLAKE2b-512, BLAKE2s-256, and OpenSSL's aliases for each) with
+> `update`/`digest`/`copy` in every encoding, `crypto.hash()`'s one-shot in both
+> of its third-argument forms, `createHmac`, `createCipheriv`/`createDecipheriv`
+> for AES-128/192/256 in ECB, CBC, CTR and GCM plus ChaCha20 and
+> ChaCha20-Poly1305 — with `setAutoPadding`, `setAAD`, `getAuthTag`/`setAuthTag`
+> and their per-mode length rules — `pbkdf2`, `scrypt` and `hkdf` in sync and
+> callback form, the whole `random*` family over the OS CSPRNG,
+> `timingSafeEqual`, secret `KeyObject`s, `generateKey`, `getHashes` /
+> `getCiphers` / `getCurves` / `getCipherInfo` over the real OpenSSL 3 table,
+> `constants`, and `subtle.digest`. The primitives are RustCrypto's (`sha2`,
+> `sha3`, `blake2`, `aes`, `ghash`, `poly1305`, `chacha20`, `scrypt`, `subtle`,
+> `getrandom`), all pure Rust, so the extension still builds with nothing but a
+> Rust toolchain; HMAC, PBKDF2 and HKDF are written out over one
+> `Box<dyn DynDigest>` handle table rather than instantiated per digest.
+>
+> The percentage is held down by two things, neither of them the cryptography.
+> **The asymmetric half is not written** — `generateKeyPair`, sign/verify,
+> `publicEncrypt`/`privateDecrypt`, Diffie-Hellman, ECDH, X.509, the
+> post-quantum families — which 72 of the 115 files reach for; every one of those entry
+> points is present and raises `ERR_CRYPTO_UNSUPPORTED_OPERATION` rather than
+> being absent. And **zun#38** again: a typed array is opaque through an `any`
+> binding, so `hash.digest()`, `randomBytes(32)` and `key.export()` reach a test
+> as values whose `.length` reads `undefined` and whose `.toString()` throws —
+> which is what stops `test-crypto-pbkdf2`, `test-crypto-hmac` and
+> `test-crypto-padding` even though their bytes are right. The bytes are
+> verified the way `zlib`'s are instead: 24 Rust tests against the published
+> RFC/NIST/FIPS vectors (SHA/SHA-3/BLAKE2 `abc`, RFC 4231 HMAC, RFC 6070
+> PBKDF2, RFC 5869 HKDF, RFC 7914 scrypt, FIPS 197 AES, SP 800-38A CTR, the
+> NIST GCM cases including a 64-bit IV, RFC 8439 ChaCha20-Poly1305) plus a
+> 165-value differential pass against the installed Node over every path that
+> answers a string, which agrees everywhere. A third blocker was found and
+> worked around: the prelude has a `crypto` of its own, and the checker resolves
+> `crypto.<member>` against it from inside a `function` body even when a user
+> declaration shadows the name — which is
+> [zun#85](https://github.com/UrubuCode/zun/issues/85)'s second half, filed for
+> `console`, landing on a second prelude namespace (standalone repro in the
+> module's test README). The bundler rewrites `crypto` as a receiver to a second
+> name, as it already does for `console` and `performance`. Blocker table:
+> [`test/crypto/README.md`](test/crypto/README.md); per-test breakdown:
+> [`test/crypto/RESULTS.md`](test/crypto/RESULTS.md).
+
 <!-- node-readline:start -->
 ### Node.js v25 `readline` compatibility
 

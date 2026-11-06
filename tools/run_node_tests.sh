@@ -160,6 +160,12 @@ case "$MODULE" in
   # `DNSException` and the record shapes. Its corpus is `test-dns*`, which
   # includes `test-dns.js` itself.
   dns)    KIND="zun-ts+ext"; PATTERNS="test-dns";                          PATTERN="test-dns";;
+  # `crypto` is TS over natives: the `Hash`/`Hmac`/`Cipheriv`/`Decipheriv`
+  # classes and the whole convenience surface are src/crypto/crypto.ts, and the
+  # primitives (the RustCrypto hashes, AES, GHASH, Poly1305, scrypt and the OS
+  # CSPRNG) are src/crypto/*.rs. Its corpus is `test-crypto*`, which includes
+  # `test-crypto.js` itself.
+  crypto) KIND="zun-ts+ext"; PATTERNS="test-crypto";                       PATTERN="test-crypto";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 

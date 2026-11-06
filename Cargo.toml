@@ -19,6 +19,83 @@ crate-type = ["cdylib", "rlib"]
 zun_abi = { path = "../crates/zun_abi" }
 
 # ---------------------------------------------------------------------------
+# Primitives for `node:crypto`.
+#
+# Node's `crypto` is a layer over OpenSSL, and the one hard requirement the
+# corpus imposes is **byte-for-byte agreement with OpenSSL** for the same
+# inputs: every `test-crypto-{hash,hmac,pbkdf2,scrypt,hkdf,cipheriv-decipheriv,
+# authenticated}.js` file compares a digest, a derived key or a ciphertext
+# against a literal test vector. Cryptographic primitives are standardised to
+# the bit, so any correct implementation agrees -- which makes the choice of
+# backend a question of *which* correct implementation is available with no C
+# toolchain, the same bar `node:zlib` holds (see the `libz-rs-sys` comment
+# above).
+#
+# The RustCrypto project is that implementation: one audited, pure-Rust crate
+# per primitive, all sharing the `digest` / `cipher` / `universal-hash` trait
+# set, which is what lets `src/crypto/hash.rs` keep *one* `Box<dyn DynDigest>`
+# handle table instead of a type per algorithm. There is no `cc`, no vendored
+# C and no OpenSSL anywhere below, so this extension still builds with nothing
+# but a Rust toolchain.
+#
+#   * `digest` -- the `Digest`/`DynDigest` traits every hash below implements;
+#     `DynDigest` is the object-safe one, and the whole `Hash` handle table is
+#     built on it.
+#   * `md-5`, `sha1`, `sha2`, `sha3`, `ripemd`, `blake2` -- exactly the digests
+#     `crypto.getHashes()` reports here, including the two XOFs (`shake128`,
+#     `shake256`, from `sha3`) that `options.outputLength` applies to and the
+#     truncated SHA-512 variants (`sha512-224`, `sha512-256`) Node lists.
+#   * `scrypt` -- RFC 7914, which is the one KDF not worth re-deriving:
+#     `scryptROMix` over Salsa20/8 is where an implementation goes wrong, and
+#     the crate is the reference port. PBKDF2, HKDF and HMAC are *not* crates
+#     here: all three are a dozen lines over `DynDigest` (see
+#     `src/crypto/mac.rs` and `src/crypto/kdf.rs`), and taking them from
+#     `hmac`/`pbkdf2`/`hkdf` would mean a generic instantiation per digest --
+#     the type-per-algorithm plumbing the `DynDigest` table exists to avoid.
+#   * `aes` -- the AES block function alone. The modes (ECB, CBC with PKCS#7,
+#     CTR, GCM) are `src/crypto/cipher.rs`, over the one `BlockKey` enum, for
+#     the same reason: a `cbc::Encryptor<Aes128>` is a distinct *type* per key
+#     size and per direction, which a handle table cannot hold.
+#   * `ghash` and `poly1305` -- the two universal hashes behind the AEAD tags
+#     (GCM and ChaCha20-Poly1305). These are the parts of an AEAD that are
+#     neither the block cipher nor the counter mode, and carry the carry-less
+#     multiplication that is worth taking from a reviewed implementation.
+#   * `chacha20` -- the ChaCha20 stream cipher for `chacha20` and the
+#     `chacha20-poly1305` AEAD.
+#     The `cipher` crate's `KeyInit`/`BlockEncrypt`/`StreamCipher` traits that
+#     all of these are used through are not a dependency of their own: `aes`
+#     re-exports them as `aes::cipher`, and `ghash` re-exports
+#     `universal_hash`, so both resolve to the one copy the lockfile already
+#     pins.
+#   * `subtle` -- `ConstantTimeEq`, which is what makes `timingSafeEqual` and
+#     every AEAD tag comparison actually constant-time. Doing this by hand is
+#     the one place where a correct-looking loop is wrong, because the compiler
+#     is allowed to short-circuit it.
+#   * `getrandom` -- the OS CSPRNG (`BCryptGenRandom` on Windows,
+#     `getrandom(2)` on Linux), which is the same source libuv's
+#     `uv_random`/OpenSSL's `RAND_bytes` draw from and the only acceptable one
+#     for `randomBytes`/`randomUUID`/`getRandomValues`.
+#
+# Not here, and absent from the module: asymmetric keys (RSA/EC/Ed25519),
+# X.509, Diffie-Hellman, the CCM/OCB/XTS/key-wrap modes and the legacy block
+# ciphers (DES, Camellia, ARIA, SM4). See test/crypto/README.md.
+digest = { version = "0.10", features = ["std", "mac"] }
+md-5 = { version = "0.10", default-features = false }
+sha1 = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+sha3 = { version = "0.10", default-features = false }
+ripemd = { version = "0.1", default-features = false }
+blake2 = { version = "0.10", default-features = false }
+scrypt = { version = "0.11", default-features = false }
+aes = { version = "0.8", default-features = false }
+ghash = { version = "0.5", default-features = false }
+poly1305 = { version = "0.8", default-features = false }
+chacha20 = { version = "0.9", default-features = false }
+subtle = { version = "2", default-features = false }
+getrandom = { version = "0.2", default-features = false }
+
+
+# ---------------------------------------------------------------------------
 # Compression backends for `node:zlib`.
 #
 # Node's `zlib` is a thin layer over zlib, Brotli and zstd, and the one hard

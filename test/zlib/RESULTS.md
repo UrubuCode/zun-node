@@ -13,7 +13,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-zlib.js` | ❌ type error | bundles/test-zlib.ts:28008:10: error: [SEM0001] no field or setter 'chunks' on this type |
+| `test-zlib.js` | ❌ type error | bundles/test-zlib.ts:28017:10: error: [SEM0001] no field or setter 'chunks' on this type |
 | `test-zlib-brotli-16GB.js` | ❌ timeout |  |
 | `test-zlib-brotli-flush.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-zlib-brotli-from-brotli.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -22,21 +22,21 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-zlib-brotli.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-zlib-close-after-error.js` | ✅ pass | |
 | `test-zlib-close-after-write.js` | ✅ pass | |
-| `test-zlib-close-in-ondata.js` | ❌ type error | bundles/test-zlib-close-in-ondata.ts:25327:26: error: [SEM0001] Buffer size must be an integer |
+| `test-zlib-close-in-ondata.js` | ❌ type error | bundles/test-zlib-close-in-ondata.ts:25336:26: error: [SEM0001] Buffer size must be an integer |
 | `test-zlib-const.js` | ✅ pass | |
-| `test-zlib-convenience-methods.js` | ❌ type error | bundles/test-zlib-convenience-methods.ts:25397:42: error: [SEM0001] right operand of 'instanceof' must be a cl |
-| `test-zlib-crc32.js` | ❌ type error | bundles/test-zlib-crc32.ts:25511:27: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, fo |
+| `test-zlib-convenience-methods.js` | ❌ type error | bundles/test-zlib-convenience-methods.ts:25406:42: error: [SEM0001] right operand of 'instanceof' must be a cl |
+| `test-zlib-crc32.js` | ❌ type error | bundles/test-zlib-crc32.ts:25520:27: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, fo |
 | `test-zlib-create-raw.js` | ✅ pass | |
 | `test-zlib-deflate-constructors.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-zlib-deflate-raw-inherits.js` | ❌ type error | bundles/test-zlib-deflate-raw-inherits.ts:25337:18: error: [SEM0001] unknown class 'NotInitialized' |
-| `test-zlib-destroy-pipe.js` | ❌ type error | bundles/test-zlib-destroy-pipe.ts:25339:32: error: [SEM0001] Buffer size must be an integer |
+| `test-zlib-deflate-raw-inherits.js` | ❌ type error | bundles/test-zlib-deflate-raw-inherits.ts:25346:18: error: [SEM0001] unknown class 'NotInitialized' |
+| `test-zlib-destroy-pipe.js` | ❌ type error | bundles/test-zlib-destroy-pipe.ts:25348:32: error: [SEM0001] Buffer size must be an integer |
 | `test-zlib-destroy.js` | ✅ pass | |
 | `test-zlib-dictionary-fail.js` | ✅ pass | |
 | `test-zlib-dictionary.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-zlib-empty-buffer.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-zlib-failed-init.js` | ✅ pass | |
 | `test-zlib-flush-drain-longblock.js` | ✅ pass | |
-| `test-zlib-flush-drain.js` | ❌ type error | bundles/test-zlib-flush-drain.ts:25326:37: error: [SEM0001] Buffer fill byte must be an integer |
+| `test-zlib-flush-drain.js` | ❌ type error | bundles/test-zlib-flush-drain.ts:25335:37: error: [SEM0001] Buffer fill byte must be an integer |
 | `test-zlib-flush-flags.js` | ✅ pass | |
 | `test-zlib-flush-write-sync-interleaved.js` | ✅ pass | |
 | `test-zlib-flush.js` | ✅ pass | |
@@ -54,11 +54,11 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-zlib-object-write.js` | ✅ pass | |
 | `test-zlib-params.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-zlib-premature-end.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-zlib-random-byte-pipes.js` | ❌ type error | bundles/test-zlib-random-byte-pipes.ts:25359:10: error: [SEM0001] no field or setter 'readable' on this type |
+| `test-zlib-random-byte-pipes.js` | ❌ type error | bundles/test-zlib-random-byte-pipes.ts:27146:10: error: [SEM0001] no field or setter 'readable' on this type |
 | `test-zlib-reset-before-write.js` | ✅ pass | |
 | `test-zlib-sync-no-event.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-zlib-truncated.js` | ❌ runtime | TypeError: slice is not a function |
-| `test-zlib-type-error.js` | ❌ type error | bundles/test-zlib-type-error.ts:24036:27: error: [SEM0001] no method 'stream' on this type |
+| `test-zlib-type-error.js` | ❌ type error | bundles/test-zlib-type-error.ts:24045:27: error: [SEM0001] no method 'stream' on this type |
 | `test-zlib-unused-weak.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-zlib-unzip-one-byte-chunks.js` | ❌ assertion | AssertionError [strictEqual]: 'abc' should match 'abcdef' after zipping and unzipping |
 | `test-zlib-write-after-close.js` | ✅ pass | |
@@ -69,7 +69,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-zlib-zstd-dictionary.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-zlib-zstd-flush.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-zlib-zstd-from-string.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-zlib-zstd-from-zstd.js` | ❌ runtime | zun: runtime error: call did not resolve to a method at <main> [1066219..1066244] |
+| `test-zlib-zstd-from-zstd.js` | ❌ runtime | zun: runtime error: call did not resolve to a method at <main> [1067064..1067089] |
 | `test-zlib-zstd-kmaxlength-rangeerror.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-zlib-zstd-pledged-src-size.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-zlib-zstd.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
