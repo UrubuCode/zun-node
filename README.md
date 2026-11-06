@@ -100,6 +100,22 @@ A Node module lands here in whichever form fits what it actually does:
   the option validation. Compressed bytes cross base64, the same carrier `fs`
   uses and for the same reason.
 
+  `v8` (`src/v8/v8.ts`) and `tty` (`src/tty/tty.ts`) are the last two of this
+  kind so far, and both are the seam-by-capability case again. `node:v8` looks
+  like the most engine-bound module in Node's library and is in fact almost
+  entirely arithmetic: V8's value-serialization wire format is bytes over the
+  engine's `Buffer` and a `DataView`, so `serialize`/`deserialize` are
+  byte-identical to Node's here, while the readings that *are* V8's — heap
+  spaces, a sampling profiler, a heap graph — have no isolate under them and
+  are reported shape-true and content-empty, each row named in the resolution
+  table in that file's header. `node:tty` is the same split one level down:
+  `isatty(fd)` is a real predicate `process` already answers,
+  `getColorDepth`/`hasColors` is `process.env` arithmetic, the two terminal
+  streams are `Duplex`es from `stream`, and the four cursor methods are
+  `readline`'s own functions reached through its module object — which is why
+  `tty` is the one module here that depends on `readline` rather than the
+  other way round.
+
 Support slices exist to run Node's own tests, and are Zun TypeScript for the
 same reason: `src/assert/assert.ts` is the strict-mode `assert` surface the
 tests assert with. `src/util/util.ts` and `src/process/process.ts` used to be
@@ -825,3 +841,34 @@ target/debug/zun run /tmp/bundle.ts
 
 `██████████░░░░░░░░░░░░░░` **45.4%** — 10 / 22 Node `test-readline*` tests passing
 <!-- node-readline:end -->
+
+<!-- node-v8:start -->
+### Node.js v25 `v8` compatibility
+
+`█████████░░░░░░░░░░░░░░░` **38.0%** — 8 / 21 Node `test-v8-*` tests passing
+<!-- node-v8:end -->
+
+> `node:v8` is a window onto a V8 isolate, and Zun is not V8: the wire format
+> of `serialize`/`deserialize` is reproduced byte for byte (every value in the
+> round-trip table in [`test/v8/README.md`](test/v8/README.md) matches the hex
+> `node -e "v8.serialize(...)"` prints), while every heap, profiler and
+> snapshot reading is shape-true and content-empty — the keys, types and file
+> formats are Node's and the numbers are what this runtime can observe. The
+> resolution table is in the header of [`src/v8/v8.ts`](src/v8/v8.ts); blockers
+> per test: [`test/v8/README.md`](test/v8/README.md); per-test breakdown:
+> [`test/v8/RESULTS.md`](test/v8/RESULTS.md).
+
+<!-- node-tty:start -->
+### Node.js v25 `tty` compatibility
+
+`█████████░░░░░░░░░░░░░░░` **40.0%** — 2 / 5 Node `test-tty-*|test-ttywrap*` tests passing
+<!-- node-tty:end -->
+
+> `node:tty` answers `isatty(fd)` for real (through `process`' predicate) and
+> implements `getColorDepth`/`hasColors`' whole environment table; the two
+> terminal streams are `Duplex`es over fds 0–2 and raise
+> `ERR_TTY_INIT_FAILED` for a descriptor that is not a terminal, which is
+> what Node does too. Window size and raw mode have no capability under them
+> here and are named as gaps. Blockers per test:
+> [`test/tty/README.md`](test/tty/README.md); per-test breakdown:
+> [`test/tty/RESULTS.md`](test/tty/RESULTS.md).

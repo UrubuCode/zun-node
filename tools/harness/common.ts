@@ -404,10 +404,17 @@ const common: any = {
   },
 
   // Node's `common.getTTYfd()` finds a tty among fds 0/1/2/4/5 and otherwise
-  // opens `/dev/tty`, returning -1 when neither works. This runtime has no tty
-  // facility at all, so -1 is the honest answer and a test that needs a real
-  // TTY takes its own `common.skip` branch.
+  // opens `/dev/tty`, returning -1 when neither works. There is no way to
+  // *open* `/dev/tty` here, so the search is over fds 0/1/2 with the real
+  // predicate from `src/tty/tty.ts`' `isatty` — which answers `false` for all
+  // three under the test runner, where the three standard streams are pipes.
+  // -1 is then the same answer Node's own `common` gives when it cannot open
+  // `/dev/tty`, and a test that needs a real TTY takes its `common.skip`
+  // branch rather than a fabricated one.
   getTTYfd(): number {
+    for (const fd of [0, 1, 2]) {
+      if (__processIsTty(fd) === true) return fd;
+    }
     return -1;
   },
 
@@ -534,18 +541,9 @@ const __node_domain: any = {
   },
 };
 
-// `node:tty`. The runtime has no TTY facility, so `WriteStream`/`ReadStream` are
-// absent and `common.getTTYfd()` answers -1 — which is a legitimate outcome in
-// Node's own `common` too (it returns -1 when it cannot open `/dev/tty`), so a
-// test that needs a real TTY takes its `common.skip` branch rather than a
-// fabricated one.
-const __node_tty: any = {
-  WriteStream: undefined,
-  ReadStream: undefined,
-  isatty(): boolean {
-    return false;
-  },
-};
+// `node:tty` used to be stubbed here. It is a real module now
+// (`src/tty/tty.ts`), inlined by the bundler for any test that requires it —
+// so the stub is gone rather than shadowing it.
 
 // `node:worker_threads`. This runtime has one thread and no `Worker`, so
 // `isMainThread` is `true` and `threadId` is `0` — which is the honest answer,

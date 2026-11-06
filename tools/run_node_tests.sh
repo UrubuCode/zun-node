@@ -139,6 +139,20 @@ case "$MODULE" in
   # (zlib-rs and the Rust Brotli port) are src/zlib/*.rs. Its corpus is
   # `test-zlib*`, which includes `test-zlib.js` itself.
   zlib)   KIND="zun-ts+ext"; PATTERNS="test-zlib";                         PATTERN="test-zlib";;
+  # `v8` is pure Zun TypeScript: V8's value-serialization wire format is byte
+  # arithmetic over the engine's `Buffer` and a `DataView`, and every reading
+  # `node:v8` gives about a heap belongs to a V8 isolate that does not exist
+  # here -- so there is no syscall for a native to make. See the resolution
+  # table in src/v8/v8.ts.
+  v8)     KIND="zun-ts";     PATTERNS="test-v8-";                          PATTERN="test-v8-";;
+  # `tty`'s corpus is two prefixes: `test-tty-` (the module) and `test-ttywrap`
+  # (the libuv handle under it, which Node's tests reach through
+  # `internalBinding('tty_wrap')`). The module is pure Zun TypeScript -- the
+  # colour-depth table is `process.env` arithmetic and the two terminal streams
+  # are `Duplex`es -- over the one predicate src/process/process.ts already
+  # answers, `isatty(fd)`.
+  tty)    KIND="zun-ts";     PATTERNS="test-tty- test-ttywrap";
+          PATTERN="test-tty-*|test-ttywrap";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 
