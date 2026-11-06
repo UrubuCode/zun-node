@@ -78,7 +78,15 @@ A Node module lands here in whichever form fits what it actually does:
   `process.ts` while most of them run with no `--ext` at all, so the import has
   to be separable — `tools/bundle_node_test.sh` appends `native.ts` only for a
   bundle that will get an extension, and `process.ts` keeps a documented
-  fallback for every native-backed value (the table is in its header).
+  fallback for every native-backed value (the table is in its header). **`zlib`
+  is the fifth**: `src/zlib/*.rs` holds one `z_stream` (or Brotli
+  encoder/decoder) per handle behind a small handle table, over `libz-rs-sys`
+  and the `brotli` crate — both pure Rust, so the extension still builds with
+  nothing but a Rust toolchain — while [`src/zlib/zlib.ts`](src/zlib/zlib.ts)
+  holds the module Node exposes: nine `Transform` classes, the `create*`
+  factories, the sync and callback convenience methods, `constants`/`codes` and
+  the option validation. Compressed bytes cross base64, the same carrier `fs`
+  uses and for the same reason.
 
 Support slices exist to run Node's own tests, and are Zun TypeScript for the
 same reason: `src/assert/assert.ts` is the strict-mode `assert` surface the
@@ -761,3 +769,41 @@ target/debug/zun run /tmp/bundle.ts
 > repro in [`test/perf_hooks/README.md`](test/perf_hooks/README.md), alongside
 > the per-test blocker table; the per-test run is in
 > [`test/perf_hooks/RESULTS.md`](test/perf_hooks/RESULTS.md).
+
+<!-- node-zlib:start -->
+### Node.js v25 `zlib` compatibility
+
+`████████░░░░░░░░░░░░░░░░` **33.3%** — 20 / 60 Node `test-zlib*` tests passing
+<!-- node-zlib:end -->
+
+> `zlib` is implemented end to end except zstd: the nine `Transform` classes,
+> the `create*` factories, the nine `*Sync` and nine callback convenience
+> methods with `maxOutputLength` and `info`, `crc32`, the frozen
+> `constants`/`codes` tables with Node's numeric reverse mapping and the legacy
+> top-level `Z_*` aliases, `flush`/`params`/`reset`/`close`, `bytesWritten`,
+> and Node's whole error surface — `checkRangesOrGetDefault` over every option,
+> `ERR_BROTLI_INVALID_PARAM`, `ERR_ZLIB_INITIALIZATION_FAILED`,
+> `ERR_BUFFER_TOO_LARGE`, and the compression errors with zlib's own messages
+> (`incorrect header check`, `unexpected end of file`, `Missing dictionary` vs
+> `Bad dictionary`). The engines are `libz-rs-sys` (zlib-rs's C API, a
+> memory-safe Rust rewrite of zlib with byte-identical output) and the `brotli`
+> crate, and `src/zlib/zstream.rs` follows Node's own `src/node_zlib.cc` call
+> for call — the per-mode `windowBits` rewriting, the `Z_NEED_DICT` retry, the
+> concatenated-gzip member loop, the error classification.
+>
+> The percentage is held down by one engine gap rather than by the module: a
+> typed array is opaque through an `any` binding
+> ([zun#38](https://github.com/UrubuCode/zun/issues/38)), and every `Buffer`
+> `zlib` returns reaches a test through one — so `zlib.gzipSync(x).length` reads
+> `undefined` and `.toString()` throws, and any test that *compares bytes* is
+> blocked before it can look at them. The compression is verified the way `os`
+> and `stream` are instead: 22 Rust tests over the engines (round trips in every
+> mode, the empty-input byte sequences, blobs produced by the real zlib and the
+> reference Brotli encoder, dictionaries, concatenated members, `reset`,
+> `params` mid-stream, the four error classifications, the `crc32` vectors) plus
+> a differential pass in which `zlib.crc32` — which stays inside the module and
+> therefore sees real `Buffer`s — confirms every round trip. zstd is the one
+> deliberate omission: every pure-Rust zstd crate is decompression-only and a
+> C-backed one would break the no-`cc` build. Blocker table:
+> [`test/zlib/README.md`](test/zlib/README.md); per-test breakdown:
+> [`test/zlib/RESULTS.md`](test/zlib/RESULTS.md).

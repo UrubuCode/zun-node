@@ -119,6 +119,11 @@ case "$MODULE" in
   perf_hooks)
           KIND="zun-ts";     PATTERNS="test-perf-hooks- test-performance";
           PATTERN="test-perf-hooks-*|test-performance";;
+  # `zlib` is TS over natives: the nine `Transform` classes and the whole
+  # convenience surface are src/zlib/zlib.ts, and the compression engines
+  # (zlib-rs and the Rust Brotli port) are src/zlib/*.rs. Its corpus is
+  # `test-zlib*`, which includes `test-zlib.js` itself.
+  zlib)   KIND="zun-ts+ext"; PATTERNS="test-zlib";                         PATTERN="test-zlib";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 

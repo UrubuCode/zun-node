@@ -19,6 +19,54 @@ crate-type = ["cdylib", "rlib"]
 zun_abi = { path = "../crates/zun_abi" }
 
 # ---------------------------------------------------------------------------
+# Compression backends for `node:zlib`.
+#
+# Node's `zlib` is a thin layer over zlib, Brotli and zstd, and the one hard
+# requirement the corpus imposes is **byte-for-byte agreement with zlib** for
+# the same parameters (`test-zlib-params.js`, `test-zlib-dictionary.js` and
+# `test-zlib-from-gzip.js` all compare bytes or round-trip through fixtures
+# produced by the real library). That rules out `miniz_oxide`, which is
+# deliberately not output-compatible and offers neither `windowBits`,
+# `memLevel`, `strategy`, dictionaries nor `deflateParams`.
+#
+# `libz-rs-sys` is the C API surface of `zlib-rs`, a memory-safe Rust rewrite
+# of zlib whose stated goal is being a drop-in replacement producing identical
+# output. It exposes exactly the entry points Node's `node_zlib.cc` calls --
+# `deflateInit2_`, `inflateInit2_`, `deflate`, `inflate`, `deflateParams`,
+# `deflateSetDictionary`, `inflateSetDictionary`, `deflateReset`,
+# `inflateReset`, `crc32` -- so `src/zlib/zstream.rs` can follow that file line
+# by line instead of reinventing the state machine. It is pure Rust (no `cc`,
+# no vendored C), which keeps this extension buildable with nothing but a Rust
+# toolchain, the same bar `os`/`fs`/`process` hold.
+#
+# `brotli` is the reference Brotli implementation ported to Rust by the same
+# route, and its streaming encoder/decoder take the very operations Node's
+# `BROTLI_OPERATION_*` flush flags name.
+#
+# zstd (Node 25 added `zstdCompress`/`ZstdCompress`) is deliberately absent:
+# every pure-Rust zstd crate today is decompression-only, and a C-backed one
+# would break the no-`cc` rule above. See `../test/zlib/README.md`.
+[dependencies.libz-rs-sys]
+version = "0.6"
+default-features = false
+features = ["std", "rust-allocator"]
+
+[dependencies.brotli]
+version = "9"
+default-features = false
+features = ["std"]
+
+# `brotli`'s own decoder half, which it re-exports only partly: the decoder
+# error *code* and its name (what Node reports as the error's `code`) are
+# public in this crate but not among `brotli`'s re-exports, and a Node-accurate
+# error is the whole point of naming it. `brotli` depends on this exact crate,
+# so the two resolve to one copy and the `BrotliState` types unify.
+[dependencies.brotli-decompressor]
+version = "6"
+default-features = false
+features = ["std"]
+
+# ---------------------------------------------------------------------------
 # Platform syscall bindings, target-gated so neither reaches the other OS.
 #
 # `node:os` is almost entirely syscalls, and the ones it needs are not in
