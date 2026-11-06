@@ -43,6 +43,12 @@ windows-sys = { version = "0.61", features = [
     "Win32_Networking_WinSock",
     "Win32_Security",
     "Win32_System_Registry",
+    # `node:fs` needs the file APIs `std` does not cover: the per-file
+    # `dev`/`ino`/`nlink` of `stat` (`GetFileInformationByHandle`), the
+    # `FILE_ATTRIBUTE_READONLY` reading of `access`/`chmod`
+    # (`Get`/`SetFileAttributesW`), `utimes` (`SetFileTime`) and `statfs`
+    # (`GetDiskFreeSpace*`).
+    "Win32_Storage_FileSystem",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",
     "Win32_System_WindowsProgramming",

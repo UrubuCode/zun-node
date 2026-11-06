@@ -137,21 +137,11 @@ function processEnvGet(name: string): any {
 // Argument validation — Node's ERR_INVALID_ARG_TYPE
 // ---------------------------------------------------------------------------
 
+// The ` Received ...` suffix of ERR_INVALID_ARG_TYPE, shared with every other
+// module so the wording (util.inspect for strings, `an instance of <Ctor>`)
+// cannot drift from Node's internal/errors.
 function describeReceived(value: any): string {
-  if (value === null) return " Received null";
-  if (value === undefined) return " Received undefined";
-  const kind = typeof value;
-  if (kind === "function") {
-    const name = value.name === undefined ? "" : String(value.name);
-    return " Received function " + name;
-  }
-  if (kind === "object") {
-    if (Array.isArray(value)) return " Received an instance of Array";
-    return " Received an instance of Object";
-  }
-  let text = kind === "string" ? JSON.stringify(value) : String(value);
-  if (slen(text) > 25) text = text.slice(0, 25) + "...";
-  return " Received type " + kind + " (" + text + ")";
+  return __evReceived(value);
 }
 
 // `ERR_INVALID_ARG_TYPE` as Node raises it: a real `TypeError` (so

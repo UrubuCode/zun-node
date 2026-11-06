@@ -13,11 +13,9 @@
 #     `zun run <bundle.ts>`, with no --ext. (`buffer` is TypeScript although
 #     `Buffer` itself is an engine realm global: the module is the surface
 #     around that global, not a second Buffer — see test/buffer/README.md.)
-#   * `fs` is a Rust zun_abi cdylib, so it also needs this repo built and is run
-#     as `zun run --ext <lib> <test.js>`.
-#   * `os` is Zun TypeScript *over* that cdylib, so it needs both: the bundle
-#     from tools/bundle_node_test.sh and `--ext`. The cdylib is therefore built
-#     before `os` is measured, not only before `fs`.
+#   * `os` and `fs` are Zun TypeScript *over* a Rust zun_abi cdylib, so they
+#     need both: the bundle from tools/bundle_node_test.sh and `--ext`. The
+#     cdylib is therefore built before either is measured.
 #
 # zun-node is a submodule of the engine, and its Cargo path dependency on
 # `../crates/zun_abi` assumes it sits inside the engine checkout at
@@ -68,8 +66,8 @@ jobs:
         working-directory: engine
         run: cargo build -p zun_cli
 
-      # The cdylib must exist before `os` (and `fs`) are measured: `os`'s
-      # bundle resolves `import * as native from "node:os"` through it.
+      # The cdylib must exist before `os` and `fs` are measured: their bundles
+      # resolve `import * as native from "node:<module>"` through it.
       - name: Build the zun-node extension
         working-directory: engine/zun-node
         run: cargo build

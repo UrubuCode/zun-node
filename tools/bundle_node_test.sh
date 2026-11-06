@@ -109,6 +109,8 @@ querystring __node_querystring -
 punycode __node_punycode -
 url __node_url -
 internal/url __node_internal_url -
+fs __node_fs -
+fs/promises __node_fs_promises -
 child_process __node_child_process -
 domain __node_domain -
 stream __node_stream -
@@ -160,8 +162,11 @@ buffer src/buffer/buffer.ts
 string_decoder src/buffer/buffer.ts
 string_decoder src/string_decoder/string_decoder.ts
 test tools/harness/node_test.ts
-tty tools/harness/node_test.ts
 punycode src/punycode/deprecation.ts
+fs src/fs/fs.ts
+fs/promises src/fs/fs.ts
+[.][.]/common/tmpdir src/fs/fs.ts
+[.][.]/common/tmpdir tools/harness/tmpdir.ts
 "
 
 # The harness, which stands on everything above it.
@@ -188,7 +193,7 @@ canon_of() { printf '%s\n' "$MODULE_SPECS" | awk -v m="$1" '$1 == m { print $3 }
 # grows, this grows with it, and until then a double-quoted require fails the
 # unresolved-require check at the end rather than silently losing a module.
 requires_module() {
-  grep -Eq "require\('(node:)?$1'\)" "$SRC"
+  grep -Eq "require\('(node:)?$1(\.js)?'\)" "$SRC"
 }
 
 # The final file list: the always-inlined modules, then the extension-backed
@@ -196,13 +201,15 @@ requires_module() {
 FILES="$BUNDLE_FILES"
 while read -r name file; do
   [ -n "${name:-}" ] || continue
-  if requires_module "$name"; then
-    case "$FILES" in
-      *"$file"*) ;;
-      *) FILES="$FILES$file
-";;
-    esac
-  fi
+  requires_module "$name" || continue
+  # One file can be named by several specifiers (`fs` and `fs/promises` are two
+  # module objects in one source file), so each is appended at most once.
+  case "
+$FILES" in *"
+$file
+"*) continue;; esac
+  FILES="$FILES$file
+"
 done <<EOF_CONDITIONAL
 $CONDITIONAL_FILES
 EOF_CONDITIONAL
@@ -225,6 +232,8 @@ trap 'rm -f "$REWRITE"' EXIT
   printf "s|^\\(const\\|let\\|var\\)[[:space:]]\\{1,\\}fixtures[[:space:]]*=[[:space:]]*require('\\.\\./common/fixtures')[[:space:]]*;[[:space:]]*\$||\n"
   printf "s|^require('\\.\\./common')[[:space:]]*;[[:space:]]*\$||\n"
   printf "s|require('\\.\\./common/fixtures')|fixtures|g\n"
+  printf "s|^\(const\|let\|var\)[[:space:]]\{1,\}tmpdir[[:space:]]*=[[:space:]]*require('[^']*common/tmpdir\(\.js\)\{0,1\}')[[:space:]]*;[[:space:]]*\$||\n"
+  printf "s|require('[^']*common/tmpdir\(\.js\)\{0,1\}')|tmpdir|g\n"
   printf "s|require('\\.\\./common')|common|g\n"
 
   # `path/posix` and `path/win32` are bound inside path.ts under those names.

@@ -73,6 +73,7 @@ case "$MODULE" in
   # `URLPattern` is a `node:url` export in Node 25, so those files are part of
   # this module's bar rather than a different one's.
   url)         KIND="zun-ts"; PATTERNS="test-url";                        PATTERN="test-url";;
+  fs)     KIND="zun-ts+ext"; PATTERNS="test-fs-";                         PATTERN="test-fs-";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 
@@ -91,13 +92,34 @@ case "$KIND" in
 esac
 
 LIST="$ROOT/test/$MODULE/NODE_TESTS.txt"
+# Some corpora open files from Node's `test/fixtures/` rather than only
+# computing over their paths (`fs` does; `path` does not). Those files are no
+# more vendored than the tests are: the module lists the ones it needs in
+# `test/<module>/NODE_FIXTURES.txt`, as repository-relative paths, and they are
+# downloaded next to the test file so that the harness's
+# `path.join(__dirname, "..", "fixtures")` -- which is exactly what Node's own
+# test/common/fixtures.js computes -- finds them.
+FIXTURES="$ROOT/test/$MODULE/NODE_FIXTURES.txt"
 RESULTS="$ROOT/test/$MODULE/RESULTS.md"
 README="$ROOT/README.md"
 BUNDLER="$ROOT/tools/bundle_node_test.sh"
 RAW="https://raw.githubusercontent.com/nodejs/node/$TAG/test/parallel"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$WORK/test/parallel" "$WORK/bundles"
+mkdir -p "$WORK/test/parallel" "$WORK/bundles" "$WORK/test/fixtures"
+
+if [ -f "$FIXTURES" ]; then
+  while IFS= read -r fixture; do
+    fixture="$(printf '%s' "$fixture" | tr -d '[:space:]')"
+    [ -n "$fixture" ] || continue
+    case "$fixture" in \#*) continue;; esac
+    mkdir -p "$(dirname "$WORK/$fixture")"
+    if ! curl -fsSL --max-time "$TIMEOUT" \
+      "https://raw.githubusercontent.com/nodejs/node/$TAG/$fixture" -o "$WORK/$fixture"; then
+      echo "warning: could not download fixture $fixture" >&2
+    fi
+  done < "$FIXTURES"
+fi
 # The engine reports the native form of the path it was given, so the scratch
 # directory is stripped from failure notes in both spellings.
 WORK_NATIVE="$WORK"

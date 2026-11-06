@@ -76,6 +76,11 @@ thread_local! {
     /// libuv errno, which Node's `SystemError` reports as `syscall`/`errno`.
     static ERR_SYSCALL: RefCell<CString> = RefCell::new(CString::default());
     static ERR_ERRNO: RefCell<i64> = const { RefCell::new(0) };
+    /// The path(s) the failed call was given, which Node's *filesystem* errors
+    /// report as `path` and `dest` (`node:os` errors have neither). Empty when
+    /// the error has none, which is how the TS layer decides the key is absent.
+    static ERR_PATH: RefCell<CString> = RefCell::new(CString::default());
+    static ERR_DEST: RefCell<CString> = RefCell::new(CString::default());
 }
 
 /// Carrier helpers implementing the `Str`/error convention documented above.
@@ -130,6 +135,17 @@ pub(crate) mod abi {
             return 0;
         }
         unsafe { (*args.add(i)).payload as i64 }
+    }
+
+    /// Read `f64` argument `i`; `0.0` when absent.
+    ///
+    /// # Safety
+    /// As [`arg_str`], for an `F64` argument.
+    pub(crate) unsafe fn arg_f64(args: *const ZunValue, n: usize, i: usize) -> f64 {
+        if i >= n {
+            return 0.0;
+        }
+        f64::from_bits(unsafe { (*args.add(i)).payload })
     }
 
     /// Write a `Str` result through the per-thread scratch buffer.
@@ -190,11 +206,6 @@ pub(crate) mod abi {
         0
     }
 
-    /// Success status for a `Void` function.
-    pub(crate) fn ok() -> i32 {
-        0
-    }
-
     /// Stash a Node-accurate `(code, message)` and return the error status.
     pub(crate) fn fail(code: &str, message: &str) -> i32 {
         ERR_CODE.with(|slot| *slot.borrow_mut() = CString::new(code).unwrap_or_default());
@@ -224,6 +235,29 @@ pub(crate) mod abi {
         ERR_MSG.with(|slot| *slot.borrow_mut() = CString::new(description).unwrap_or_default());
         ERR_SYSCALL.with(|slot| *slot.borrow_mut() = CString::new(syscall).unwrap_or_default());
         ERR_ERRNO.with(|slot| *slot.borrow_mut() = errno);
+        ERR_PATH.with(|slot| *slot.borrow_mut() = CString::default());
+        ERR_DEST.with(|slot| *slot.borrow_mut() = CString::default());
+    }
+
+    /// [`fail_system`] plus the one or two paths a *filesystem* error carries.
+    ///
+    /// Node's `fs` errors are `uvException`s rather than `SystemError`s: the
+    /// message is `"<code>: <description>, <syscall> '<path>'"` (with
+    /// `" -> '<dest>'"` appended for the two-path syscalls), and `path`/`dest`
+    /// are own properties of the error. The composing is left to the TS layer
+    /// for the same reason as in [`fail_system`] — it keeps the fields
+    /// available individually instead of only their concatenation.
+    pub(crate) fn fail_fs(
+        syscall: &str,
+        code: &str,
+        errno: i64,
+        description: &str,
+        path: &str,
+        dest: &str,
+    ) {
+        fail_system(syscall, code, errno, description);
+        ERR_PATH.with(|slot| *slot.borrow_mut() = CString::new(path).unwrap_or_default());
+        ERR_DEST.with(|slot| *slot.borrow_mut() = CString::new(dest).unwrap_or_default());
     }
 }
 
@@ -252,6 +286,20 @@ pub(crate) unsafe extern "C" fn last_error_syscall(_: *const ZunValue, _: usize,
 pub(crate) unsafe extern "C" fn last_error_errno(_: *const ZunValue, _: usize, out: *mut ZunValue) -> i32 {
     let errno = ERR_ERRNO.with(|slot| *slot.borrow());
     unsafe { abi::ret_i64(out, errno) }
+}
+
+/// `lastErrorPath()` — the path the failed filesystem call was given, which
+/// Node's `fs` errors expose as `path`.
+pub(crate) unsafe extern "C" fn last_error_path(_: *const ZunValue, _: usize, out: *mut ZunValue) -> i32 {
+    let path = ERR_PATH.with(|slot| slot.borrow().to_string_lossy().into_owned());
+    unsafe { abi::ret_str(out, &path) }
+}
+
+/// `lastErrorDest()` — the second path of a two-path filesystem call
+/// (`rename`, `copyfile`, `link`, `symlink`), which Node exposes as `dest`.
+pub(crate) unsafe extern "C" fn last_error_dest(_: *const ZunValue, _: usize, out: *mut ZunValue) -> i32 {
+    let dest = ERR_DEST.with(|slot| slot.borrow().to_string_lossy().into_owned());
+    unsafe { abi::ret_str(out, &dest) }
 }
 
 /// One function descriptor: a NUL-terminated key, its parameter types, return
