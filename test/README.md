@@ -71,6 +71,16 @@ reproduces.
   `console/README.md` names the rest, and documents the two engine behaviours
   that make the identifier `console` unusable as a method receiver — which is
   why `tools/bundle_node_test.sh` rewrites it.
+- `module/` — the full 54-file `test-module-*` + `test-require-*` corpus,
+  through the bundler *and* `--ext`. It is the one corpus the bundler has a
+  **mode** for: `--module module` exports `ZUN_NODE_REQUIRE`, under which
+  `require` is left as a run-time function instead of being rewritten away,
+  because this is the corpus whose subject is `require`. It is also the one
+  module that cannot reach 100%: the engine compiles ahead of execution, so a
+  `require` that turns a JavaScript file into a module has no compiler to call,
+  which is 17 of the 34 failures. `module/README.md` groups every failure by
+  root cause, states exactly which half of `node:module` is implemented and
+  which cannot be, and records the two engine bugs this corpus found.
 - `fs/` — the full 227-file `test-fs-*` inventory. It measures 0% until the
   Node-API shaping over the extension natives (Buffers, fds, callbacks/promises,
   full `Stats`) and the `test/fixtures/` tree exist; see `fs/README.md`.

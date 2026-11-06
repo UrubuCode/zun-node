@@ -67,6 +67,42 @@
 # CommonJS also provides `__filename` and `__dirname`; they are injected as the
 # test's own location (override the file name with ZUN_NODE_TEST_FILENAME, used
 # when bundling a truncated copy of a test).
+
+# ---------------------------------------------------------------------------
+# ZUN_NODE_REQUIRE: the `module` corpus, where `require` is the subject
+# ---------------------------------------------------------------------------
+#
+# Every rule above rewrites `require(...)` *away*, which is exactly wrong for
+# the one corpus whose subject is `require` itself: `test-require-cache.js`
+# writes `require.cache.fs` and then asks what `require('fs')` answers, and
+# `test-module-cache.js` calls `require(<a path held in a variable>)`. Both
+# need `require` to be a **function at run time**, not a name the bundler
+# erased.
+#
+# `tools/run_node_tests.sh --module module` therefore exports
+# ZUN_NODE_REQUIRE=1, and this bundler then does three things differently --
+# and only for that corpus, so every other bundle stays byte-identical:
+#
+#   1. `src/fs/fs.ts` and `src/module/module.ts` are inlined unconditionally
+#      (the resolver is file-system work), so the bundle runs with `--ext`.
+#   2. the generic `require('<specifier>')` -> `__node_<specifier>` rewrite is
+#      **not** emitted for a Node builtin specifier. The canonical-binding
+#      rules still are, so `const assert = require('assert');` is still
+#      deleted and `assert` is still the inlined module -- what changes is
+#      that an *inline* `require('fs')` survives to run time.
+#   3. every surviving `require` in the body becomes `__zunRequire`, the
+#      `require` of the bundled file's own module record
+#      (`src/module/module.ts`). That one rename carries `require(...)`,
+#      `require.resolve(...)`, `require.cache`, `require.extensions` and
+#      `require.main` at once, and the word boundary keeps it off
+#      `createRequire`.
+#
+# The registry that makes step 3 answer anything is emitted with the bundle:
+# one `__modRegisterBuiltin("<specifier>", __node_<specifier>)` call per module
+# object the bundle actually declares, which is how `node:module` knows what
+# this program carries. `builtinModules` and `isBuiltin` still answer *Node's*
+# list, because that list is a fact about Node's API; requiring a builtin this
+# library has not implemented throws rather than answering an empty object.
 #
 # The last line of the bundle is `__zunHarnessFinish();`, which starts the
 # settle loop that emits `process` 'exit' and verifies the `common.mustCall`
@@ -195,6 +231,7 @@ internal/test/binding __node_internal_test_binding -
 internal/errors __node_internal_errors -
 [.][.]/common/internet __node_harness_internet -
 perf_hooks __node_perf_hooks PerformanceEntry,PerformanceMark,PerformanceMeasure,PerformanceObserver,PerformanceObserverEntryList,PerformanceResourceTiming,Performance,createHistogram,monitorEventLoopDelay
+module __node_module Module,builtinModules,isBuiltin,createRequire,SourceMap,stripTypeScriptTypes,findPackageJSON
 "
 
 # The modules inlined into every bundle, in dependency order.
@@ -431,6 +468,8 @@ internal/test/binding src/dns/dns.ts
 internal/test/binding tools/harness/binding.ts
 internal/errors src/dns/dns.ts
 internal/errors tools/harness/binding.ts
+module src/fs/fs.ts
+module src/module/module.ts
 [.][.]/common/internet tools/harness/internet.ts
 "
 
@@ -591,6 +630,20 @@ $file
 done <<EOF_CONDITIONAL
 $CONDITIONAL_FILES
 EOF_CONDITIONAL
+
+# The `module` corpus always carries the resolver and the file system under it,
+# whether or not the test in hand spells `require('module')`; see
+# ZUN_NODE_REQUIRE above. The append-once rule is the loop's.
+if [ -n "${ZUN_NODE_REQUIRE:-}" ]; then
+  for required in src/fs/fs.ts src/module/module.ts; do
+    case "
+$FILES" in *"
+$required
+"*) continue;; esac
+    FILES="$FILES$required
+"
+  done
+fi
 
 # The global `performance`.
 #
@@ -996,7 +1049,22 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
     printf "s#^%s[[:space:]]*;[[:space:]]*\$##\n" "$pat"
     # Everything else -- `const x = require('m')`, `require('m').member`,
     # `const { a, b } = require('m')` -- becomes the module object in place.
-    printf "s#%s#%s#g\n" "$pat" "$obj"
+    #
+    # Except in ZUN_NODE_REQUIRE mode, where every specifier but a harness
+    # one (`../common/*`) is left for the run-time `require` to resolve (see
+    # the header). That includes the `internal/*` surfaces, which are *not*
+    # builtins in Node: `test-require-node-prefix.js` asserts that
+    # `require('node:internal/test/binding')` throws
+    # ERR_UNKNOWN_BUILTIN_MODULE, which it cannot do if the bundler has
+    # already turned the call into the object.
+    if [ -n "${ZUN_NODE_REQUIRE:-}" ]; then
+      case "$name" in
+        '[.][.]/'*) printf "s#%s#%s#g\n" "$pat" "$obj";;
+        *) :;;
+      esac
+    else
+      printf "s#%s#%s#g\n" "$pat" "$obj"
+    fi
   done
 
   # Engine workaround (https://github.com/UrubuCode/zun/issues/18): `new
@@ -1053,6 +1121,44 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
   # out of reach too, since `_` is a word character and `\b` does not match
   # inside them.
   cat "$LATE"
+
+  # ZUN_NODE_REQUIRE, last of all: every `require` the rules above left in
+  # the body becomes `__zunRequire`. It has to be last for the same reason
+  # the alias renames do -- a specifier still spelled out must already have
+  # been consumed.
+  #
+  # The match requires a `(`, `.` or `[` immediately after the name, and
+  # refuses a word character, a `-` or a `.` immediately before it, so the
+  # word has to be *used as the require function* to be renamed.
+  # `createRequire` and `requires` are out of reach because the name is
+  # case-sensitive and the trailing class is not a word character, and -- the
+  # case that made the leading class necessary -- the fixture directory name
+  # `'module-require'` keeps its spelling, where a bare word boundary turned
+  # it into `module-__zunRequire` and sent
+  # `test-require-resolve-opts-paths-relative.js` looking for a path that does
+  # not exist.
+  #
+  # A quote is *not* excluded, unlike the `console` rule above. Three files in
+  # this corpus write a tiny CommonJS module into a scratch file as a string
+  # literal (`fs.writeFileSync(f, 'require("./other");')`), and leaving those
+  # alone made the whole bundle fail the unresolved-require check at the end --
+  # reporting "bundle failed" for a test whose real blocker is that this
+  # platform cannot compile a file at run time at all. The rewrite inside such
+  # a string changes data that is written to a file nothing here can load, so
+  # it costs nothing and keeps the failure honest.
+  #
+  # The rule is emitted twice because sed's `g` consumes the character it
+  # matched before the name.
+  #
+  # `printf '%s\n'` rather than a format string: a bare `\1` backreference in
+  # a printf *format* is an octal escape, which would emit a U+0001 into the
+  # sed program instead of the backreference.
+  if [ -n "${ZUN_NODE_REQUIRE:-}" ]; then
+    for _pass in 1 2; do
+      printf '%s\n' "s#^require\([.([]\)#__zunRequire\1#"
+      printf '%s\n' "s#\([^A-Za-z0-9_\$.-]\)require\([.([]\)#\1__zunRequire\2#g"
+    done
+  fi
 } > "$REWRITE"
 
 # ---------------------------------------------------------------------------
@@ -1070,6 +1176,33 @@ EOF_FILES
   cat "$@"
   echo "const __filename: string = $(json_string "$TEST_PATH");"
   echo "const __dirname: string = $(json_string "$TEST_DIR");"
+  # The builtin registry and `require.main` (ZUN_NODE_REQUIRE only; see the
+  # header). One declaration scan over the inlined files, then an in-shell
+  # membership test per specifier -- a `grep` per specifier cost about a
+  # second a bundle on Windows. Only a module object named `__node_<something>`
+  # can be registered, and only under a specifier that is a Node builtin id: a
+  # harness specifier (`../common/*`) is not a module `require` resolves, and
+  # an `internal/*` surface is not a builtin in Node either.
+  #
+  # `__modInitMain()` is last, and it is here rather than in the library
+  # because the module record it builds reads `__filename`, which is declared
+  # just above. It is the position Node's own
+  # `setOwnProperty(module.require, 'main', process.mainModule)` occupies.
+  if [ -n "${ZUN_NODE_REQUIRE:-}" ]; then
+    declared="$(grep -ho '^const __node_[A-Za-z0-9_]*' "$@" | sed 's/^const //' | sort -u)
+"
+    printf '%s\n' "$MODULE_SPECS" | while read -r name obj canons; do
+      [ -n "${name:-}" ] || continue
+      case "$name" in '[.][.]/'*|internal/*) continue;; esac
+      case "$obj" in __node_*) ;; *) continue;; esac
+      case "
+$declared" in *"
+$obj
+"*) ;; *) continue;; esac
+      printf '__modRegisterBuiltin("%s", %s);\n' "$name" "$obj"
+    done
+    echo "__modInitMain();"
+  fi
   echo "// ==== test body ===="
   if [ "$WRAP_BODY" = 1 ]; then echo "function __zunTestBody(): void {"; fi
   sed -f "$REWRITE" "$SRC" | awk "$UNPACK_MODULE_DESTRUCTURING"

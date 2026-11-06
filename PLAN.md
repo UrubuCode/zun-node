@@ -1354,6 +1354,78 @@ gets deleted; nothing else in the tracker changes.
   `vm`'s tracker kind is `zun-ts` and the CI workflow excludes it from
   `--ext`. Table in `test/vm/README.md`.
 
+- **`node:module`: implemented, TS over natives (the `os` kind), in
+  `src/module/module.ts`.** The half of `node:module` that is *computation over
+  paths and files* is complete — the resolver (`_resolveFilename` with
+  `options.paths`, `_findPath` with `_pathCache`, the trailing-slash rule and
+  multi-dot extensions, `_resolveLookupPaths`, `_nodeModulePaths` for both
+  platforms, `_initPaths`/`globalPaths`, `_stat`,
+  `tryFile`/`tryExtensions`/`tryPackage` with package.json `"main"` and its
+  DEP0128 warning), `_cache`/`_pathCache`/`_extensions` with user-registered
+  loaders, `_load`, `createRequire`, `require.resolve`/`.paths`/`.cache`/
+  `.extensions`/`.main`, `builtinModules`/`isBuiltin` over Node 25's own id
+  list, `findPackageJSON`, a complete Source Map v3 reader (`SourceMap`,
+  `findEntry`, `findOrigin`, index-map `sections`), `setSourceMapsSupport`,
+  `Module.wrap`/`wrapper`, `syncBuiltinESMExports`, `constants` and the
+  compile-cache trio. `stripTypeScriptTypes` is Node's wrapper exactly over a
+  whitespace-preserving stripper written here, because Amaro is SWC compiled to
+  Wasm and there is no Wasm engine to run it in.
+
+  The half that is *turning a source file into a module* is **not** here, and
+  cannot be: the engine compiles a program ahead of execution, so there is no
+  runtime compiler, no `eval` and no `vm`
+  ([zun#4](https://github.com/UrubuCode/zun/issues/4)). `.json` loads for real;
+  `.js`/`.cjs` answers `ERR_ZUN_NO_RUNTIME_COMPILER`, `.mjs` answers
+  `ERR_REQUIRE_ESM` and `.node` answers `ERR_DLOPEN_FAILED` — the honest errors
+  rather than fabricated successes. `register`/`registerHooks` report
+  `ERR_METHOD_NOT_IMPLEMENTED` for the same reason: both forms of loader hook
+  exist to feed a compiler, and honouring the `resolve` half alone would change
+  which file a specifier names while still refusing to load it. This is the one
+  module that cannot reach 100% of its corpus, and that fact is stated in
+  `test/module/README.md` rather than left for a reader to infer.
+
+  It is also the one module that needed a **bundler mode**. Every other corpus
+  is built by rewriting `require(...)` away into the inlined module objects,
+  which is exactly wrong for the corpus whose subject is `require`:
+  `test-require-cache.js` writes `require.cache.fs` and then asks what
+  `require('fs')` answers. `tools/run_node_tests.sh --module module` therefore
+  exports `ZUN_NODE_REQUIRE=1`, under which `tools/bundle_node_test.sh` leaves a
+  builtin specifier for the run-time `require` to resolve, renames the body's
+  `require` to `__zunRequire` (the `require` of the bundled file's own module
+  record), inlines `src/fs/fs.ts` and `src/module/module.ts` unconditionally,
+  and emits one `__modRegisterBuiltin("<specifier>", __node_<specifier>)` call
+  per module object the bundle declares — which is how `node:module` knows what
+  this program carries, there being no disk to read a built-in module from. The
+  mode is gated on that one environment variable, so no other corpus' bundle
+  changes by a byte.
+
+  **Documented deviations**: `Module` is a function carrying Node's statics
+  rather than a constructor, because the engine has no function-constructor or
+  prototype model ([zun#25](https://github.com/UrubuCode/zun/issues/25)), so
+  `new Module(id, parent)` cannot work and `Module.prototype` is absent rather
+  than faked; there is no `exports`-field or `#name` package-imports
+  resolution, both of which need the ESM resolver; a circularly-required
+  module's exports come back as they are, without Node's warning `Proxy`;
+  `module.parent` is absent rather than `null`, because Node only has it under
+  `--pending-deprecation` and this runtime honours no command-line flags;
+  `SourceMap`'s `payload` and `lineLengths` are declared fields rather than
+  copy-returning accessors ([zun#51](https://github.com/UrubuCode/zun/issues/51)
+  leaves a class prototype carrying none of the class's own members, so an
+  accessor there is unreachable on a typed receiver); and `mode: 'transform'`
+  is strip plus an identity source map rather than SWC's `enum`/`namespace`
+  lowering, which strip-only rejects outright. **Two new engine findings**, both
+  with standalone repros in `test/module/README.md`: a function expression
+  assigned to an expando property of a *function* is given a synthetic leading
+  `this` parameter — shifting every argument by one — as soon as the token
+  `this` appears anywhere in its source span, comments included (the same
+  assignment onto a plain object is unaffected, and a named function
+  declaration never shifts; the same textual-scan family as
+  [zun#40](https://github.com/UrubuCode/zun/issues/40)); and
+  `Object.defineProperty` on a function value throws "called on non-object".
+  The first is why every `Module.<name>` is a named top-level function assigned
+  to the property; the second is why `require.main` is a plain property set by
+  one bundler-emitted call. Table in `test/module/README.md`.
+
 ### Module keys and host dispatch
 
 The native surface is registered under `node:fs` and `node:os`, so those import

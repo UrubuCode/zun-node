@@ -1247,3 +1247,52 @@ target/debug/zun run /tmp/bundle.ts
 > frame. The file-by-file blocker table, with a standalone repro for each
 > finding, is in [`test/vm/README.md`](test/vm/README.md); the per-test
 > breakdown in [`test/vm/RESULTS.md`](test/vm/RESULTS.md).
+
+<!-- node-module:start -->
+### Node.js v25 `module` compatibility
+
+`████████░░░░░░░░░░░░░░░░` **37.0%** — 20 / 54 Node `test-module-*|test-require-*` tests passing
+<!-- node-module:end -->
+
+> `module` is the one module in this library that cannot reach 100%, and the
+> reason is structural rather than a gap to close: the Zun engine compiles a
+> program ahead of execution, so there is no runtime compiler, no `eval` and no
+> `vm` ([zun#4](https://github.com/UrubuCode/zun/issues/4)), and a `require`
+> that turns a JavaScript file into a module needs one. That single fact
+> accounts for **17 of the 34 failures**; nine more spawn `process.execPath` as
+> if it were a `node` binary and ask it to run a `.js` main.
+>
+> What *is* here is the whole half of `node:module` that is computation over
+> paths and files, and it is complete: the resolver
+> (`_resolveFilename` with `options.paths`, `_findPath` with `_pathCache` and
+> multi-dot extensions, `_resolveLookupPaths`, `_nodeModulePaths` for both
+> platforms, `_initPaths`/`globalPaths`, `_stat`, package.json `"main"` with its
+> DEP0128 warning), the caches, the extension table with user-registered
+> loaders, `createRequire`, `findPackageJSON`, a complete Source Map v3 reader
+> (`SourceMap`, `findEntry`, `findOrigin`, index maps), `Module.wrap`,
+> `setSourceMapsSupport`, the compile-cache trio reporting honest values, and
+> `stripTypeScriptTypes` over a whitespace-preserving stripper written here
+> rather than borrowed from SWC. `.json` modules load for real; `.mjs` answers
+> `ERR_REQUIRE_ESM` and `.node` answers `ERR_DLOPEN_FAILED`, which are the
+> honest errors rather than fabricated successes.
+>
+> It also needed a bundler mode. Every other corpus is built by rewriting
+> `require(...)` *away* into the inlined module objects, which is exactly wrong
+> for the corpus whose subject is `require`: `test-require-cache.js` writes
+> `require.cache.fs` and then asks what `require('fs')` answers. So
+> `tools/run_node_tests.sh --module module` exports `ZUN_NODE_REQUIRE=1`, under
+> which the bundler leaves a builtin specifier for the run-time `require` to
+> resolve, renames the body's `require` to `__zunRequire` — the `require` of the
+> bundled file's own module record — and emits one
+> `__modRegisterBuiltin("<specifier>", __node_<specifier>)` call per module
+> object the bundle carries. No other corpus' bundle changes by a byte.
+>
+> Two engine bugs were found here, both with standalone repros: a function
+> expression assigned to an expando property of a **function** is given a
+> synthetic leading `this` parameter — shifting every argument by one — as soon
+> as the token `this` appears anywhere in its source span, comments included
+> (the same assignment onto a plain *object* is unaffected); and
+> `Object.defineProperty` on a function value throws "called on non-object".
+> Deviations, repros and the blocker table:
+> [`test/module/README.md`](test/module/README.md); per-test breakdown:
+> [`test/module/RESULTS.md`](test/module/RESULTS.md).
