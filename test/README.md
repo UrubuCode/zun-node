@@ -36,6 +36,16 @@ reproduces.
   The module itself is verified by a differential run against Node with zero
   divergences on both platforms, so every remaining failure is a harness or
   engine gap; see `os/README.md`.
+- `buffer/` — the full 64-file `test-buffer*` corpus, through the bundler.
+  `Buffer` itself is the **engine's** realm global (NUCLEUS #21), so this corpus
+  measures the engine's Buffer as much as the module around it, and every
+  failure is an engine or harness gap; `buffer/README.md` groups all 63 of them
+  by root cause with a standalone repro each, and records the check of the four
+  historical Buffer CVEs.
+- `string_decoder/` — the full 3-file `test-string-decoder*` corpus, through the
+  bundler. All three fail to compile on engine gaps, so the decoder is verified
+  by a differential run against Node over 1248 cases with zero divergences; see
+  `string_decoder/README.md`.
 - `fs/` — the full 227-file `test-fs-*` inventory. It measures 0% until the
   Node-API shaping over the extension natives (Buffers, fds, callbacks/promises,
   full `Stats`) and the `test/fixtures/` tree exist; see `fs/README.md`.

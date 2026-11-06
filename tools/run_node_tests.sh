@@ -36,7 +36,7 @@
 #
 # Usage:
 #   tools/run_node_tests.sh --zun <path> [--ext <lib>] [--tag v25.0.0]
-#       [--module fs|path|events] [--limit N] [--timeout 20]
+#       [--module fs|path|events|buffer|string_decoder] [--limit N] [--timeout 20]
 set -u
 
 ZUN=""; EXT=""; TAG="v25.0.0"; MODULE="fs"; LIMIT=0; TIMEOUT=20
@@ -64,10 +64,13 @@ case "$MODULE" in
   util)   KIND="zun-ts";     PATTERNS="test-util";                        PATTERN="test-util";;
   events) KIND="zun-ts";     PATTERNS="test-event-emitter- test-events-"; PATTERN="test-event-emitter-*|test-events-";;
   os)     KIND="zun-ts+ext"; PATTERNS="test-os";                          PATTERN="test-os";;
+  buffer) KIND="zun-ts";     PATTERNS="test-buffer";                      PATTERN="test-buffer";;
+  string_decoder)
+          KIND="zun-ts";     PATTERNS="test-string-decoder";              PATTERN="test-string-decoder";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 
-[ -n "$ZUN" ] || { echo "usage: --zun <path> [--ext <lib>] [--module fs|path|events|os]" >&2; exit 2; }
+[ -n "$ZUN" ] || { echo "usage: --zun <path> [--ext <lib>] [--module fs|path|events|os|buffer|string_decoder]" >&2; exit 2; }
 case "$KIND" in
   extension)
     if [ -z "$EXT" ]; then
