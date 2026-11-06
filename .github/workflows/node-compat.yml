@@ -35,7 +35,7 @@ on:
   workflow_dispatch:
     inputs:
       module:
-        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, stream, diagnostics_channel, console, perf_hooks, v8, tty, readline, domain, process, os, fs, child_process, zlib, dns, crypto, net, … or "all")
+        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, stream, diagnostics_channel, console, perf_hooks, v8, tty, readline, domain, process, os, fs, child_process, zlib, dns, crypto, net, vm, … or "all")
         default: all
       limit:
         description: Only the first N tests (0 = all)
@@ -93,7 +93,7 @@ jobs:
           ZUN="$PWD/target/debug/zun"
           EXT="$PWD/zun-node/target/debug/libzun_node.so"
           case "$MODULE" in
-            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks v8 tty readline domain process os fs child_process zlib dns crypto net";;
+            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks v8 tty readline domain process os fs child_process zlib dns crypto net vm";;
             *)   MODULES="$MODULE";;
           esac
           test -f "$EXT" || { echo "extension cdylib missing: $EXT" >&2; exit 1; }
@@ -104,7 +104,10 @@ jobs:
             # `domain`, which call into no native themselves but whose corpora
             # require `fs`/`crypto`.
             case "$m" in
-              util|assert|path|events|buffer|string_decoder|querystring|punycode|url|timers|stream|diagnostics_channel|console|perf_hooks|v8|tty) EXT_ARGS="";;
+              # `vm` must run **without** `--ext`: `zun run --ext` injects no
+              # `EvalHost`, so `new Function` -- the module's whole floor --
+              # throws "code generation from strings disallowed" there.
+              util|assert|path|events|buffer|string_decoder|querystring|punycode|url|timers|stream|diagnostics_channel|console|perf_hooks|v8|vm|tty) EXT_ARGS="";;
               *)           EXT_ARGS="--ext $EXT";;
             esac
             bash zun-node/tools/run_node_tests.sh \

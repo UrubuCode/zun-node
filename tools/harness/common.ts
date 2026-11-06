@@ -744,23 +744,14 @@ const __node_worker_threads: any = {
   SHARE_ENV: undefined,
 };
 
-// `node:vm` is required by `test-querystring.js`, which uses
-// `vm.runInNewContext('({"foo": ["bar", "baz"]})')` to obtain a plain object
-// from *another realm* and check that `querystring.stringify` handles it. A
-// second realm is a VM facility, not something a library can synthesize, so the
-// stub throws rather than handing back a same-realm object and quietly turning
-// a cross-realm test into a tautology.
-const __node_vm: any = {
-  runInNewContext(): any {
-    throw new Error("vm is not available in the zun harness");
-  },
-  runInThisContext(): any {
-    throw new Error("vm is not available in the zun harness");
-  },
-  createContext(): any {
-    throw new Error("vm is not available in the zun harness");
-  },
-};
+// `node:vm` used to be stubbed here, throwing, because a second realm is a VM
+// facility rather than something a library can synthesize. It is a real module
+// now (`src/vm/vm.ts`), built on the engine's own run-time compile path
+// (`new Function` -> `EvalHost` -> the project's compiler), and the bundler
+// inlines it for any test that requires it. So the stub is gone: a second
+// declaration of `__node_vm` in one program is a compile error. What the real
+// module cannot do is *isolate* a context -- this engine has one realm global
+// -- and that is stated at its own use sites rather than hidden behind a throw.
 
 // `node:crypto` used to be stubbed here, throwing, with `common.hasCrypto`
 // left `false` — the shape a `--without-ssl` Node build has. It is a real

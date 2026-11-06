@@ -58,6 +58,15 @@ A Node module lands here in whichever form fits what it actually does:
   `src/domain/domain.ts` is the only writer; see
   [`test/domain/README.md`](test/domain/README.md) for the table of what each
   slot replaces.
+  `vm` (`src/vm/vm.ts`) is the kind's other limiting case, from the opposite
+  side: compiling source text at run time sounds like the least
+  library-expressible thing in Node, and it turns out the engine already owns
+  the capability. `new Function(...)` is lowered to the `functionConstruct`
+  intrinsic and answered by an injected `EvalHost` that calls **the project's
+  own compiler**, so `vm` needs no syscall and no native — only the Node-shaped
+  surface over that one primitive. It is the one module that must run *without*
+  `--ext`, because `zun run --ext` injects no such host; see
+  [`test/vm/README.md`](test/vm/README.md).
 
   `console` can still be bundled. `readline` and `readline/promises`
   (`src/readline/`) are pure computation over `events`, `stream`,
@@ -530,11 +539,11 @@ the direct `zun run --ext <lib> <test.js>` path.
 > Object` answers `true` for a null-prototype object on this engine
 > ([zun#26](https://github.com/UrubuCode/zun/issues/26)) — which is exactly what
 > that line denies. With it removed,
-> `test-querystring-multichar-separator.js` passes in full;
-> `test-querystring.js` additionally needs a second realm
-> (`vm.runInNewContext`). The callable-`assert` half of the blocker
-> ([zun#14](https://github.com/UrubuCode/zun/issues/14)) **no longer
-> reproduces** as of engine `c4afcca4`. The blocker table is
+> `test-querystring-multichar-separator.js` passes in full. The callable-`assert`
+> half of the old blocker ([zun#14](https://github.com/UrubuCode/zun/issues/14))
+> **no longer reproduces** as of engine `c4afcca4`, and `test-querystring.js`'s
+> `vm.runInNewContext('({"foo": ["bar", "baz"]})')` is served by the real
+> `node:vm` now ([`src/vm/vm.ts`](src/vm/vm.ts)). The blocker table is
 > in [`test/querystring/README.md`](test/querystring/README.md), the per-test
 > breakdown in [`test/querystring/RESULTS.md`](test/querystring/RESULTS.md).
 
@@ -1178,3 +1187,63 @@ target/debug/zun run /tmp/bundle.ts
 > receiver; `bind` does not exist at all). Per-test breakdown and the full
 > blocker table: [`test/net/README.md`](test/net/README.md),
 > [`test/net/RESULTS.md`](test/net/RESULTS.md).
+
+<!-- node-vm:start -->
+### Node.js v25 `vm` compatibility
+
+`███░░░░░░░░░░░░░░░░░░░░░` **16.3%** — 15 / 92 Node `test-vm-*` tests passing
+<!-- node-vm:end -->
+
+> `vm` is the one module whose job *is* run-time compilation, so the first
+> question was whether this platform has any. It does, and it is a real compile:
+> the checker lowers `new Function(p1, …, body)` to the `functionConstruct`
+> intrinsic, the interpreter hands the strings to an injected `EvalHost`, and
+> the driver answers with **the project's own compiler**
+> (`zun_compiler::compile_without_prelude`), links the resulting methods into
+> the live module and re-verifies them. There is no `eval`, direct or indirect,
+> and no host/ABI entry that compiles — `zun_abi` publishes natives *to* the
+> engine, never the other way — so `new Function` is the whole surface, and
+> `src/vm/vm.ts` is built on it rather than on an imitation of it. Every
+> `Script` here is compiled by the compiler and every run executes compiled
+> code.
+>
+> Two gaps separate `new Function(body)` from `vm.Script`, and both are closed
+> with **the compiler as the authority** instead of a guess. A *completion
+> value*: `__vmScan` finds the top-level statement boundaries — tracking
+> comments, the three string forms, regular-expression literals and bracket
+> depth — and the compile driver walks them backwards asking the compiler
+> whether `<prefix> __zunVmR = (<suffix>);` compiles, keeping the first split it
+> accepts; a bad proposal simply fails to compile and is discarded. And
+> *contextified globals*: reading a free identifier lowers to `globalGet(name)`,
+> but **writing** one is a compile error — ``unknown variable `foo` `` — and
+> that diagnostic *names* every implicitly assigned global, so the names are
+> read out of the message, declared `let` at the top of the generated body from
+> the active context and copied back in a `finally`, while reads are served by
+> installing the context's own properties on the realm global for the duration.
+> Top-level `var` and `function` declarations go back to the context too,
+> because in Node they become context-global properties where `let` and `const`
+> do not.
+>
+> What this cannot be is a second realm: the engine has one realm global, so a
+> context cannot *hide* the host's globals, and
+> `vm.runInNewContext('typeof process')` answers `"object"` where Node answers
+> `"undefined"`. That is stated rather than papered over, and it is most of what
+> the corpus measures — along with two engine findings that this work produced
+> and that between them cost about twenty files: `new Error("boom")` inside
+> dynamically compiled code evaluates to a **function value** rather than an
+> error (the builtin class cannot be referenced, so `new` on the realm class
+> descriptor returns the descriptor, with no diagnostic), and `this.x = v` in
+> compiled code **panics the interpreter** instead of throwing a `TypeError`.
+> A third finding is why the tracker kind is `zun-ts`: `zun run --ext <lib>
+> file.ts` injects no `EvalHost`, so loading any native extension silently
+> removes run-time code generation from the program. Twenty-one more files need
+> `--experimental-vm-modules`, whose `SourceTextModule` needs a module
+> compilation entry the engine does not expose — so `vm.Module` and friends are
+> **absent**, exactly as they are in a Node run without that flag. There is no
+> code cache either, so `produceCachedData` reports
+> `cachedDataProduced: false`, a supplied `cachedData` is honestly rejected and
+> `createCachedData()` throws with its reason; and `timeout`/`breakOnSigint`
+> are validated and then ignored, because nothing can interrupt a running
+> frame. The file-by-file blocker table, with a standalone repro for each
+> finding, is in [`test/vm/README.md`](test/vm/README.md); the per-test
+> breakdown in [`test/vm/RESULTS.md`](test/vm/RESULTS.md).
