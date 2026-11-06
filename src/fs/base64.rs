@@ -10,7 +10,7 @@
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /// Encode `bytes` as padded base64.
-pub(super) fn encode(bytes: &[u8]) -> String {
+pub(crate) fn encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
     let mut chunks = bytes.chunks_exact(3);
     for chunk in &mut chunks {
@@ -55,7 +55,7 @@ fn sextet(byte: u8) -> Option<u8> {
 /// Decode base64 (padding optional, unknown characters skipped — the lenient
 /// reading `Buffer.from(…, "base64")` also takes, so a round trip through
 /// either side agrees).
-pub(super) fn decode(text: &str) -> Vec<u8> {
+pub(crate) fn decode(text: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len() / 4 * 3);
     let mut accumulator: u32 = 0;
     let mut bits = 0u32;

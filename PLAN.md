@@ -593,6 +593,82 @@ gets deleted; nothing else in the tracker changes.
   class has no constructor body, so `new URL(...)` fills its fields
   positionally and the lazy parser short-circuits). Table in
   `test/url/README.md`.
+- **`node:timers` + `node:timers/promises`: complete, in
+  `src/timers/timers.ts`, measured against the full Node corpus.** This is the
+  first module whose *substance* is already in the VM: the macrotask tier of the
+  unified event loop (NUCLEUS §9a) with a virtual clock that fast-forwards
+  instead of sleeping. What Node adds on top is shape, and that is the whole
+  file — the `Timeout` and `Immediate` objects with Node's own enumerable fields
+  (`_idleTimeout`, `_onTimeout`, `_repeat`, `_destroyed`, the list pointers),
+  `ref`/`unref`/`hasRef`/`refresh`/`close`/`[Symbol.toPrimitive]`,
+  `validateFunction`, the delay-coercion ladder with its three
+  `Timeout*Warning`s, `clearTimeout` by object *or* id (with Node's lazy
+  `knownTimersById` registration), `enroll`/`unenroll`/`active` (DEP0096), and
+  `timers/promises`' `setTimeout`/`setImmediate`/`setInterval` (an async
+  generator) plus `scheduler.wait`/`scheduler.yield`, all with `AbortSignal` and
+  the `ref` option. `lib/timers.js` and `lib/internal/timers.js` are followed
+  instruction for instruction where it is observable, `listOnTimeout`'s
+  `try`/`finally` ordering included — which is what makes `refresh()` inside a
+  callback keep the timer alive, a one-shot turn into an interval by assigning
+  `_repeat`, and an interval survive a throwing callback.
+  **The module is also where [zun#29](https://github.com/UrubuCode/zun/issues/29)
+  gets its answer.** `setTimeout` & co. are *globals* in Node and typed
+  *intrinsics* in Zun — the callback must be statically a function, a handle must
+  be numeric — so Node's tests, which pass an `any` and clear with an object,
+  are rejected at compile time. Declaring the six names as top-level functions
+  shadows the intrinsics program-wide, and the implementation reaches the loop
+  through `import { timers } from "zun:core"` instead: a namespace member call
+  lowers straight to `call.builtin`, so the shadow never sees it, and the
+  native's callback parameter is `Opaque`, so an `any`-typed callable is accepted
+  there and nowhere else. That is the general escape hatch for any library in
+  this position, and it is recorded at the use site.
+  The harness gained two facts from this: `__timerPendingRefs()` and
+  `__timerNextDelay()`, which turn the settle loop's "is the program finished"
+  heuristic into a real question and let it jump the virtual clock to the next
+  due time instead of spending a turn per millisecond; it also emits
+  `process` 'beforeExit' now. **Documented deviations**: `this` inside a callback
+  is undefined rather than the timer
+  ([#1](https://github.com/UrubuCode/zun/issues/1)); an `Immediate` is a 0-delay
+  macrotask rather than a check-phase handle, so it interleaves with
+  `setTimeout(fn, 0)` in arm order; `Symbol.dispose` does not exist in this
+  engine, so `close()` is the only spelling. Two new engine bugs came out of this
+  work — a bare `return;` in a function whose return type was *inferred* as
+  `Any` is rejected, and an explicit `obj[Symbol.toPrimitive]()` panics the
+  interpreter although every implicit coercion works — and between them they
+  account for nine of the thirty-two failures. Table in
+  `test/timers/README.md`.
+- **`node:child_process`: the synchronous half, TS over natives (the `os`
+  kind).** `src/child_process/*.rs` runs one child to completion with
+  `std::process::Command` plus the three things `Command` does not do on its own
+  (feed stdin from a thread so it cannot deadlock against the child's output,
+  enforce a timeout and kill with a *chosen* signal — `libc::kill` on POSIX,
+  because `Child::kill` is hard-wired to `SIGKILL` and Node's default is
+  `SIGTERM` — and cap a pipe at `maxBuffer` with `ENOBUFS`), and
+  `src/child_process/child_process.ts` is Node's shape: `spawnSync`, `execSync`,
+  `execFileSync` with `normalizeSpawnArguments`/`normalizeExecArgs`/
+  `normalizeExecFileArgs`, the `cmd.exe /d /s /c "<command>"` and `/bin/sh -c`
+  shells (with `windowsVerbatimArguments`, which is why the Windows shell path
+  needs `raw_arg` rather than `Command::arg`), the `stdio` grammar, `encoding`,
+  the result object with its `output` array, `convertToValidSignal`, the
+  null-byte rejection and `checkExecSyncError`'s two kinds of throw. The request
+  crosses the ABI as one `US`/`RS`-delimited string and the reply as one
+  twelve-field record, the `node:os` convention, with the child's output base64
+  because bytes cannot ride a NUL-terminated carrier — the rule `node:fs` fixed.
+  **The asynchronous half is a stated gap, not an omission**: a `ChildProcess` is
+  an `EventEmitter` whose `stdin`/`stdout`/`stderr` are `node:stream` objects, so
+  `spawn` and `fork` throw `ERR_METHOD_NOT_IMPLEMENTED` rather than pretending.
+  `exec` and `execFile` *are* here, because their callback contract —
+  `(error, stdout, stderr)` on a later tick, `error.code` the exit status,
+  `error.killed`/`signal`/`cmd` — is reproducible without streams: the child runs
+  through the sync native and only the callback is deferred, through
+  `process.nextTick`. What is not reproduced is the concurrency, and the returned
+  handle carries no streams. `process.execPath` is real (`cpExecPath()` is the
+  host's own executable, i.e. the `zun` binary) and that is precisely what caps
+  the corpus: most of Node's `child_process` tests re-run *themselves* with
+  `spawnSync(process.execPath, [__filename, 'child'])`, and the child would be
+  handed a raw CommonJS file the engine cannot run
+  ([#4](https://github.com/UrubuCode/zun/issues/4)) — it would have to be
+  bundled first. Table in `test/child_process/README.md`.
 - **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
   `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
   `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,

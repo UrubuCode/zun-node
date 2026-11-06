@@ -74,6 +74,14 @@ case "$MODULE" in
   # this module's bar rather than a different one's.
   url)         KIND="zun-ts"; PATTERNS="test-url";                        PATTERN="test-url";;
   fs)     KIND="zun-ts+ext"; PATTERNS="test-fs-";                         PATTERN="test-fs-";;
+  # `timers`' corpus is `test-timers*`, which includes `test-timers.js` itself.
+  # The module is pure Zun TypeScript: the VM already owns the event loop, so
+  # there is nothing for a native extension to do (see src/timers/timers.ts).
+  timers) KIND="zun-ts";     PATTERNS="test-timers";                      PATTERN="test-timers";;
+  # `child_process` is TS over natives: `std::process::Command` in
+  # src/child_process/*.rs, Node's shape in src/child_process/child_process.ts.
+  child_process)
+          KIND="zun-ts+ext"; PATTERNS="test-child-process";               PATTERN="test-child-process";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 

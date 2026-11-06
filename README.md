@@ -20,7 +20,13 @@ A Node module lands here in whichever form fits what it actually does:
   (`src/punycode/punycode.ts`) and `url` (`src/url/url.ts`) are the same kind;
   `url` stands on the other two plus `path`, and re-exports the engine's
   prelude `URL`/`URLSearchParams`, which is the relationship `node:url` has with
-  the globals in Node.
+  the globals in Node. `timers` (`src/timers/timers.ts`) is the same kind for a
+  different reason: it is not pure computation, but the capability it needs — the
+  macrotask tier of the VM's unified event loop (NUCLEUS §9a) — is already
+  *inside* the engine, so there is nothing for a native to do. It reaches that
+  tier through `import { timers } from "zun:core"`, and it declares the six
+  timer globals itself, which is what gives Node's own signatures to every
+  bundle.
 - **Zun TypeScript over natives** — both, with the seam drawn where the
   capability changes. `os` is the first: the facts it reports are syscalls
   (`src/os/`, Rust), while the module *Node* exposes is objects, arrays,
@@ -34,7 +40,15 @@ A Node module lands here in whichever form fits what it actually does:
   [`src/fs/fs.ts`](src/fs/fs.ts) for the Node API, with one addition `os` did
   not need — a file's *bytes* cannot ride a NUL-terminated string carrier, so
   they cross base64 and the TypeScript side turns them into the engine's
-  prelude `Buffer`.
+  prelude `Buffer`. **`child_process` is the third**: `src/child_process/*.rs`
+  spawns a child and waits for it (`std::process::Command`, a thread per pipe, a
+  timeout with a chosen kill signal), while
+  [`src/child_process/child_process.ts`](src/child_process/child_process.ts)
+  holds the module Node exposes — the argument normalizers, the shell rules, the
+  `stdio` grammar and the result object. A spawn request cannot cross one scalar
+  word at a time either, so it crosses as one delimited string in the same
+  grammar, with the child's output base64 for the same reason a file's bytes
+  are.
 
 Support slices exist to run Node's own tests, and are Zun TypeScript for the
 same reason: `src/assert/assert.ts` (the strict-mode `assert` surface the tests
@@ -382,6 +396,93 @@ the direct `zun run --ext <lib> <test.js>` path.
 > spread into a built-in. The blocker-by-blocker table is in
 > [`test/url/README.md`](test/url/README.md), the per-test breakdown in
 > [`test/url/RESULTS.md`](test/url/RESULTS.md).
+
+<!-- node-timers:start -->
+### Node.js v25 `timers` compatibility
+
+`██████████░░░░░░░░░░░░░░` **44.8%** — 26 / 58 Node `test-timers*` tests passing
+<!-- node-timers:end -->
+
+> `timers` is the first module whose *substance* was already in the engine: the
+> VM owns the event loop (NUCLEUS §9a — one unified loop that drains Promise
+> microtasks and fires timers, on a virtual clock that fast-forwards to the next
+> due time instead of sleeping). What Node adds on top is shape, and that is
+> what [`src/timers/timers.ts`](src/timers/timers.ts) is — the `Timeout` and
+> `Immediate` objects with Node's own enumerable fields,
+> `ref`/`unref`/`hasRef`/`refresh`/`close`/`[Symbol.toPrimitive]`, the delay
+> coercion with its three `Timeout*Warning`s, `clearTimeout` by object *or* id,
+> the DEP0096 `enroll`/`unenroll`/`active` trio, and `timers/promises`'
+> `setTimeout`/`setImmediate`/`setInterval` (an async generator) plus
+> `scheduler.wait`/`scheduler.yield`, all with `AbortSignal` and the `ref`
+> option. It is also where
+> [zun#29](https://github.com/UrubuCode/zun/issues/29) gets its answer:
+> `setTimeout` & co. are *globals* in Node and typed *intrinsics* in Zun, so
+> Node's tests — which pass an `any` callback and clear with an object — are
+> rejected at compile time. Declaring the six names as top-level functions
+> shadows the intrinsics program-wide, and the implementation reaches the loop
+> through `import { timers } from "zun:core"` instead, where the native's
+> callback parameter is `Opaque`. Beyond the corpus the module was checked
+> against Node directly — one 33-assertion driver run unchanged under `node` and
+> under `zun run`, **zero divergences**. The failures are not in `timers.ts`:
+> thirteen files need a harness module that does not exist, nine are two *new*
+> engine bugs (a bare `return;` in a function whose return type was **inferred**
+> as `Any` is rejected; an explicit `obj[Symbol.toPrimitive]()` panics the
+> interpreter although every implicit coercion works), three need a closure to
+> see a `const` initialised by the statement it was created in, and one is an
+> honest ordering deviation — libuv runs immediates in a *check* phase after the
+> timers phase, while the VM has a single macrotask tier. A third new engine bug
+> was found and worked around here: `clearTimeout('16')` panicked, because
+> reading an undeclared property off a **string** held in an `any` aborts the
+> run. The harness gained something real in exchange: the settle loop now asks
+> this module how many **ref'd** timers are armed and when the next one is due,
+> so it stops guessing and jumps the virtual clock instead of spending a turn
+> per millisecond, and it emits `process` 'beforeExit'. Blocker table:
+> [`test/timers/README.md`](test/timers/README.md); per-test breakdown:
+> [`test/timers/RESULTS.md`](test/timers/RESULTS.md).
+
+<!-- node-child_process:start -->
+### Node.js v25 `child_process` compatibility
+
+`░░░░░░░░░░░░░░░░░░░░░░░░` **2.7%** — 3 / 109 Node `test-child-process*` tests passing
+<!-- node-child_process:end -->
+
+> `child_process` is **TS over natives** (the `os` kind) and deliberately **half
+> a module**: `src/child_process/*.rs` runs one child to completion with
+> `std::process::Command` plus the three things `Command` does not do on its own
+> (feed stdin from its own thread so it cannot deadlock against the child's
+> output, enforce a timeout and kill with a *chosen* signal — `libc::kill` on
+> POSIX, since `Child::kill` is hard-wired to `SIGKILL` and Node's default is
+> `SIGTERM` — and cap a pipe at `maxBuffer` with `ENOBUFS`), and
+> [`src/child_process/child_process.ts`](src/child_process/child_process.ts) is
+> Node's shape: `spawnSync`, `execSync`, `execFileSync` with Node's three
+> argument normalizers, the `cmd.exe /d /s /c "<command>"` and `/bin/sh -c`
+> shells, the `stdio` grammar, `encoding`, the result object with its `output`
+> array, `convertToValidSignal`, the null-byte rejection and
+> `checkExecSyncError`'s two kinds of throw. The async half is a **stated gap**:
+> a `ChildProcess` is an `EventEmitter` whose `stdin`/`stdout`/`stderr` are
+> `node:stream` objects, so `spawn` and `fork` throw
+> `ERR_METHOD_NOT_IMPLEMENTED` rather than pretending — while `exec` and
+> `execFile` *are* here, because their callback contract is reproducible without
+> streams (the child runs through the sync native and only the callback is
+> deferred, through `process.nextTick`). The number is low for two reasons, and
+> the second one matters more than the first: about seventy of the files need
+> that async half, and about twenty re-run **themselves** with
+> `spawnSync(process.execPath, [__filename, 'child'])`. `process.execPath` is
+> real here (`cpExecPath()` is the host's own executable, i.e. the `zun`
+> binary), but the child would be handed a raw CommonJS test file the engine
+> cannot run ([zun#4](https://github.com/UrubuCode/zun/issues/4)) — it would
+> have to be bundled first, which is a harness capability this library does not
+> have yet. The module is therefore verified directly instead: 15 native tests
+> through the real `cpSpawnSync` entry point (the wire grammar, the spawn and
+> the reply encoder together) plus a differential pass over the TypeScript layer against
+> Node on commands that need no Node child. One real bug came out of that: on
+> Windows `Command::arg` applies MSVCRT quoting, which turned
+> `cmd /d /s /c "echo hi"` into `cmd /d /s /c "\"echo hi\""` and made every
+> shell command an unknown program — the Windows shell path uses `raw_arg` now,
+> which is what libuv's `UV_PROCESS_WINDOWS_VERBATIM_ARGUMENTS` is for. Blocker
+> table: [`test/child_process/README.md`](test/child_process/README.md);
+> per-test breakdown:
+> [`test/child_process/RESULTS.md`](test/child_process/RESULTS.md).
 
 ## Running the tracker locally
 

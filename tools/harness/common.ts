@@ -20,19 +20,28 @@
 //      drains its unified loop (timers + microtasks) after the main script
 //      returns, but exposes no "about to exit" hook, so the bundler appends one
 //      statement — `__zunHarnessFinish();` — as the last line of the program.
-//      That starts a *settle loop*: a chain of `setTimeout(step, 1)` turns, each
-//      of which yields to the VM's timer and microtask queues. A turn counts as
-//      idle when `process.nextTick` has nothing pending; after
-//      `__IDLE_ROUNDS` consecutive idle turns (or `__MAX_ROUNDS` turns in all,
-//      the guard against a test that never settles) the chain emits 'exit' and,
-//      if a check failed, exits non-zero.
+//      That starts a *settle loop*: a chain of engine timer turns, each of which
+//      yields to the VM's timer and microtask queues. A turn counts as idle when
+//      `process.nextTick` has nothing pending **and** `node:timers` has no
+//      ref'd timer armed; after `__IDLE_ROUNDS` consecutive idle turns (or
+//      `__MAX_ROUNDS` turns in all, the guard against a test that never settles)
+//      the chain emits 'exit' and, if a check failed, exits non-zero.
 //
-// The settle loop is a heuristic in one respect only: work scheduled through the
-// host's own `setTimeout`/`setInterval` is invisible to it, so a test whose
-// pending timers outlast `__IDLE_ROUNDS` turns would be judged finished early.
-// Every such test in the events corpus is blocked for another reason, and the
-// round budget is generous (hundreds of turns), so this has not bitten yet; the
-// honest fix is a `beforeExit` hook in the VM.
+// Pending timers used to be invisible to the loop, which made the exit decision
+// a heuristic. They are not any more: `src/timers/timers.ts` owns every Node
+// timer, so it can report how many ref'd ones are still armed
+// (`__timerPendingRefs()`) and how long until the earliest is due
+// (`__timerNextDelay()`). The loop uses the first to stay awake and the second
+// to pick its own next delay, so a pending `setTimeout(fn, 1000)` neither ends
+// the run early nor spends a thousand turns getting there — the VM's virtual
+// clock jumps straight to the due time. What remains outside the loop's view is
+// an `unref()`'d timer, which is exactly what Node also declines to wait for.
+//
+// The loop arms its own turn through the `zun:core` `timers` namespace rather
+// than the global `setTimeout`, for two reasons: a harness turn is not Node
+// work and must not count as a pending ref, and the global is
+// `src/timers/timers.ts`' Node-shaped function, which would allocate a
+// `Timeout` object per turn.
 
 // ---------------------------------------------------------------------------
 // Why every helper here hands back a *boxed* function
@@ -124,6 +133,10 @@ function __runCallChecks(): void {
 // — the same ordering Node's `test/common` gets from being required first.
 process.on("exit", __runCallChecks);
 
+// The VM's own macrotask tier, reached by namespace so the harness turn is not
+// one of Node's timers. See the note at the top of this file.
+import { timers as __harnessTimers } from "zun:core";
+
 // Started by the single statement the bundler appends after the test body.
 //
 // `__zunHarnessStep` is a top-level function declaration rather than a closure,
@@ -135,7 +148,7 @@ const __harnessLoop: any = { idle: 0, rounds: 0 };
 
 function __zunHarnessStep(): void {
   __harnessLoop.rounds = Number(__harnessLoop.rounds) + 1;
-  if (__processPendingTicks() > 0) {
+  if (__processPendingTicks() > 0 || __timerPendingRefs() > 0) {
     __harnessLoop.idle = 0;
   } else {
     __harnessLoop.idle = Number(__harnessLoop.idle) + 1;
@@ -144,18 +157,53 @@ function __zunHarnessStep(): void {
     Number(__harnessLoop.idle) >= __IDLE_ROUNDS ||
     Number(__harnessLoop.rounds) >= __MAX_ROUNDS
   ) {
+    if (
+      Number(__harnessLoop.rounds) < __MAX_ROUNDS &&
+      __zunHarnessBeforeExit()
+    ) {
+      __harnessLoop.idle = 0;
+      __zunHarnessArm();
+      return;
+    }
     __zunHarnessExit();
     return;
   }
-  setTimeout(__zunHarnessStep, 1);
+  __zunHarnessArm();
+}
+
+// Node's `process` 'beforeExit', which fires when the loop has nothing left to
+// do. A listener may schedule more work, and then the loop runs again and
+// 'beforeExit' fires once more — so this returns whether that happened. Work
+// that is only `unref()`'d does not count, which is exactly what
+// `test-timers-unrefed-in-beforeexit.js` checks. The round budget is the guard
+// against a listener that schedules forever, the same one Node lacks.
+function __zunHarnessBeforeExit(): boolean {
+  if (Number(process.listenerCount("beforeExit")) === 0) return false;
+  const code: any = process.exitCode;
+  process.emit("beforeExit", code === undefined || code === null ? 0 : Number(code));
+  return __processPendingTicks() > 0 || __timerPendingRefs() > 0;
+}
+
+// One settle turn, armed for whenever the next Node timer is due (1ms when none
+// is). The VM fast-forwards its virtual clock to the earliest due time between
+// macrotasks, so this is what keeps a long delay from costing a turn per
+// millisecond.
+function __zunHarnessArm(): void {
+  const next: number = __timerNextDelay();
+  __harnessTimers.setTimeout(__zunHarnessStep, next > 1 ? next : 1);
 }
 
 function __zunHarnessFinish(): void {
-  setTimeout(__zunHarnessStep, 1);
+  __zunHarnessArm();
 }
 
 function __zunHarnessExit(): void {
   __processRunExit(undefined);
+  // The 'exit' listeners have run, so the state they inspect is settled; now
+  // drop whatever is still armed. An `unref()`'d interval is work Node would
+  // have abandoned at this point, but the VM's timer heap keeps re-arming it,
+  // which would hang the run.
+  __timerShutdown();
   const code: any = process.exitCode;
   if (code !== undefined && code !== null && Number(code) !== 0) {
     host.exitProcess(Number(code));
@@ -320,6 +368,41 @@ const common: any = {
     return ms;
   },
 
+  // `test/common/index.js`' `pwdCommand`: the `[file, args]` pair that prints
+  // the working directory on this platform, which ten `child_process` tests
+  // spread into `spawnSync(...common.pwdCommand, { cwd })`.
+  pwdCommand: process.platform === "win32" ? ["cmd.exe", ["/d", "/c", "cd"]] : ["pwd", []],
+
+  // `test/common/index.js`' `escapePOSIXShell`, a tagged template that builds a
+  // `[command, options]` pair safe to hand to a shell. On Windows the
+  // substitutions go in literally (a Windows path cannot contain a `"`); on
+  // POSIX each one is passed through an `ESCAPED_<n>` environment variable, so
+  // nothing in it is ever re-parsed by the shell.
+  escapePOSIXShell(parts: any, ...args: any[]): any[] {
+    const count: number = Number(args.length);
+    if (process.platform === "win32") {
+      let command: string = String(parts[0]);
+      for (let i = 0; i < count; i++) {
+        command = command + String(args[i]) + String(parts[i + 1]);
+      }
+      return [command];
+    }
+    const env: any = {};
+    const keys: any[] = Object.keys(process.env);
+    const keyCount: number = Number(keys.length);
+    for (let i = 0; i < keyCount; i++) {
+      const key: string = String(keys[i]);
+      env[key] = process.env[key];
+    }
+    let command: string = String(parts[0]);
+    for (let i = 0; i < count; i++) {
+      const name: string = "ESCAPED_" + String(i);
+      env[name] = String(args[i]);
+      command = command + "${" + name + "}" + String(parts[i + 1]);
+    }
+    return [command, { env: env }];
+  },
+
   // Node's `common.getTTYfd()` finds a tty among fds 0/1/2/4/5 and otherwise
   // opens `/dev/tty`, returning -1 when neither works. This runtime has no tty
   // facility at all, so -1 is the honest answer and a test that needs a real
@@ -434,18 +517,13 @@ Object.defineProperty(fixtures, "fixturesDir", {
   },
 });
 
-// `child_process` is required by `test-path-resolve.js`, whose Windows-only tail
-// spawns the runtime on a fixture. A real `spawnSync` belongs to the
-// `child_process` module's own work; until then the stub throws, so that block
-// fails on Windows (on Linux the test takes the other branch).
-const __node_child_process: any = {
-  execSync(): string {
-    throw new Error("child_process is not available in the zun harness");
-  },
-  spawnSync(): any {
-    throw new Error("child_process is not available in the zun harness");
-  },
-};
+// `child_process` used to be stubbed here, for `test-path-resolve.js`'s
+// Windows-only tail. It is a real module now
+// (`src/child_process/child_process.ts`), inlined by the bundler for any test
+// that requires it — so the stub is gone rather than shadowing it. The one cost
+// is that the real module imports its natives, so a bundle that requires
+// `child_process` now needs `--ext`; a `path` or `util` bundle that does so
+// fails to compile without one, where before it compiled and threw.
 
 // `node:domain` is required by `test-event-emitter-no-error-provided-to-error-event.js`.
 // Domains are a deprecated, async-hooks-backed facility; there is nothing here to

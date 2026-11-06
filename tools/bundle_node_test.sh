@@ -88,6 +88,18 @@ json_string() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"
 # `parseQueryString`) and punycode (`domainToASCII`/`domainToUnicode`), so it is
 # inlined last of the library modules.
 #
+# `timers` is inlined unconditionally, and it is the one module that has to be:
+# `setTimeout`/`setInterval`/`setImmediate`/`clearTimeout`/`clearInterval` are
+# *globals* in Node, and in Zun they are typed intrinsics that reject an `any`
+# callback or a non-numeric handle at compile time
+# (https://github.com/UrubuCode/zun/issues/29). `src/timers/timers.ts` declares
+# them as top-level functions, which shadows the intrinsics program-wide and
+# gives every bundle Node's signatures; it reaches the VM's macrotask tier through
+# the `zun:core` `timers` namespace instead of the shadowed bare names. The
+# harness settle loop stands on the same file (it asks it how many ref'd timers
+# are still armed), so `timers` is inlined ahead of `tools/harness/common.ts` for
+# every module, not only for `test-timers-*`.
+#
 # `os` is the first module whose bundle also needs `--ext`: the Node-shaped API
 # is this TypeScript file, but the facts underneath it are syscalls in the
 # `node:os` extension, which `src/os/os.ts` reaches with
@@ -111,6 +123,8 @@ url __node_url -
 internal/url __node_internal_url -
 fs __node_fs -
 fs/promises __node_fs_promises -
+timers __node_timers setTimeout
+timers/promises __node_timers_promises -
 child_process __node_child_process -
 domain __node_domain -
 stream __node_stream -
@@ -129,6 +143,7 @@ src/path/path.ts
 src/querystring/querystring.ts
 src/punycode/punycode.ts
 src/url/url.ts
+src/timers/timers.ts
 "
 
 # Modules inlined **only when the test actually requires them**.
@@ -165,6 +180,7 @@ test tools/harness/node_test.ts
 punycode src/punycode/deprecation.ts
 fs src/fs/fs.ts
 fs/promises src/fs/fs.ts
+child_process src/child_process/child_process.ts
 [.][.]/common/tmpdir src/fs/fs.ts
 [.][.]/common/tmpdir tools/harness/tmpdir.ts
 "

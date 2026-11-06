@@ -79,7 +79,10 @@ use std::io;
 use crate::Descriptor;
 use zun_abi::ZunTy::{Bool, F64, I64, Str};
 
-mod base64;
+// `child_process` carries a child's stdout/stderr over the same base64 carrier
+// (`src/child_process/mod.rs`), so the codec is crate-visible rather than
+// private to `fs`.
+pub(crate) mod base64;
 mod consts;
 mod dirs;
 mod fd;
