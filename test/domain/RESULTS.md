@@ -22,7 +22,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-domain-ee-error-listener.js` | ✅ pass | |
 | `test-domain-ee-implicit.js` | ✅ pass | |
 | `test-domain-ee.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-domain-emit-error-handler-stack.js` | ❌ parse | bundles/test-domain-emit-error-handler-stack.ts:18411:7: error: [SEM0001] no field or setter 'expectedStackLen |
+| `test-domain-emit-error-handler-stack.js` | ❌ parse | bundles/test-domain-emit-error-handler-stack.ts:18537:7: error: [SEM0001] no field or setter 'expectedStackLen |
 | `test-domain-enter-exit.js` | ✅ pass | |
 | `test-domain-error-types.js` | ✅ pass | |
 | `test-domain-from-timer.js` | ✅ pass | |
@@ -50,10 +50,10 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-domain-promise.js` | ❌ parse | Error: vm is not available in the zun harness |
 | `test-domain-run.js` | ✅ pass | |
 | `test-domain-safe-exit.js` | ✅ pass | |
-| `test-domain-set-uncaught-exception-capture-after-load.js` | ❌ engine panic | thread '<unnamed>' (47056) panicked at crates\zun_interp\src\value.rs:226:25: |
+| `test-domain-set-uncaught-exception-capture-after-load.js` | ❌ engine panic | thread '<unnamed>' (39828) panicked at crates\zun_interp\src\value.rs:226:25: |
 | `test-domain-stack-empty-in-process-uncaughtexception.js` | ✅ pass | |
 | `test-domain-stack.js` | ✅ pass | |
-| `test-domain-throw-error-then-throw-from-uncaught-exception-handler.js` | ❌ type error | bundles/test-domain-throw-error-then-throw-from-uncaught-exception-handler.ts:19320:5: error: [SEM0001] spread |
+| `test-domain-throw-error-then-throw-from-uncaught-exception-handler.js` | ❌ type error | bundles/test-domain-throw-error-then-throw-from-uncaught-exception-handler.ts:19446:5: error: [SEM0001] spread |
 | `test-domain-thrown-error-handler-stack.js` | ✅ pass | |
 | `test-domain-timer.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-domain-timers-uncaught-exception.js` | ✅ pass | |

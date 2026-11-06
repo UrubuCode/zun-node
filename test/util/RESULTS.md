@@ -18,9 +18,9 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-util-deprecate.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-util-deprecate-invalid-code.js` | ✅ pass | |
 | `test-util-emit-experimental-warning.js` | ✅ pass | |
-| `test-util-format.js` | ❌ type error | bundles/test-util-format.ts:17533:24: error: [SEM0001] unknown base class 'Array' |
+| `test-util-format.js` | ❌ type error | bundles/test-util-format.ts:17800:24: error: [SEM0001] unknown base class 'Array' |
 | `test-util-getcallsites.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-util-inherits.js` | ❌ type error | bundles/test-util-inherits.ts:17343:3: error: [SEM0001] 'call' passes 1 argument(s) including 'this', but the  |
+| `test-util-inherits.js` | ❌ type error | bundles/test-util-inherits.ts:17610:3: error: [SEM0001] 'call' passes 1 argument(s) including 'this', but the  |
 | `test-util-inspect.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-util-inspect.js: |
 | `test-util-inspect-getters-accessing-this.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-util-inspect-long-running.js` | ❌ timeout |  |
@@ -28,14 +28,14 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-util-inspect-proxy.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-util-inspect-regexp.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-util-internal.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-util-internal.js: |
-| `test-util-isDeepStrictEqual.js` | ❌ type error | bundles/test-util-isDeepStrictEqual.ts:17636:69: error: [SEM0001] no field or setter 'y' on this type |
+| `test-util-isDeepStrictEqual.js` | ❌ type error | bundles/test-util-isDeepStrictEqual.ts:17903:69: error: [SEM0001] no field or setter 'y' on this type |
 | `test-util-parse-env.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-util-parse-env.js: |
-| `test-util-primordial-monkeypatching.js` | ❌ engine panic | thread '<unnamed>' (812) panicked at crates\zun_interp\src\value.rs:226:25: |
-| `test-util-promisify.js` | ❌ unsupported import/require | bundles/test-util-promisify.ts:19979:3: error: [SEM0001] indexing requires an Array |
+| `test-util-primordial-monkeypatching.js` | ❌ engine panic | thread '<unnamed>' (46524) panicked at crates\zun_interp\src\value.rs:226:25: |
+| `test-util-promisify.js` | ❌ unsupported import/require | bundles/test-util-promisify.ts:20246:3: error: [SEM0001] indexing requires an Array |
 | `test-util-sigint-watchdog.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-util-sleep.js` | ✅ pass | |
 | `test-util-stripvtcontrolcharacters.js` | ✅ pass | |
 | `test-util-styletext.js` | ✅ pass | |
-| `test-util-text-decoder.js` | ❌ type error | bundles/test-util-text-decoder.ts:17521:19: error: [SEM0001] 'TextDecoder' has 0 field(s), found 1 initializer |
-| `test-util-types.js` | ❌ type error | bundles/test-util-types.ts:27576:5: error: [SEM0001] 'RegExp' expects 1 to 2 constructor argument(s), found 0 |
+| `test-util-text-decoder.js` | ❌ type error | bundles/test-util-text-decoder.ts:17788:19: error: [SEM0001] 'TextDecoder' has 0 field(s), found 1 initializer |
+| `test-util-types.js` | ❌ type error | bundles/test-util-types.ts:28133:5: error: [SEM0001] 'RegExp' expects 1 to 2 constructor argument(s), found 0 |
 | `test-util-types-exists.js` | ✅ pass | |

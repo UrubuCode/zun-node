@@ -295,7 +295,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **34.2%** — 12 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+`████████░░░░░░░░░░░░░░░░` **37.1%** — 13 / 35 Node `test-event-emitter-*|test-events-*` tests passing
 <!-- node-events:end -->
 
 > `events` is implemented end to end — the whole `EventEmitter` surface plus every
