@@ -47,8 +47,16 @@ is *express* the check.
 
 | Test | Blocked by | What happens |
 |---|---|---|
-| `test-querystring.js` | [zun#14](https://github.com/UrubuCode/zun/issues/14), [zun#26](https://github.com/UrubuCode/zun/issues/26); harness: `vm` | its `check()` helper opens with the bare callable form `assert(!(actual instanceof Object))`. Node's `assert` is a function that also carries `strictEqual` & co., and a property stored on a function cannot be called as a method from inside a nested function (#14), so the call aborts with "call did not resolve to a method". Even with a callable `assert` the assertion would fail: `instanceof Object` answers `true` for a null-prototype object (#26). The file also needs a **second realm** — `vm.runInNewContext('({"foo": ["bar", "baz"]})')`, to prove `stringify` handles a foreign object — which a library cannot synthesize; the harness stub therefore throws (`tools/harness/common.ts`). The `__proto__=1` case needs one more thing: see the note below. |
-| `test-querystring-multichar-separator.js` | [zun#14](https://github.com/UrubuCode/zun/issues/14), [zun#26](https://github.com/UrubuCode/zun/issues/26) | the same `check()` shape, and nothing else. All four of its `parse`/`stringify` expectations over multi-character `sep`/`eq` (`'&&'`/`'=>'` and `', '`/`'==>'`) were verified by hand and match. |
+| `test-querystring.js` | [zun#26](https://github.com/UrubuCode/zun/issues/26); harness: `vm` | its `check()` helper opens with the bare callable form `assert(!(actual instanceof Object))`, and `instanceof Object` answers `true` for a null-prototype object on this engine (#26) — which is exactly what the assertion denies. The file also needs a **second realm** — `vm.runInNewContext('({"foo": ["bar", "baz"]})')`, to prove `stringify` handles a foreign object — which a library cannot synthesize; the harness stub therefore throws (`tools/harness/common.ts`). The `__proto__=1` case needs one more thing: see the note below. |
+| `test-querystring-multichar-separator.js` | [zun#26](https://github.com/UrubuCode/zun/issues/26) | the same `check()` shape, and nothing else: with that one `instanceof Object` line removed, the file passes in full (verified by probe — the four `parse`/`stringify` expectations over multi-character `sep`/`eq`, `'&&'`/`'=>'` and `', '`/`'==>'`, all match). |
+
+[zun#14](https://github.com/UrubuCode/zun/issues/14) — a property stored on a
+function not being callable as a method from inside a nested function, which
+used to block both of these as well — **no longer reproduces** as of engine
+`c4afcca4`. The probe is three lines: a `const assert: any = base` carrying
+`assert.ok = base`, called as `assert(true)` from inside another function. Both
+spellings now work, so `#26` is the whole of what stands between
+`test-querystring-multichar-separator.js` and green.
 
 ### The `__proto__` key
 

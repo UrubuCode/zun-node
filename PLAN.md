@@ -606,10 +606,13 @@ gets deleted; nothing else in the tracker changes.
   `test-querystring-maxKeys-non-finite.js` parses four times, is the test that
   forces it. **Both remaining failures are outside the module:** Node's other
   two files open their `check()` with the bare callable form
-  `assert(!(actual instanceof Object))`, which needs
-  [#14](https://github.com/UrubuCode/zun/issues/14) and an `instanceof Object`
-  that answers `false` for a null-prototype object
-  ([#26](https://github.com/UrubuCode/zun/issues/26)), and
+  `assert(!(actual instanceof Object))`. The callable half is fixed in the
+  engine as of `c4afcca4` — [#14](https://github.com/UrubuCode/zun/issues/14)
+  re-probed and no longer reproduces — but `instanceof Object` still answers
+  `true` for a null-prototype object
+  ([#26](https://github.com/UrubuCode/zun/issues/26)), which is exactly the
+  assertion; with that one line removed,
+  `test-querystring-multichar-separator.js` passes in full.
   `test-querystring.js` additionally needs a second realm
   (`vm.runInNewContext`). `unescapeBuffer` answers a documented byte view
   rather than a `Buffer`, for the same reason `os.userInfo({ encoding:
@@ -633,40 +636,61 @@ gets deleted; nothing else in the tracker changes.
   integer-typed constant with a float-typed expression yields an `Any`, and
   passing that to a `number` parameter panics the interpreter (new bug, found
   by this work).
-- **`node:url`: implemented in `src/url/url.ts`, measured against the full Node
-  corpus.** The legacy API (`parse` with `parseQueryString` and
+- **`node:url`: implemented in `src/url/url.ts` + `src/url/whatwg.ts`, measured
+  against the full Node corpus — both halves of it.** The corpus is two
+  prefixes, `test-url*` (17 files, `test-urlpattern*` among them) and
+  `test-whatwg-url-*` (27 files): `URL`/`URLSearchParams` are `node:url`
+  exports, so those 27 are this module's bar, not the prelude's.
+  `src/url/url.ts` is the legacy API (`parse` with `parseQueryString` and
   `slashesDenoteHost`, `format` in its string/object/`URL` forms plus
   `format(URL, options)`, `resolve`, `resolveObject`, the `Url` class and its
-  five methods), the WHATWG re-exports (`URL`, `URLSearchParams` — the engine's
-  prelude classes, which is the relationship `node:url` has with the globals in
-  Node), `domainToASCII`/`domainToUnicode`, `fileURLToPath`, `pathToFileURL`
-  and `urlToHttpOptions`, plus `internal/url`'s `isURL` and the three protocol
-  sets. It follows `lib/url.js` and `lib/internal/url.js` instruction for
-  instruction, because `url.parse` is explicitly not standardized — that is
-  what DEP0169 says — so its behaviour simply *is* that code. **Every CVE guard
-  is reproduced**, not simplified: the scheme is lower-cased before any
-  protocol-set decision (CVE-2018-12123); the hostname is re-checked against
-  the forbidden set *after* IDNA, so a NUL can neither be accepted nor
-  truncated away (the CVE-2026-48930 class); an empty post-IDNA hostname throws
-  `ERR_INVALID_URL`; `parse(url, true)` hands back a null-prototype query. All
-  eight of Node's regular expressions here are hand-written scans, so the
-  parser owns no backtracking engine. A differential run against Node over the
-  whole of `test-url-relative.js` — all 194 `relativeTests2` cases through
-  `resolve`, and all 31 `relativeTests` through `resolve`, `resolveObject` +
-  `deepStrictEqual` and `format` — shows **zero divergences**; that file fails
-  only because the engine corrupts a long-lived array of strings after roughly
-  250 `url.parse` calls (new bug, reported with this work).
+  five methods), `domainToASCII`/`domainToUnicode`, `fileURLToPath`,
+  `pathToFileURL` and `urlToHttpOptions`, plus `internal/url`'s `isURL` and the
+  three protocol sets. It follows `lib/url.js` and `lib/internal/url.js`
+  instruction for instruction, because `url.parse` is explicitly not
+  standardized — that is what DEP0169 says — so its behaviour simply *is* that
+  code. **Every CVE guard is reproduced**, not simplified: the scheme is
+  lower-cased before any protocol-set decision (CVE-2018-12123); the hostname
+  is re-checked against the forbidden set *after* IDNA, so a NUL can neither be
+  accepted nor truncated away (the CVE-2026-48930 class); an empty post-IDNA
+  hostname throws `ERR_INVALID_URL`; `parse(url, true)` hands back a
+  null-prototype query. All eight of Node's regular expressions here are
+  hand-written scans, so the parser owns no backtracking engine.
+  `src/url/whatwg.ts` is the **WHATWG URL Standard itself**, no longer the
+  engine's partial prelude classes: the basic URL parser as a 21-state machine,
+  host parsing (opaque hosts, the IPv4 and IPv6 parsers and both serializers,
+  IDNA), the eight percent-encode sets, the URL and origin serializers, every
+  getter *and* every setter, `URL.canParse`/`URL.parse`,
+  `URL.createObjectURL`/`revokeObjectURL`, and `URLSearchParams` in full
+  (`append`/`delete`/`get`/`getAll`/`has`/`set`/`sort`/`forEach`/`keys`/
+  `values`/`entries`/`size`/`toString`, the urlencoded parser and serializer,
+  and the live link back to the URL that owns it). Differential against Node
+  over the WPT fixtures Node ships: **869 of 869 `urltestdata.json` constructor
+  cases, bar seven**, and **270 of 270 `setters_tests.json` setter cases, with
+  no divergence at all**; the seven are each one line of the UTS#46 mapping
+  table (see below). The classes are declared `NodeURL`/`NodeURLSearchParams`
+  because those two names are prelude classes in this engine and a user class
+  of the same name is a "duplicate class" error; they are exported as
+  `url.URL`/`url.URLSearchParams`, and `tools/bundle_node_test.sh` rewrites the
+  three spellings a test body can use to reach the class — `new URL(...)`,
+  `URL.<static>`, `x instanceof URL` — exactly as it already rewrites
+  `console`, `performance` and `crypto`.
   **Not done, by capability:** `URLPattern` (a separate WHATWG specification
-  Node implements in C++, declared as a gap rather than faked),
-  `fileURLToPathBuffer` (needs `node:buffer`), and full UTS#46 IDNA —
-  `domainToASCII`/`domainToUnicode` are punycode, which agrees with ICU for
-  every ASCII label and every `xn--` label and differs on ICU's mapping steps;
-  Node's own test for them is `{ skip: !hasIntl }`. The prelude `URL` cannot
-  parse a `file:` URL with an empty host, which is why `pathToFileURL` and
-  `fileURLToPath` build genuine `URL` instances from components instead (a Zun
-  class has no constructor body, so `new URL(...)` fills its fields
-  positionally and the lazy parser short-circuits). Table in
-  `test/url/README.md`.
+  Node implements in C++ over ada's `url_pattern`, declared as a gap rather
+  than faked), `fileURLToPathBuffer` (needs `node:buffer`), `Symbol.iterator`
+  and `Symbol.toStringTag` on `URL`/`URLSearchParams` (no symbol-keyed class
+  members on this engine), `util.inspect` custom formatting for them, and the
+  rest of **UTS#46**: there is no ICU here, so `whatwg.ts` carries the three
+  parts of the mapping that are a finite table — the ignored code points, the
+  noncharacters and U+FFFD, and the fullwidth and space-like mappings — and
+  stops before the full Unicode database. That is the whole of the residual
+  divergence from Node. `test-url-relative.js` still fails only because the
+  engine corrupts a long-lived array of strings under allocation pressure
+  ([#67](https://github.com/UrubuCode/zun/issues/67): the dynamic-call path
+  drops the calling frame from the GC root chain, so the first young collection
+  frees the caller's live locals — re-confirmed on `c4afcca4`, where a loop over
+  120 string-literal rows calling `url.resolve` panics at row 83 with "expected
+  float, found Void"). Table in `test/url/README.md`.
 - **`node:assert`: implemented in `src/assert/assert.ts`, measured against the
   full Node corpus.** The whole Node 25 module, not a harness slice any more:
   the callable module object, `ok`, `equal`/`notEqual` (loose, with Node 25's

@@ -76,10 +76,14 @@ case "$MODULE" in
           KIND="zun-ts";     PATTERNS="test-string-decoder";              PATTERN="test-string-decoder";;
   querystring) KIND="zun-ts"; PATTERNS="test-querystring";                PATTERN="test-querystring";;
   punycode)    KIND="zun-ts"; PATTERNS="test-punycode";                   PATTERN="test-punycode";;
-  # `url`'s corpus is `test-url*`, which also selects `test-urlpattern*`:
+  # `url`'s corpus is two prefixes. `test-url*` also selects `test-urlpattern*`:
   # `URLPattern` is a `node:url` export in Node 25, so those files are part of
-  # this module's bar rather than a different one's.
-  url)         KIND="zun-ts"; PATTERNS="test-url";                        PATTERN="test-url";;
+  # this module's bar rather than a different one's. `test-whatwg-url-*` is the
+  # WHATWG `URL`/`URLSearchParams` surface, which `node:url` exports and
+  # `src/url/whatwg.ts` implements -- so those 27 files are this module's bar
+  # too, not the prelude's.
+  url)         KIND="zun-ts"; PATTERNS="test-url test-whatwg-url-";
+               PATTERN="test-url*|test-whatwg-url-";;
   # `stream`'s corpus is five prefixes, and naming each one is the point:
   # `test-stream-` is the bulk, `test-stream2-` and `test-stream3-` are the two
   # historical rewrites Node still ships under their old names, `test-streams-`

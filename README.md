@@ -17,10 +17,12 @@ A Node module lands here in whichever form fits what it actually does:
   computation: `path` (`src/path/path.ts`) is string manipulation end to end, so
   there is nothing to gain from crossing the ABI, and no `--ext` is involved.
   `querystring` (`src/querystring/querystring.ts`), `punycode`
-  (`src/punycode/punycode.ts`) and `url` (`src/url/url.ts`) are the same kind;
-  `url` stands on the other two plus `path`, and re-exports the engine's
-  prelude `URL`/`URLSearchParams`, which is the relationship `node:url` has with
-  the globals in Node. `stream` (`src/stream/stream.ts`) is the largest of
+  (`src/punycode/punycode.ts`) and `url` (`src/url/url.ts` plus
+  `src/url/whatwg.ts`) are the same kind; `url` stands on the other two plus
+  `path`, and carries the WHATWG URL Standard — the parser, the hosts, the
+  percent-encode sets, the setters and `URLSearchParams` — in
+  `src/url/whatwg.ts` rather than deferring to the engine's partial prelude
+  classes. `stream` (`src/stream/stream.ts`) is the largest of
   them: pure computation over `events`, `process.nextTick`, the global `Buffer`
   and `string_decoder` — exactly the dependency set `lib/internal/streams/*`
   has. `timers` (`src/timers/timers.ts`) is the same kind for a
@@ -484,12 +486,15 @@ the direct `zun run --ext <lib> <test.js>` path.
 > module builds a RegExp — which is the structural reason `querystring` has no
 > CVEs of its own in Node's history. The two failures are not in
 > `querystring.ts`: both of Node's remaining files open their `check()` with the
-> bare callable form `assert(!(actual instanceof Object))`, which needs an
-> `assert` that is a function *and* carries methods
-> ([zun#14](https://github.com/UrubuCode/zun/issues/14)) and an `instanceof
-> Object` that answers `false` for a null-prototype object
-> ([zun#26](https://github.com/UrubuCode/zun/issues/26)); `test-querystring.js`
-> additionally needs a second realm (`vm.runInNewContext`). The blocker table is
+> bare callable form `assert(!(actual instanceof Object))`, and `instanceof
+> Object` answers `true` for a null-prototype object on this engine
+> ([zun#26](https://github.com/UrubuCode/zun/issues/26)) — which is exactly what
+> that line denies. With it removed,
+> `test-querystring-multichar-separator.js` passes in full;
+> `test-querystring.js` additionally needs a second realm
+> (`vm.runInNewContext`). The callable-`assert` half of the blocker
+> ([zun#14](https://github.com/UrubuCode/zun/issues/14)) **no longer
+> reproduces** as of engine `c4afcca4`. The blocker table is
 > in [`test/querystring/README.md`](test/querystring/README.md), the per-test
 > breakdown in [`test/querystring/RESULTS.md`](test/querystring/RESULTS.md).
 
@@ -516,41 +521,61 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-url:start -->
 ### Node.js v25 `url` compatibility
 
-`███████████░░░░░░░░░░░░░` **47.0%** — 8 / 17 Node `test-url*` tests passing
+`████████░░░░░░░░░░░░░░░░` **34.0%** — 15 / 44 Node `test-url*|test-whatwg-url-*` tests passing
 <!-- node-url:end -->
 
-> `url` is implemented end to end — the legacy `parse` (with `parseQueryString`
-> and `slashesDenoteHost`), `format` (string, object and `URL` forms, plus
-> `format(URL, options)`), `resolve`, `resolveObject` and the `Url` class, the
-> WHATWG re-exports, `domainToASCII`/`domainToUnicode`,
-> `fileURLToPath`/`pathToFileURL` for both platforms, and `urlToHttpOptions` —
-> following Node's `lib/url.js` and `lib/internal/url.js` instruction for
-> instruction, because `url.parse` is explicitly not standardized (that is what
-> DEP0169 says) and its behaviour simply *is* that code. Every CVE guard is
-> reproduced rather than simplified: the scheme is lower-cased before any
-> protocol-set decision (CVE-2018-12123), the hostname is re-checked against the
-> forbidden set **after** IDNA so a NUL can neither be accepted nor truncated
-> away (the CVE-2026-48930 class), an empty post-IDNA hostname throws
-> `ERR_INVALID_URL`, and `parse(url, true)` hands back a null-prototype query.
-> Node's eight regular expressions here are eight hand-written scans, so the
-> parser owns no backtracking engine. Because four of the seventeen files are
-> ICU skips and two cannot be expressed on this engine at all, the module was
-> checked directly against Node's own expectation tables: 89 `parseTests` cases
-> (all twelve fields, the whitespace-trimmed re-parse and `format(expected)`),
-> 29 `formatTests` cases in both their string and object forms, all 194
-> `relativeTests2` and 31 `relativeTests` resolve cases, and the 51
-> `pathToFileURL` / 43 `fileURLToPath` cases with their error paths — 447 of
-> Node's own expectation rows and 1 695 individual comparisons, **zero
-> divergences**. `test-url-relative.js` therefore fails on the
-> engine, not on `url.ts`: the run corrupts a long-lived array of strings after
-> roughly 250 `url.parse` calls (new engine bug, reported with this work). The rest are the prelude `URL`'s own limits
-> (`new URL('file:///C:/foo')` throws there, so `pathToFileURL` builds its
-> `URL` instances from components instead), `URLPattern` (a separate WHATWG
-> specification Node implements in C++, and unreachable from a test here in any
-> case), a callable `assert`, `new` on a member expression, `child_process` and
-> spread into a built-in. The blocker-by-blocker table is in
-> [`test/url/README.md`](test/url/README.md), the per-test breakdown in
-> [`test/url/RESULTS.md`](test/url/RESULTS.md).
+> `url` is implemented end to end, on both of its halves. `src/url/url.ts` is
+> the legacy API — `parse` (with `parseQueryString` and `slashesDenoteHost`),
+> `format` (string, object and `URL` forms, plus `format(URL, options)`),
+> `resolve`, `resolveObject`, the `Url` class,
+> `domainToASCII`/`domainToUnicode`, `fileURLToPath`/`pathToFileURL` for both
+> platforms and `urlToHttpOptions` — following Node's `lib/url.js` and
+> `lib/internal/url.js` instruction for instruction, because `url.parse` is
+> explicitly not standardized (that is what DEP0169 says) and its behaviour
+> simply *is* that code. Every CVE guard is reproduced rather than simplified:
+> the scheme is lower-cased before any protocol-set decision (CVE-2018-12123),
+> the hostname is re-checked against the forbidden set **after** IDNA so a NUL
+> can neither be accepted nor truncated away (the CVE-2026-48930 class), an
+> empty post-IDNA hostname throws `ERR_INVALID_URL`, and `parse(url, true)`
+> hands back a null-prototype query. Node's eight regular expressions here are
+> eight hand-written scans, so the parser owns no backtracking engine.
+>
+> `src/url/whatwg.ts` is the **WHATWG URL Standard itself** — the basic URL
+> parser as its 21 states (`stateOverride` included, which is what every setter
+> runs), host parsing with the IPv4 and IPv6 parsers and serializers and IDNA,
+> the eight percent-encode sets, the URL and origin serializers, every getter
+> and setter, `URL.canParse`/`URL.parse`, and `URLSearchParams` in full with the
+> live link back to the URL that owns it. Measured against the WPT fixtures
+> Node ships: **869 of 869 `urltestdata.json` constructor cases bar seven**, and
+> **270 of 270 `setters_tests.json` setter cases with no divergence at all** —
+> the seven are each one line of the UTS#46 mapping table this runtime has no
+> ICU for. The classes are declared `NodeURL`/`NodeURLSearchParams`, because
+> `URL` and `URLSearchParams` are prelude class names here and a user class of
+> the same name is a "duplicate class" error; the bundler rewrites `new URL(…)`,
+> `URL.<static>` and `x instanceof URL` to them, exactly as it already rewrites
+> `console`, `performance` and `crypto`.
+>
+> Because the corpus now covers both prefixes (`test-url*` and
+> `test-whatwg-url-*`, 44 files), and six of them cannot be bundled or expressed
+> on this engine at all, the module is also checked directly against Node's own
+> expectation tables: 89 `parseTests` cases (all twelve fields, the
+> whitespace-trimmed re-parse and `format(expected)`), 29 `formatTests` cases in
+> both forms, all 194 `relativeTests2` and 31 `relativeTests` resolve cases, the
+> 51 `pathToFileURL` / 43 `fileURLToPath` cases with their error paths, and 35
+> `URLSearchParams` cases — **zero divergences**. `test-url-relative.js`
+> therefore fails on the engine, not on `url.ts`: the run corrupts a long-lived
+> array of strings after roughly 80 `url.resolve` calls and the interpreter
+> panics on the loop counter
+> ([zun#67](https://github.com/UrubuCode/zun/issues/67), re-confirmed on
+> `c4afcca4`). The
+> remaining failures are `URLPattern` (a separate WHATWG specification Node
+> implements in C++, declared as a gap rather than faked), the
+> function/prototype/descriptor model, symbol-keyed class members
+> (`Symbol.iterator`, `Symbol.toStringTag`, `util.inspect.custom`), reading a
+> class method as a value for the `method.call(undefined)` brand checks,
+> `child_process`, `eval`, and spread into a built-in. The blocker-by-blocker
+> table is in [`test/url/README.md`](test/url/README.md), the per-test breakdown
+> in [`test/url/RESULTS.md`](test/url/RESULTS.md).
 
 <!-- node-timers:start -->
 ### Node.js v25 `timers` compatibility
