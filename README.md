@@ -39,7 +39,15 @@ A Node module lands here in whichever form fits what it actually does:
   global in Node, while the engine's prelude `console` has five of its nineteen
   methods and a compile error for the rest. The binding that shadows it is one
   file of its own (`src/console/global.ts`), so that a test declaring its own
-  `console` can still be bundled.
+  `console` can still be bundled. `perf_hooks`
+  (`src/perf_hooks/perf_hooks.ts`) is the third global of that kind, and the
+  clearest case of the seam being drawn by *capability* rather than by subject:
+  a performance timeline is marks in a map, entries in three arrays and
+  observers in a list — pure computation — and the one thing it cannot compute
+  is a clock, which `process` already answers as `process.hrtime`. So it needs
+  no native of its own and runs with or without `--ext`; the extension only
+  sharpens `performance.now()` from whole milliseconds to the platform
+  monotonic clock.
 - **Zun TypeScript over natives** — both, with the seam drawn where the
   capability changes. `os` is the first: the facts it reports are syscalls
   (`src/os/`, Rust), while the module *Node* exposes is objects, arrays,
@@ -719,3 +727,37 @@ target/debug/zun run /tmp/bundle.ts
 
 `████████░░░░░░░░░░░░░░░░` **36.3%** — 8 / 22 Node `test-console*` tests passing
 <!-- node-console:end -->
+
+<!-- node-perf_hooks:start -->
+### Node.js v25 `perf_hooks` compatibility
+
+`███░░░░░░░░░░░░░░░░░░░░░` **15.0%** — 3 / 20 Node `test-perf-hooks-*|test-performance*` tests passing
+<!-- node-perf_hooks:end -->
+
+> The whole surface is implemented — `performance` (`now`, `timeOrigin`,
+> `mark`/`measure` with `detail` and start/end/duration options, the
+> `getEntriesBy*`/`clear*` trio over Node's three separate global buffers,
+> `markResourceTiming` with the secondary buffer and its single
+> `resourcetimingbufferfull` drain, `timerify`, `eventLoopUtilization`,
+> `nodeTiming`, `toJSON`), the five entry classes, `PerformanceObserver` with
+> buffered observation and `setImmediate`-delivered callbacks, `createHistogram`
+> and `monitorEventLoopDelay` with every reading including the `*BigInt`
+> variants, and `constants`. The bar is low because this corpus leans hard on
+> things the VM does not publish: six of the twenty files need
+> `node:worker_threads`, three need `internalBinding` or `--expose-gc`, and one
+> is an ES module the bundler does not rewrite. Of the rest, **two are blocked
+> by a single engine gap** — `Object.defineProperty` does not store
+> `writable: false` for a *symbol-keyed* property, so Node's
+> `Symbol.toStringTag` descriptor assertion fails; re-run with only that block
+> removed, `test-perf-hooks-usertiming.js` passes **in full**, which is the real
+> measure of the user-timing half. `test-performance-measure.js` is recorded as
+> a pass but is not one: its assertion runs inside an observer callback, where
+> the engine does not let a throw fail the run, and it would fail anyway because
+> the VM's timer tier advances a *virtual* clock while `performance.now()` reads
+> a real one. Five new engine findings came out of this module — BigInt identity
+> lost across a value round-trip, the symbol-descriptor gap above, quadratic
+> class-instance allocation, a throw inside a macrotask not failing the run, and
+> a spread into a method call rejected inside a function body — each with a
+> repro in [`test/perf_hooks/README.md`](test/perf_hooks/README.md), alongside
+> the per-test blocker table; the per-test run is in
+> [`test/perf_hooks/RESULTS.md`](test/perf_hooks/RESULTS.md).

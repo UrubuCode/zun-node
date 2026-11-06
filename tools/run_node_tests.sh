@@ -108,6 +108,17 @@ case "$MODULE" in
   # src/process/*.rs, and src/process/native.ts -- the only file that imports
   # them -- is inlined by the bundler just for the bundles that get `--ext`.
   process) KIND="zun-ts+ext"; PATTERNS="test-process-";                   PATTERN="test-process-";;
+  # `perf_hooks`' corpus is two prefixes that share no stem: `test-perf-hooks-`
+  # (the module surface) and `test-performance*` (the timeline, which also
+  # covers `test-performanceobserver*`). The module is pure Zun TypeScript: its
+  # one capability is a clock, and `src/process/process.ts` already answers it
+  # in both of its forms. Running the bundle with `--ext` sharpens
+  # `performance.now()` from whole milliseconds to the platform monotonic
+  # clock, but no test in the corpus distinguishes the two, so the kind is
+  # `zun-ts` -- see the resolution table in src/perf_hooks/perf_hooks.ts.
+  perf_hooks)
+          KIND="zun-ts";     PATTERNS="test-perf-hooks- test-performance";
+          PATTERN="test-perf-hooks-*|test-performance";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 
