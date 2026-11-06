@@ -256,10 +256,29 @@ class ERR_INVALID_RETURN_VALUE extends NodeTypeError {
   }
 }
 
+// Node's takes a variadic list of names and joins them (`assert.equal(1)` is
+// the two-name case, `url.domainToASCII()` the one-name case). An **optional**
+// constructor parameter is still counted as fixed by the checker, so the list
+// is a rest parameter.
 class ERR_MISSING_ARGS extends NodeTypeError {
-  constructor(name: string) {
-    super("ERR_MISSING_ARGS", 'The "' + name + '" argument must be specified');
+  constructor(...names: string[]) {
+    super("ERR_MISSING_ARGS", __utilMissingArgsMessage(names));
   }
+}
+
+function __utilMissingArgsMessage(names: string[]): string {
+  const quoted: string[] = [];
+  for (const name of names) quoted.push('"' + String(name) + '"');
+  const n = Number(quoted.length);
+  // The plural noun is assembled from two pieces: the parser looks for the
+  // name of the implicit call-value object textually anywhere inside a
+  // function's source span and injects a synthetic rest parameter where it
+  // finds one (zun#40), and the singular spelling plus `"s"` is the same
+  // string without the trip.
+  const plural = " argument" + "s must be specified";
+  if (n === 1) return "The " + quoted[0] + " argument must be specified";
+  if (n === 2) return "The " + quoted[0] + " and " + quoted[1] + plural;
+  return "The " + quoted.slice(0, n - 1).join(", ") + ", and " + quoted[n - 1] + plural;
 }
 
 class ERR_PARSE_ARGS_INVALID_OPTION_VALUE extends NodeTypeError {
@@ -2168,6 +2187,13 @@ function __utilInnerDeepEqual(a: any, b: any, seen: any[], skipProto: boolean): 
   if (a instanceof Error) {
     if (String(a.name) !== String(b.name)) return false;
     if (String(a.message) !== String(b.message)) return false;
+    // Node compares `cause` and `errors` as well, and deliberately not `stack`
+    // (`lib/internal/util/comparisons.js`' `isError` branch). Both are
+    // *readable* here but are not own properties — `Object.keys(new Error('a',
+    // { cause: e }))` is empty — so the key walk below never reaches them and
+    // two errors differing only in their cause used to compare equal.
+    if (!__utilInnerDeepEqual(a.cause, b.cause, seen, skipProto)) return false;
+    if (!__utilInnerDeepEqual(a.errors, b.errors, seen, skipProto)) return false;
   }
 
   for (const pair of seen) {

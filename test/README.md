@@ -27,6 +27,10 @@ reproduces.
 
 ## Current corpus
 
+- `assert/` — the full 14-file `test-assert*` corpus, through the bundler.
+  `assert` is also the harness **every** other corpus runs through, so a change
+  to it is re-measured against all of them; `assert/README.md` names the blocker
+  for each remaining file and records the four engine gaps this corpus found.
 - `path/` — the full 17-file `test-path*` corpus, running today through the
   bundler. This is the live measurement; see `path/README.md` for what blocks the
   remaining failures.

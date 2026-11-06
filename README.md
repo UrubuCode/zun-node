@@ -146,6 +146,43 @@ the direct `zun run --ext <lib> <test.js>` path.
 > visible to `Object.keys` now, so `inspect({ fn() {} })` is
 > `{ fn: [Function (anonymous)] }` rather than `{}`.
 
+<!-- node-assert:start -->
+### Node.js v25 `assert` compatibility
+
+`█████░░░░░░░░░░░░░░░░░░░` **21.4%** — 3 / 14 Node `test-assert*` tests passing
+<!-- node-assert:end -->
+
+> `assert` is the module every other corpus runs *through* — each
+> `test/parallel/test-*.js` opens with `const assert = require('assert')` — and
+> it is now implemented end to end rather than as a harness slice: the callable
+> module object, `ok`, `equal`/`notEqual` (loose, with Node 25's `NaN == NaN`
+> rule), `strictEqual`/`notStrictEqual` (`Object.is`, so `0` and `-0` differ),
+> `deepEqual`/`notDeepEqual` (**loose** deep equality — it used to be aliased to
+> the strict comparison, which was simply wrong),
+> `deepStrictEqual`/`notDeepStrictEqual`, `partialDeepStrictEqual`,
+> `throws`/`doesNotThrow`, `rejects`/`doesNotReject`, `match`/`doesNotMatch`,
+> `fail`, `ifError`, `assert.strict`, `require('assert/strict')` and Node 25's
+> `assert.Assert` class. `AssertionError` composes **Node's own generated
+> messages**: the `kReadableOperator` headers, the `+ actual - expected` Myers
+> line diff with its `...`/"Skipped lines" collapsing (a port of
+> `lib/internal/assert/myers_diff.js`, exported as `internal/assert/myers_diff`
+> because Node's own test file requires it), the short `a !== b` form and the
+> stacked form with its `^` indicator — verified byte for byte against Node.
+> `CallTracker` and `fail`'s legacy four-argument form with DEP0094 are absent
+> because **Node 25 removed them**, not as a gap.
+> **No remaining failure is in `assert.ts`.** The dominant blocker is new and
+> was found by this work: `err instanceof assert.AssertionError` does not
+> compile, because the right operand of `instanceof` must be a literal class
+> name — which takes out `test-assert.js`, `test-assert-async.js` and
+> `test-assert-class.js` between them. The rest are typed arrays through an
+> `any` lane ([zun#38](https://github.com/UrubuCode/zun/issues/38)), a class
+> method that cannot be read as a value
+> ([zun#19](https://github.com/UrubuCode/zun/issues/19)), `err.stack` having no
+> setter, `new Array(a, b, c)` being rejected, and two files that need
+> `require()` of a fixture module and a child process. The blocker-by-blocker
+> table is in [`test/assert/README.md`](test/assert/README.md), the per-test
+> breakdown in [`test/assert/RESULTS.md`](test/assert/RESULTS.md).
+
 <!-- node-path:start -->
 ### Node.js v25 `path` compatibility
 

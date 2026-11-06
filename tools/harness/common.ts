@@ -492,3 +492,18 @@ const __node_vm: any = {
     throw new Error("vm is not available in the zun harness");
   },
 };
+
+// `node:crypto` is required by `test-assert-deep.js` and
+// `test-assert-partial-deep-equal.js`, both of which guard every use with
+// `common.hasCrypto` — which is `false` here. That is a shape Node itself has:
+// a `--without-ssl` build reports `hasCrypto === false` and `require('crypto')`
+// throws "Node.js is not compiled with OpenSSL support". The stub says the same
+// thing, so the guarded blocks are skipped exactly as they are in that build
+// and the bundler, whose unresolved-`require` check is textual, stops failing
+// the whole file over a branch that never runs.
+const __node_crypto: any = {
+  createSecretKey(): any {
+    throw new Error("crypto is not available in the zun harness");
+  },
+  KeyObject: undefined,
+};
