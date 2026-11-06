@@ -35,9 +35,12 @@ bash zun-node/tools/run_node_tests.sh \
 ```
 
 Each test is bundled by `tools/bundle_node_test.sh` (`util` → `events` →
-`process` → `assert` → `path` → **`fs`** → the harness) and then run as
+`process` → `assert` → `path` → `buffer` → `string_decoder` → `stream` →
+**`fs`** → `fs/streams` → `fs/watchers` → the harness) and then run as
 `zun run --ext <lib> <bundle.ts>`, because the Node-shaped API is
 `../../src/fs/fs.ts` while the syscalls underneath it are `../../src/fs/*.rs`.
+`stream` is in that list because `fs.createReadStream` stands on it, exactly as
+`lib/internal/fs/streams.js` stands on `lib/stream.js`.
 
 Two harness pieces exist for this corpus and are inlined only when a test asks
 for them (`CONDITIONAL_FILES`, so a `path` or `events` bundle still compiles
@@ -52,6 +55,11 @@ with no `--ext`):
   inlined unconditionally, which broke every test file declaring its own
   `function test(...)` (eight in this corpus) with "duplicate function
   declaration".
+
+The `fs` entry in `CONDITIONAL_FILES` therefore pulls six files rather than
+one, and `../common/tmpdir` pulls `fs.ts` and `fs/watchers.ts` but *not*
+`fs/streams.ts` — which is the whole reason the two stream entry points go
+through a hook table instead of naming the classes directly.
 
 ## What is implemented
 
@@ -96,6 +104,58 @@ and reports `ENOENT` for `rmdir` of a file the way the CRT's `_wrmdir` does.
   `FileHandle` with `read`/`write`/`readv`/`writev`/`stat`/`truncate`/`sync`/
   `datasync`/`chmod`/`chown`/`utimes`/`readFile`/`writeFile`/`appendFile`.
 
+**The streams (`../../src/fs/streams.ts`)** — `ReadStream` and `WriteStream`
+over `../../src/stream/stream.ts`, which is what `fs.createReadStream`,
+`fs.createWriteStream`, `fs.ReadStream`/`fs.WriteStream` and
+`filehandle.createReadStream`/`createWriteStream` answer. The `options.fs`
+operations table a program can replace is there (and the default *is* the
+module object, so patching `fs.open` is observable, which Node's own
+`test-fs-read-stream-patch-open.js` checks), as are `start`/`end`,
+`autoClose`/`autoDestroy`, `flush`, `pending`, `bytesRead`/`bytesWritten`, the
+`'open'`/`'ready'`/`'close'` order, the five-retry short-write loop and the
+`kIoDone` handshake that keeps a descriptor open under a pending read.
+
+The classes are a separate file for one reason: `fs.ts` is inlined for
+`../common/tmpdir` as well, which 160 of these 227 files require, and a `path`
+or `events` bundle must not grow a stream module it never uses. `fs.ts`
+therefore knows only the hook table `__fsStreamHooks`, which still throws
+`ERR_METHOD_NOT_IMPLEMENTED` when this file is not in the bundle.
+
+**The watchers (`../../src/fs/watchers.ts`)** — `fs.watch`, `fs.watchFile`,
+`fs.unwatchFile`, `fsPromises.watch`, and the `FSWatcher`/`StatWatcher`
+classes, as **pollers over `setInterval`**:
+
+* `watchFile` is a poller in Node too. `uv_fs_poll_t` stats the path on a timer
+  and compares the result with the previous one, and libuv's `poll_cb` is
+  reproduced field for field — the first *successful* stat is recorded without
+  an event, the first *failing* one does fire, and the `busy_polling`
+  tri-state is what makes those two rules work out. That is why `watchFile` on
+  a path that does not exist yet calls its listener once with two all-zero
+  `Stats` and again when the file appears, which is exactly what
+  `test-fs-watchfile.js` asserts.
+* `watch` is `uv_fs_event_t` in Node — `ReadDirectoryChangesW` on Windows,
+  `inotify` on Linux — and there is no loop hook in this VM to attach such a
+  handle to. So it diffs a snapshot of the entry names and their
+  `(mtimeMs, size, ino, mode)`: an appeared or vanished name is reported as
+  `'rename'` and a changed one as `'change'`, with the same `(eventType,
+  filename)` listener arguments. The resolution is the poll interval rather
+  than the kernel's. Node ships a poller of exactly this shape as its own
+  `recursive` fallback on Linux (`lib/internal/fs/recursive_watch.js`).
+
+`persistent: false` is an `unref()` on that interval, so a non-persistent
+watcher does not hold the process open — which is what `ref`/`unref` mean on
+both classes.
+
+**`internal/fs/utils` (`../../src/fs/internal.ts`)** — not a public module, and
+here for the reason `internal/util` is in `src/util/util.ts`: six of Node's own
+`test-fs-*` files run under `--expose-internals` and drive these functions
+*directly* rather than through the `fs` API that calls them
+(`test-fs-open-flags.js` walks `stringToFlags` over the whole flag table,
+`test-fs-util-validateoffsetlength.js` checks the two range validators message
+for message, `test-fs-rm.js` calls `validateRmOptionsSync`,
+`test-fs-watchfile-bigint.js` wants the `BigIntStats` class). Every member is
+the same function `fs.ts` already uses, re-exported under Node's internal name.
+
 ### Deliberate gaps
 
 Each of these throws `ERR_METHOD_NOT_IMPLEMENTED` rather than being absent, so
@@ -104,9 +164,7 @@ a test that reaches one fails with a named gap instead of
 
 | Gap | Needs |
 |---|---|
-| `createReadStream` / `createWriteStream`, `ReadStream`, `WriteStream` | `node:stream`, its own module in PLAN.md's order |
-| `watch`, `watchFile`, `unwatchFile` | a filesystem-event source in the VM's loop (libuv's `uv_fs_event_t`); there is no loop hook to attach one to |
-| `glob`, `globSync` | a path matcher, which `node:path` does not have yet |
+| `glob`, `globSync` | a path matcher, which `node:path` does not have yet. No file in this corpus reaches either, so it is the one gap with no test behind it |
 | `openAsBlob` | `node:buffer`'s `Blob` |
 | `lchmodSync` / `lchmod` | only defined on macOS in Node; libuv reports `ENOSYS` elsewhere |
 
@@ -124,284 +182,254 @@ a round trip through a file containing NUL and invalid UTF-8 is covered by
 
 ## Results
 
-**40 of 227** of Node 25's `test-fs-*` files pass (`tools/run_node_tests.sh --module fs`, Windows). What stops the other 187:
+**96 of 227** of Node 25's `test-fs-*` files pass
+(`tools/run_node_tests.sh --module fs`, Windows). What stops the other 131:
 
 | Blocker | Issue | Tests |
 |---|---|---|
-| `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | 45 |
-| `node:stream` / `createReadStream` | — | 35 |
-| unresolved `require` | — | 32 |
-| `fs.watch` / `watchFile` | — | 22 |
-| `.then(common.mustCall())` | new (see below) | 10 |
-| bare `assert(...)` | [zun#14](https://github.com/UrubuCode/zun/issues/14) | 8 |
-| behaviour mismatch | — | 8 |
-| top-level `return` in a CommonJS module | — | 7 |
-| `f.apply` / `f.call` | [zun#1](https://github.com/UrubuCode/zun/issues/1) | 6 |
-| uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | 6 |
-| `child_process` | — | 3 |
-| callback never ran | — | 2 |
-| callable-with-properties | [zun#14](https://github.com/UrubuCode/zun/issues/14) | 1 |
-| does not compile | — | 1 |
-| runtime error | — | 1 |
+| `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | 29 |
+| uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | 29 |
+| behaviour mismatch | — | 28 |
+| runtime error | — | 12 |
+| callback never ran | — | 11 |
+| unresolved `require` | — | 11 |
+| does not compile | — | 7 |
+| spread arguments | [zun#11](https://github.com/UrubuCode/zun/issues/11) | 3 |
+| timed out | — | 1 |
 
 ### Per test
 
 | Test | Blocker | Issue | Why |
 |---|---|---|---|
-| `test-fs-access.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-access.js: |
-| `test-fs-append-file.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-append-file.ts:10938:44: error: [SEM0001] 'Buffer.byteLength' expects a… |
-| `test-fs-append-file-flush.js` | behaviour mismatch | — | assertion — AssertionError [throws]: Missing expected exception. |
-| `test-fs-append-file-sync.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — bundles/test-fs-append-file-sync.ts:10938:38: error: [SEM0001] 'Buffer.byteLength' expects a… |
-| `test-fs-assert-encoding-error.js` | `fs.watch` / `watchFile` | — | assertion — AssertionError [throws]: The error does not match the expectation. |
-| `test-fs-buffer.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-buffer.ts:10906:23: error: [SEM0001] 'Buffer.from' expects a string, ar… |
-| `test-fs-chmod.js` | `f.apply` / `f.call` | [zun#1](https://github.com/UrubuCode/zun/issues/1) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x213b9c31f80)) |
-| `test-fs-chmod-mask.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x2012fa72960)) |
-| `test-fs-copyfile.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-copyfile.js: |
-| `test-fs-copyfile-respect-permissions.js` | bare `assert(...)` | [zun#14](https://github.com/UrubuCode/zun/issues/14) | runtime — zun: runtime error: call did not resolve to a method at <closure@403028> [403121..403153] |
-| `test-fs-cp-sync-dereference.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x1e225fb5868)) |
-| `test-fs-error-messages.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-error-messages.js: |
-| `test-fs-exists.js` | bare `assert(...)` | [zun#14](https://github.com/UrubuCode/zun/issues/14) | runtime — zun: runtime error: call did not resolve to a method at <main> [398806..398807] |
-| `test-fs-existssync-false.js` | bare `assert(...)` | [zun#14](https://github.com/UrubuCode/zun/issues/14) | runtime — zun: runtime error: call did not resolve to a method at <main> [402902..402931] |
+| `test-fs-access.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-access.ts:31273:37: error: [SEM0001] 'Buffer.from' expects a string, arr |
+| `test-fs-append-file.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-append-file.ts:29053:44: error: [SEM0001] 'Buffer.byteLength' expects a  |
+| `test-fs-append-file-flush.js` | behaviour mismatch | — | runtime — not ok - performs flush: Cannot read properties of undefined (reading 'method') |
+| `test-fs-append-file-sync.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — bundles/test-fs-append-file-sync.ts:29053:38: error: [SEM0001] 'Buffer.byteLength' expec |
+| `test-fs-assert-encoding-error.js` | behaviour mismatch | — | assertion — AssertionError [throws]: Expected values to be strictly deep-equal: |
+| `test-fs-buffer.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-buffer.ts:29021:23: error: [SEM0001] 'Buffer.from' expects a string, arr |
+| `test-fs-chmod.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-chmod-mask.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-copyfile.js` | behaviour mismatch | — | assertion — AssertionError [throws]: Expected values to be strictly deep-equal: |
+| `test-fs-cp-sync-dereference.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-error-messages.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-exists.js` | runtime error | — | parse — Mismatched function call: expected warning DeprecationWarning was never emitted |
+| `test-fs-existssync-false.js` | callback never ran | — | parse — Mismatched function call: mustSucceed received an error: ENOENT: no such file or directo |
 | `test-fs-existssync-memleak-longpath.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-existssync-memleak-longpath.js: |
-| `test-fs-fchmod.js` | behaviour mismatch | — | assertion — AssertionError [throws]: The error does not match the expectation. |
-| `test-fs-fchown.js` | behaviour mismatch | — | assertion — AssertionError [throws]: The error does not match the expectation. |
-| `test-fs-filehandle.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-filehandle.js: |
-| `test-fs-filehandle-use-after-close.js` | `.then(common.mustCall())` | new (see below) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-internal-assertencoding.js` | behaviour mismatch | — | assertion — AssertionError [throws]: The error does not match the expectation. |
-| `test-fs-lchown-negative-one.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x257486a1fe8)) |
-| `test-fs-long-path.js` | `.then(common.mustCall())` | new (see below) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-make-callback.js` | behaviour mismatch | — | assertion — AssertionError [throws]: The error does not match the expectation. |
-| `test-fs-mkdir.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-mkdir.js: |
-| `test-fs-mkdir-mode-mask.js` | top-level `return` in a CommonJS module | — | runtime — bundles/test-fs-mkdir-mode-mask.ts: error: parse error: "A 'return' statement can only be … |
-| `test-fs-mkdir-recursive-eaccess.js` | `child_process` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x21f44664268)) |
-| `test-fs-mkdir-rmdir.js` | bare `assert(...)` | [zun#14](https://github.com/UrubuCode/zun/issues/14) | runtime — zun: runtime error: call did not resolve to a method at <main> [402536..402537] |
-| `test-fs-mkdtemp.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-mkdtemp.ts:10920:40: error: [SEM0001] 'Buffer.byteLength' expects a str… |
-| `test-fs-non-number-arguments-throw.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x26a151c1f50)) |
-| `test-fs-null-bytes.js` | `fs.watch` / `watchFile` | — | assertion — AssertionError [throws]: The error does not match the expectation. |
-| `test-fs-open.js` | `.then(common.mustCall())` | new (see below) | type error — bundles/test-fs-open.ts:10832:31: error: [SEM0001] spread arguments are not lowered yet |
-| `test-fs-opendir.js` | bare `assert(...)` | [zun#14](https://github.com/UrubuCode/zun/issues/14) | type error — bundles/test-fs-opendir.ts:10925:25: error: [SEM0001] right operand of 'instanceof' mus… |
-| `test-fs-open-flags.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-open-flags.js: |
-| `test-fs-open-no-close.js` | callback never ran | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-options-immutable.js` | `fs.watch` / `watchFile` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x233a4630cb0)) |
-| `test-fs-promises.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x155b52c1e70)) |
-| `test-fs-promises-file-handle-aggregate-errors.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-promises-file-handle-aggregate-… |
-| `test-fs-promises-file-handle-append-file.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-promises-file-handle-chmod.js` | `.then(common.mustCall())` | new (see below) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-promises-file-handle-close-errors.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-promises-file-handle-close-erro… |
-| `test-fs-promises-file-handle-dispose.js` | `.then(common.mustCall())` | new (see below) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-promises-file-handle-op-errors.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-promises-file-handle-op-errors.… |
-| `test-fs-promises-file-handle-read.js` | `node:stream` / `createReadStream` | — | type error — bundles/test-fs-promises-file-handle-read.ts:10919:30: error: [SEM0001] 'Buffer.from' e… |
-| `test-fs-promises-file-handle-read-worker.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-promises-file-handle-read-worke… |
-| `test-fs-promises-file-handle-stat.js` | `.then(common.mustCall())` | new (see below) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-promises-file-handle-stream.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-promises-file-handle-stream.js: |
-| `test-fs-promises-file-handle-truncate.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-promises-file-handle-write.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-promises-readfile.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-promises-readfile.js: |
-| `test-fs-promises-readfile-empty.js` | callable-with-properties | [zun#14](https://github.com/UrubuCode/zun/issues/14) | runtime — zun: runtime error: call did not resolve to a method at <main> [397149..397151] |
-| `test-fs-promises-readfile-with-fd.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-promises-watch.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-promises-watch.js: |
-| `test-fs-promises-watch-iterator.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-promises-watch-iterator.js: |
-| `test-fs-promises-writefile.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x23431281f60)) |
-| `test-fs-promises-writefile-typedarray.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-promises-writefile-typedarray.ts:10914:35: error: [SEM0001] type Buffer… |
-| `test-fs-promises-writefile-with-fd.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-promises-write-optional-params.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-promises-write-optional-params.ts:10969:15: error: [SEM0001] type Buffe… |
-| `test-fs-promisified.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-read.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | assertion — AssertionError [strictEqual]: 4 !== undefined |
+| `test-fs-filehandle.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-filehandle-use-after-close.js` | behaviour mismatch | — | assertion — AssertionError [rejects]: Expected values to be strictly deep-equal: |
+| `test-fs-lchown-negative-one.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-mkdir.js` | behaviour mismatch | — | assertion — AssertionError [throws]: Expected values to be strictly deep-equal: |
+| `test-fs-mkdir-recursive-eaccess.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-mkdtemp.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-mkdtemp.ts:29035:40: error: [SEM0001] 'Buffer.byteLength' expects a stri |
+| `test-fs-non-number-arguments-throw.js` | runtime error | — | runtime — TypeError: toString is not a function |
+| `test-fs-null-bytes.js` | runtime error | — | runtime — zun: runtime error: call did not resolve to a method at <main> [1098830..1098851] |
+| `test-fs-open.js` | spread arguments | [zun#11](https://github.com/UrubuCode/zun/issues/11) | type error — bundles/test-fs-open.ts:28947:31: error: [SEM0001] spread arguments are not lowered yet |
+| `test-fs-opendir.js` | behaviour mismatch | — | assertion — AssertionError [throws]: Expected values to be strictly deep-equal: |
+| `test-fs-open-flags.js` | behaviour mismatch | — | assertion — AssertionError [throws]: Expected values to be strictly deep-equal: |
+| `test-fs-options-immutable.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-promises.js` | behaviour mismatch | — | assertion — AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-fs-promises-file-handle-aggregate-errors.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-promises-file-handle-aggregate-erro |
+| `test-fs-promises-file-handle-append-file.js` | behaviour mismatch | — | assertion — AssertionError [rejects]: Missing expected rejection (AbortError). |
+| `test-fs-promises-file-handle-close-errors.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-promises-file-handle-close-errors.j |
+| `test-fs-promises-file-handle-dispose.js` | callback never ran | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-fs-promises-file-handle-op-errors.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-promises-file-handle-op-errors.js: |
+| `test-fs-promises-file-handle-read.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-promises-file-handle-read.ts:29034:30: error: [SEM0001] 'Buffer.from' ex |
+| `test-fs-promises-file-handle-stream.js` | callback never ran | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-fs-promises-file-handle-truncate.js` | callback never ran | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-fs-promises-readfile.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-promises-readfile-empty.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-promises-readfile-with-fd.js` | callback never ran | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-fs-promises-watch-iterator.js` | does not compile | — | parse — bundles/test-fs-promises-watch-iterator.ts:29032:9: error: [SEM0001] async functions mus |
+| `test-fs-promises-writefile.js` | behaviour mismatch | — | assertion — AssertionError [rejects]: Missing expected rejection (AbortError). |
+| `test-fs-promises-writefile-typedarray.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-promises-writefile-typedarray.ts:29029:35: error: [SEM0001] type BufferV |
+| `test-fs-promises-writefile-with-fd.js` | callback never ran | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-fs-promises-write-optional-params.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-promises-write-optional-params.ts:29084:15: error: [SEM0001] type Buffer |
+| `test-fs-promisified.js` | behaviour mismatch | — | assertion — AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-fs-read.js` | behaviour mismatch | — | assertion — AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-fs-readdir.js` | behaviour mismatch | — | assertion — AssertionError [throws]: The input did not match the regular expression /Error: ENOTDIR: |
 | `test-fs-readdir-recursive.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-readdir-recursive.js: |
-| `test-fs-readdir-stack-overflow.js` | runtime error | — | runtime — thread '<unknown>' (28928) has overflowed its stack |
-| `test-fs-readdir-types.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-readdir-types.js: |
-| `test-fs-readdir-ucs2.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-readdir-ucs2.ts:10924:38: error: [SEM0001] 'Buffer.from' expects a stri… |
-| `test-fs-read-empty-buffer.js` | `.then(common.mustCall())` | new (see below) | type error — bundles/test-fs-read-empty-buffer.ts:10775:16: error: [SEM0001] 'Uint8Array' expects at… |
-| `test-fs-readfile.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-readfile.ts:10795:35: error: [SEM0001] Buffer size must be an integer |
-| `test-fs-readfile-eof.js` | top-level `return` in a CommonJS module | — | runtime — bundles/test-fs-readfile-eof.ts: error: parse error: "A 'return' statement can only be use… |
-| `test-fs-readfile-error.js` | `child_process` | — | type error — bundles/test-fs-readfile-error.ts:10803:8: error: [SEM0001] spread arguments are not lo… |
-| `test-fs-readfile-fd.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x284b93e6268)) |
-| `test-fs-readfile-flags.js` | callback never ran | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-readfile-pipe.js` | top-level `return` in a CommonJS module | — | runtime — bundles/test-fs-readfile-pipe.ts: error: parse error: "A 'return' statement can only be us… |
-| `test-fs-readfile-pipe-large.js` | top-level `return` in a CommonJS module | — | runtime — bundles/test-fs-readfile-pipe-large.ts: error: parse error: "A 'return' statement can only… |
-| `test-fs-read-file-sync.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x23314659288)) |
-| `test-fs-readfilesync-enoent.js` | behaviour mismatch | — | assertion — AssertionError [strictEqual]: '\\\\marcospc\\c$' !== '\\\\marcospc\\c$\\' |
-| `test-fs-readfilesync-pipe-large.js` | top-level `return` in a CommonJS module | — | parse — bundles/test-fs-readfilesync-pipe-large.ts: error: parse error: "A 'return' statement can on… |
-| `test-fs-readfile-unlink.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-readfile-unlink.ts:10928:26: error: [SEM0001] Buffer size must be an in… |
-| `test-fs-read-offset-null.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | assertion — AssertionError [strictEqual]: undefined !== 120 |
-| `test-fs-read-optional-params.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-read-optional-params.ts:10780:29: error: [SEM0001] spread arguments are… |
-| `test-fs-read-promises-optional-params.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-read-promises-optional-params.ts:10777:43: error: [SEM0001] type Buffer… |
-| `test-fs-read-stream.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x20cffc320e0)) |
-| `test-fs-read-stream-concurrent-reads.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x2a94ef181d0)) |
-| `test-fs-read-stream-double-close.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x1d03ce9d2d0)) |
-| `test-fs-read-stream-encoding.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x18c020106c8)) |
-| `test-fs-read-stream-err.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x234ff5d1d60)) |
-| `test-fs-read-stream-fd.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x120202dd100)) |
-| `test-fs-read-stream-fd-leak.js` | `node:stream` / `createReadStream` | — | parse — bundles/test-fs-read-stream-fd-leak.ts:10800:7: error: [SEM0001] expected a Any return value |
-| `test-fs-read-stream-file-handle.js` | `node:stream` / `createReadStream` | — | assertion — AssertionError [throws]: The error does not match the expectation. |
-| `test-fs-read-stream-inherit.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x12520311fc0)) |
-| `test-fs-read-stream-patch-open.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x22d862c1d50)) |
-| `test-fs-read-stream-pos.js` | `node:stream` / `createReadStream` | — | parse — bundles/test-fs-read-stream-pos.ts:10926:15: error: [SEM0001] expected a Any return value |
-| `test-fs-read-stream-resume.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x1fb2f3be1a8)) |
-| `test-fs-read-stream-throw-type-error.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x246f006f608)) |
-| `test-fs-read-type.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | assertion — AssertionError [throws]: Missing expected exception. |
-| `test-fs-readv.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-readv.ts:10914:31: error: [SEM0001] Buffer size must be an integer |
-| `test-fs-readv-promises.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-readv-promises.ts:10915:31: error: [SEM0001] Buffer size must be an int… |
-| `test-fs-readv-promisify.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | assertion — AssertionError [deepStrictEqual]: undefined !== [ {} ] |
-| `test-fs-readv-sync.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — bundles/test-fs-readv-sync.ts:10916:31: error: [SEM0001] Buffer size must be an integer |
-| `test-fs-ready-event-stream.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x11795791e60)) |
-| `test-fs-realpath.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-realpath.js: |
-| `test-fs-realpath-buffer-encoding.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | runtime — bundles/test-fs-realpath-buffer-encoding.ts: error: OXC adapter supports declared for-in b… |
-| `test-fs-realpath-native.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x230bf8b56f0)) |
-| `test-fs-realpath-on-substed-drive.js` | `child_process` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x1ee1c1ed150)) |
-| `test-fs-rm.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-rm.js: |
-| `test-fs-rmdir-recursive-error.js` | `.then(common.mustCall())` | new (see below) | assertion — AssertionError [throws]: Missing expected exception. |
-| `test-fs-rmdir-throws-not-found.js` | `.then(common.mustCall())` | new (see below) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-rmdir-throws-on-file.js` | `.then(common.mustCall())` | new (see below) | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-stat.js` | does not compile | — | type error — bundles/test-fs-stat.ts:10923:3: error: [SEM0001] type Any has no methods |
-| `test-fs-stat-bigint.js` | bare `assert(...)` | [zun#14](https://github.com/UrubuCode/zun/issues/14) | type error — bundles/test-fs-stat-bigint.ts:10929:51: error: [SEM0001] 'BigInt' expects a string or … |
-| `test-fs-statfs.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x247941b2070)) |
-| `test-fs-stream-construct-compat-error-read.js` | `f.apply` / `f.call` | [zun#1](https://github.com/UrubuCode/zun/issues/1) | type error — bundles/test-fs-stream-construct-compat-error-read.ts:10909:30: error: [SEM0001] spread… |
-| `test-fs-stream-construct-compat-error-write.js` | `f.apply` / `f.call` | [zun#1](https://github.com/UrubuCode/zun/issues/1) | type error — bundles/test-fs-stream-construct-compat-error-write.ts:10915:31: error: [SEM0001] sprea… |
-| `test-fs-stream-construct-compat-graceful-fs.js` | `f.apply` / `f.call` | [zun#1](https://github.com/UrubuCode/zun/issues/1) | type error — bundles/test-fs-stream-construct-compat-graceful-fs.ts:10910:30: error: [SEM0001] sprea… |
-| `test-fs-stream-construct-compat-old-node.js` | `f.apply` / `f.call` | [zun#1](https://github.com/UrubuCode/zun/issues/1) | parse — bundles/test-fs-stream-construct-compat-old-node.ts:10910:30: error: [SEM0001] spread argume… |
-| `test-fs-stream-destroy-emit-error.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x20270457b70)) |
-| `test-fs-stream-double-close.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x206eeb21ec0)) |
-| `test-fs-stream-fs-options.js` | `node:stream` / `createReadStream` | — | assertion — AssertionError [throws]: createWriteStream options.fs.open should throw if isn't a funct… |
-| `test-fs-stream-options.js` | `node:stream` / `createReadStream` | — | assertion — AssertionError [throws]: The error does not match the expectation. |
-| `test-fs-symlink-buffer-path.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-symlink-buffer-path.ts:10938:28: error: [SEM0001] 'Buffer.from' expects… |
-| `test-fs-symlink-dir-junction.js` | bare `assert(...)` | [zun#14](https://github.com/UrubuCode/zun/issues/14) | parse — Mismatched function call: mustSucceed received an error: EPERM: operation not permitted, sym… |
-| `test-fs-symlink-dir-junction-relative.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x1cf2f8d2218)) |
-| `test-fs-symlink-longpath.js` | bare `assert(...)` | [zun#14](https://github.com/UrubuCode/zun/issues/14) | parse — Mismatched function call: mustSucceed received an error: EPERM: operation not permitted, sym… |
-| `test-fs-sync-fd-leak.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-sync-fd-leak.js: |
-| `test-fs-syncwritestream.js` | top-level `return` in a CommonJS module | — | parse — bundles/test-fs-syncwritestream.ts: error: parse error: "A 'return' statement can only be us… |
-| `test-fs-truncate.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-truncate.ts:10925:27: error: [SEM0001] Buffer size must be an integer |
-| `test-fs-truncate-clear-file-zero.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x25fd5d8cb00)) |
-| `test-fs-truncate-sync.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x2332b2a1fb0)) |
-| `test-fs-utils-get-dirents.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-utils-get-dirents.js: |
-| `test-fs-util-validateoffsetlength.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-util-validateoffsetlength.js: |
-| `test-fs-utimes.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-utimes.js: |
-| `test-fs-watch.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watch.ts:10945:21: error: [SEM0001] 'clearInterval' expects a numeric h… |
-| `test-fs-watch-abort-signal.js` | `fs.watch` / `watchFile` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x1daa33bb950)) |
-| `test-fs-watch-close-when-destroyed.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watch-close-when-destroyed.ts:10927:5: error: [SEM0001] 'setTimeout' de… |
-| `test-fs-watch-encoding.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watch-encoding.ts:10938:19: error: [SEM0001] 'clearInterval' expects a … |
-| `test-fs-watch-enoent.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-watch-enoent.js: |
-| `test-fs-watchfile.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watchfile.ts:10986:21: error: [SEM0001] 'clearInterval' expects a numer… |
-| `test-fs-watchfile-bigint.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-watchfile-bigint.js: |
-| `test-fs-watch-file-enoent-after-deletion.js` | `fs.watch` / `watchFile` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x26bfcdccce0)) |
-| `test-fs-watchfile-ref-unref.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watchfile-ref-unref.ts:10791:3: error: [SEM0001] 'setTimeout' expects a… |
-| `test-fs-watch-recursive-add-file.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watch-recursive-add-file.ts:10939:4: error: [SEM0001] 'setTimeout' dela… |
-| `test-fs-watch-recursive-add-file-to-existing-subfolder.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watch-recursive-add-file-to-existing-subfolder.ts:10948:4: error: [SEM0… |
-| `test-fs-watch-recursive-add-file-to-new-folder.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watch-recursive-add-file-to-new-folder.ts:10944:4: error: [SEM0001] 'se… |
-| `test-fs-watch-recursive-add-file-with-url.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-watch-recursive-add-file-with-u… |
-| `test-fs-watch-recursive-add-folder.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-watch-recursive-add-folder.js: |
-| `test-fs-watch-recursive-assert-leaks.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-watch-recursive-assert-leaks.js… |
-| `test-fs-watch-recursive-delete.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watch-recursive-delete.ts:10928:4: error: [SEM0001] 'setTimeout' delay … |
-| `test-fs-watch-recursive-promise.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watch-recursive-promise.ts:10949:17: error: [SEM0001] 'clearInterval' e… |
-| `test-fs-watch-recursive-symlink.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-watch-recursive-symlink.js: |
-| `test-fs-watch-recursive-sync-write.js` | `fs.watch` / `watchFile` | — | parse — bundles/test-fs-watch-recursive-sync-write.ts:10925:18: error: [SEM0001] 'clearTimeout' expe… |
-| `test-fs-watch-recursive-update-file.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watch-recursive-update-file.ts:10940:4: error: [SEM0001] 'setTimeout' d… |
-| `test-fs-watch-recursive-validate.js` | `fs.watch` / `watchFile` | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-watch-recursive-watch-file.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watch-recursive-watch-file.ts:10935:21: error: [SEM0001] 'clearInterval… |
-| `test-fs-watch-ref-unref.js` | `fs.watch` / `watchFile` | — | type error — bundles/test-fs-watch-ref-unref.ts:10779:3: error: [SEM0001] 'setTimeout' expects a fun… |
-| `test-fs-watch-stop-async.js` | `fs.watch` / `watchFile` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x26505c61d80)) |
-| `test-fs-watch-stop-sync.js` | `fs.watch` / `watchFile` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x1ab38cfc470)) |
-| `test-fs-whatwg-url.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-whatwg-url.js: |
-| `test-fs-write.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | assertion — AssertionError [notStrictEqual]: undefined !== undefined |
-| `test-fs-write-buffer.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-buffer.ts:11057:31: error: [SEM0001] type BufferView(U8) has no f… |
-| `test-fs-write-buffer-large.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-buffer-large.ts:10910:28: error: [SEM0001] Buffer size must be an… |
-| `test-fs-write-file.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-file.ts:10931:42: error: [SEM0001] 'Buffer.byteLength' expects a … |
-| `test-fs-write-file-buffer.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-file-buffer.ts:10940:8: error: [SEM0001] cannot assign String to … |
-| `test-fs-write-file-flush.js` | behaviour mismatch | — | assertion — AssertionError [throws]: Missing expected exception. |
-| `test-fs-write-file-invalid-path.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x196451a25c0)) |
-| `test-fs-write-file-sync.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-write-file-sync.js: |
-| `test-fs-write-file-typedarrays.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-file-typedarrays.ts:10910:33: error: [SEM0001] 'Buffer.from' expe… |
-| `test-fs-writefile-with-fd.js` | unresolved `require` | — | bundle failed — tools/bundle_node_test.sh: line 254: … |
-| `test-fs-write-negativeoffset.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | assertion — AssertionError [throws]: Missing expected exception. |
-| `test-fs-write-optional-params.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-optional-params.ts:10977:15: error: [SEM0001] type BufferView(U8)… |
-| `test-fs-write-reuse-callback.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-reuse-callback.ts:10942:28: error: [SEM0001] Buffer size must be … |
-| `test-fs-write-stream.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x298d84f9c48)) |
-| `test-fs-write-stream-autoclose-option.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x26bc2544518)) |
-| `test-fs-write-stream-change-open.js` | `f.apply` / `f.call` | [zun#1](https://github.com/UrubuCode/zun/issues/1) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x1d0081f78f8)) |
-| `test-fs-write-stream-close-without-callback.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x199a4b81dd8)) |
-| `test-fs-write-stream-double-close.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x27dff231f08)) |
-| `test-fs-write-stream-encoding.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x29fcd7547d0)) |
-| `test-fs-write-stream-end.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x2337f4a6688)) |
-| `test-fs-write-stream-err.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x285cc565ec0)) |
-| `test-fs-write-stream-file-handle.js` | `node:stream` / `createReadStream` | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-write-stream-file-handle-2.js` | `node:stream` / `createReadStream` | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-fs-write-stream-flush.js` | `node:stream` / `createReadStream` | — | assertion — AssertionError [throws]: The error does not match the expectation. |
-| `test-fs-write-stream-fs.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x171652120d8)) |
-| `test-fs-writestream-open-write.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x19174bcd4c8)) |
-| `test-fs-write-stream-patch-open.js` | top-level `return` in a CommonJS module | — | runtime — bundles/test-fs-write-stream-patch-open.ts: error: parse error: "A 'return' statement can … |
-| `test-fs-write-stream-throw-type-error.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x21c76369ce8)) |
-| `test-fs-writesync-crash.js` | behaviour mismatch | — | assertion — AssertionError [throws]: The error does not match the expectation. |
-| `test-fs-write-sync-optional-params.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — bundles/test-fs-write-sync-optional-params.ts:10932:30: error: [SEM0001] spread arguments ar… |
-| `test-fs-writev.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-writev.ts:10935:47: error: [SEM0001] type BufferView(U8) has no fields |
-| `test-fs-writev-promises.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-writev-promises.ts:10928:47: error: [SEM0001] type BufferView(U8) has n… |
-| `test-fs-writev-sync.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — bundles/test-fs-writev-sync.ts:10932:45: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-fs-readdir-stack-overflow.js` | timed out | — | timeout —  |
+| `test-fs-readdir-types.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-readdir-ucs2.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-readdir-ucs2.ts:29039:38: error: [SEM0001] 'Buffer.from' expects a strin |
+| `test-fs-read-empty-buffer.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-read-empty-buffer.ts:28890:16: error: [SEM0001] 'Uint8Array' expects at  |
+| `test-fs-readfile.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-readfile.ts:29041:35: error: [SEM0001] Buffer size must be an integer |
+| `test-fs-readfile-error.js` | behaviour mismatch | — | assertion — AssertionError [match]: The input did not match the regular expression /EISDIR/. Input: |
+| `test-fs-readfile-fd.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-readfile-flags.js` | runtime error | — | parse — TypeError: Cannot read properties of null (reading 'code') |
+| `test-fs-readfile-pipe.js` | unresolved `require` | — | bundle failed — tools/bundle_node_test.sh: line 970: syntax error near unexpected token '(' |
+| `test-fs-readfile-pipe-large.js` | unresolved `require` | — | bundle failed — tools/bundle_node_test.sh: line 935: syntax error near unexpected token ''\(node:\)\{0,1 |
+| `test-fs-read-file-sync.js` | unresolved `require` | — | bundle failed — tools/bundle_node_test.sh: line 935: syntax error near unexpected token ''\(node:\)\{0,1 |
+| `test-fs-readfilesync-enoent.js` | unresolved `require` | — | bundle failed — tools/bundle_node_test.sh: line 935: syntax error near unexpected token ''\(node:\)\{0,1 |
+| `test-fs-read-file-sync-hostname.js` | unresolved `require` | — | bundle failed — tools/bundle_node_test.sh: line 935: syntax error near unexpected token ''\(node:\)\{0,1 |
+| `test-fs-readfile-unlink.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-readfile-unlink.ts:29045:26: error: [SEM0001] Buffer size must be an int |
+| `test-fs-read-offset-null.js` | behaviour mismatch | — | assertion — AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-fs-read-optional-params.js` | spread arguments | [zun#11](https://github.com/UrubuCode/zun/issues/11) | type error — bundles/test-fs-read-optional-params.ts:28897:29: error: [SEM0001] spread arguments are  |
+| `test-fs-read-promises-optional-params.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-read-promises-optional-params.ts:28894:43: error: [SEM0001] type BufferV |
+| `test-fs-read-stream.js` | unresolved `require` | — | bundle failed —  |
+| `test-fs-read-stream-concurrent-reads.js` | runtime error | — | runtime — zun: runtime error: call did not resolve to a method at <closure@1096589> [1096684..1096 |
+| `test-fs-read-stream-encoding.js` | runtime error | — | runtime — TypeError: equals is not a function |
+| `test-fs-read-stream-file-handle.js` | behaviour mismatch | — | assertion — AssertionError [throws]: Expected values to be strictly deep-equal: |
+| `test-fs-read-stream-inherit.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-read-type.js` | behaviour mismatch | — | assertion — AssertionError [throws]: Missing expected exception (RangeError). |
+| `test-fs-readv.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-readv.ts:29031:31: error: [SEM0001] Buffer size must be an integer |
+| `test-fs-readv-promises.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-readv-promises.ts:29032:31: error: [SEM0001] Buffer size must be an inte |
+| `test-fs-readv-promisify.js` | behaviour mismatch | — | assertion — AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
+| `test-fs-readv-sync.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — bundles/test-fs-readv-sync.ts:29033:31: error: [SEM0001] Buffer size must be an integer |
+| `test-fs-realpath.js` | runtime error | — | assertion — start tests |
+| `test-fs-realpath-buffer-encoding.js` | runtime error | — | runtime — bundles/test-fs-realpath-buffer-encoding.ts: error: OXC adapter supports declared for-in |
+| `test-fs-realpath-native.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-realpath-on-substed-drive.js` | behaviour mismatch | — | assertion — AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-fs-rm.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-rmdir-recursive-error.js` | behaviour mismatch | — | assertion — AssertionError [throws]: Missing expected exception. |
+| `test-fs-stat.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-stat-bigint.js` | does not compile | — | type error — bundles/test-fs-stat-bigint.ts:29046:51: error: [SEM0001] 'BigInt' expects a string or n |
+| `test-fs-statfs.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-stream-construct-compat-error-read.js` | does not compile | — | type error — bundles/test-fs-stream-construct-compat-error-read.ts:29026:30: error: [SEM0001] spread  |
+| `test-fs-stream-construct-compat-error-write.js` | does not compile | — | type error — bundles/test-fs-stream-construct-compat-error-write.ts:29032:31: error: [SEM0001] spread |
+| `test-fs-stream-construct-compat-graceful-fs.js` | does not compile | — | type error — bundles/test-fs-stream-construct-compat-graceful-fs.ts:29027:30: error: [SEM0001] spread |
+| `test-fs-stream-construct-compat-old-node.js` | does not compile | — | type error — bundles/test-fs-stream-construct-compat-old-node.ts:29027:30: error: [SEM0001] spread ar |
+| `test-fs-symlink-buffer-path.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-symlink-buffer-path.ts:29055:28: error: [SEM0001] 'Buffer.from' expects  |
+| `test-fs-symlink-dir-junction.js` | callback never ran | — | parse — Mismatched function call: mustSucceed received an error: EPERM: operation not permitted, |
+| `test-fs-symlink-dir-junction-relative.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-symlink-longpath.js` | callback never ran | — | parse — Mismatched function call: mustSucceed received an error: EPERM: operation not permitted, |
+| `test-fs-sync-fd-leak.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-syncwritestream.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-truncate.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-truncate.ts:29042:27: error: [SEM0001] Buffer size must be an integer |
+| `test-fs-truncate-clear-file-zero.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-truncate-sync.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-utils-get-dirents.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-utils-get-dirents.ts:31308:17: error: [SEM0001] 'Buffer.from' expects a  |
+| `test-fs-utimes.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-watch-enoent.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-watchfile.js` | runtime error | — | runtime — ReferenceError: interval is not defined |
+| `test-fs-watchfile-bigint.js` | behaviour mismatch | — | assertion — AssertionError [deepStrictEqual]: Values have same structure but are not reference-equal |
+| `test-fs-watch-recursive-symlink.js` | callback never ran | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-fs-watch-recursive-sync-write.js` | runtime error | — | runtime — ReferenceError: watcher is not defined |
+| `test-fs-watch-ref-unref.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-whatwg-url.js` | behaviour mismatch | — | assertion — AssertionError [==]: false == true |
+| `test-fs-write.js` | behaviour mismatch | — | assertion — AssertionError [notStrictEqual]: Expected "actual" to be strictly unequal to: |
+| `test-fs-write-buffer.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-buffer.ts:29174:31: error: [SEM0001] type BufferView(U8) has no fi |
+| `test-fs-write-buffer-large.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-buffer-large.ts:29027:28: error: [SEM0001] Buffer size must be an  |
+| `test-fs-write-file.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-file.ts:29048:42: error: [SEM0001] 'Buffer.byteLength' expects a s |
+| `test-fs-write-file-buffer.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-file-buffer.ts:29057:8: error: [SEM0001] cannot assign String to A |
+| `test-fs-write-file-flush.js` | behaviour mismatch | — | runtime — not ok - performs flush: Cannot read properties of undefined (reading 'method') |
+| `test-fs-write-file-invalid-path.js` | behaviour mismatch | — | assertion — AssertionError [throws]: failed with '<' |
+| `test-fs-write-file-sync.js` | does not compile | — | parse — bundles/test-fs-write-file-sync.ts:29126:66: error: [SEM0001] 'Math.random' is not suppo |
+| `test-fs-write-file-typedarrays.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-file-typedarrays.ts:29027:33: error: [SEM0001] 'Buffer.from' expec |
+| `test-fs-writefile-with-fd.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-write-negativeoffset.js` | behaviour mismatch | — | assertion — AssertionError [throws]: Missing expected exception. |
+| `test-fs-write-optional-params.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-optional-params.ts:29082:15: error: [SEM0001] type BufferView(U8)  |
+| `test-fs-write-reuse-callback.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-reuse-callback.ts:29047:28: error: [SEM0001] Buffer size must be a |
+| `test-fs-write-stream.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-write-stream-autoclose-option.js` | runtime error | — | engine panic — thread '<unnamed>' (44920) panicked at crates\zun_interp\src\value.rs:228:22: |
+| `test-fs-write-stream-change-open.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-write-stream-encoding.js` | runtime error | — | runtime — TypeError: equals is not a function |
+| `test-fs-write-stream-file-handle.js` | callback never ran | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-fs-write-stream-file-handle-2.js` | callback never ran | — | parse — Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-fs-write-stream-flush.js` | behaviour mismatch | — | runtime — not ok - performs flush: Cannot read properties of undefined (reading 'method') |
+| `test-fs-write-stream-patch-open.js` | uncaught error (address only) | [zun#8](https://github.com/UrubuCode/zun/issues/8) | runtime — zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-fs-writesync-crash.js` | behaviour mismatch | — | assertion — AssertionError [throws]: Expected values to be strictly deep-equal: |
+| `test-fs-write-sync-optional-params.js` | spread arguments | [zun#11](https://github.com/UrubuCode/zun/issues/11) | parse — bundles/test-fs-write-sync-optional-params.ts:29037:30: error: [SEM0001] spread argument |
+| `test-fs-writev.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-writev.ts:29040:47: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-fs-writev-promises.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-writev-promises.ts:29033:47: error: [SEM0001] type BufferView(U8) has no |
+| `test-fs-writev-sync.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | parse — bundles/test-fs-writev-sync.ts:29037:45: error: [SEM0001] type BufferView(U8) has no fie |
 
-A test is listed under the **first** thing that stops it, so a file blocked by a
-missing `node:stream` is counted there even though it also calls
-`Buffer.from(x)`. "unresolved `require`" is a module the bundler does not know
-(`internal/*`, `worker_threads`, `timers/promises`, `node:net`); the rest are
-engine limits, described below.
+A test is listed under the **first** thing that stops it, so a file whose
+`Buffer.from(x)` is rejected at compile time is counted there even though it
+would also have hit something else afterwards. "unresolved `require`" is a
+module the bundler does not know (`internal/fs/promises`, `worker_threads`,
+`node:net`, `../common/gc`); "uncaught error (address only)" is
+[zun#8](https://github.com/UrubuCode/zun/issues/8), where the engine prints a
+heap address instead of the error, so the row says nothing about the cause and
+the test has to be re-run by hand to find it. The rest are described below.
 
 ### The blockers that cap this corpus
 
 Everything listed above is implemented; these are the limits in front of it.
 
 **[zun#38](https://github.com/UrubuCode/zun/issues/38) — a `Buffer` is opaque
-through `any`.** A typed array reached through an `any` binding has no
-`length`, no indexing and no methods: `buf.toString("utf8")` throws
-"toString is not a function" and `buf.length` reads `undefined`. Inside
-`fs.ts` this is worked around by keeping every `Buffer` in a statically typed
-binding (`__fsAsBuffer` re-types one that arrives as `any`), but a *test file*
-is plain JavaScript, where every binding is `any` — so
-`fs.readFileSync(p).equals(Buffer.from("hello"))` cannot work no matter what
-this module returns. The same compile-time restriction rejects
-`Buffer.from(x)`, `Buffer.byteLength(x)` and `Buffer.alloc(x)` when `x` is
-`any`, which is how most of the corpus writes them. Reads *with* an encoding
-return strings and are unaffected, which is why they are the surface that
-passes today.
+through `any`,** with
+[zun#58](https://github.com/UrubuCode/zun/issues/58) beside it. A typed array
+reached through an `any` binding has no `length`, no indexing and no methods:
+`buf.toString("utf8")` throws "toString is not a function" and `buf.length`
+reads `undefined`. Inside `fs.ts` this is worked around by keeping every
+`Buffer` in a statically typed binding (`__fsAsBuffer` re-types one that
+arrives as `any`), but a *test file* is plain JavaScript, where every binding
+is `any` — so `fs.readFileSync(p).equals(Buffer.from("hello"))` cannot work no
+matter what this module returns. The companion restriction is a *compile*
+error: `Buffer.from(x)`, `Buffer.byteLength(x)` and `Buffer.alloc(x)` are
+rejected outright when `x` is `any`, which is how most of the corpus writes
+them. It bites this module too — `Buffer.alloc(n)` only compiles for an
+integer **literal**, so `src/fs/streams.ts` allocates one 64K scratch buffer
+and slices it to the length a read asked for. Reads *with* an encoding return
+strings and are unaffected, which is why they are the surface that passes
+today. This one blocker is the first thing in the way of a third of the
+corpus.
 
-**[zun#14](https://github.com/UrubuCode/zun/issues/14) — the bare
-`assert(value)` form.** Node's `assert` is a function that also carries
-`strictEqual` & co., and `assert(fs.existsSync(dir))` fails with
-"call did not resolve to a method". 51 files in this corpus use the bare form at
-least once; it is the *first* blocker for 9 of them.
+**A `functionBox` is invisible to `Promise.prototype.then`** — worked around
+here. `typeof box === "function"` and `box()` calls it, but
+`Promise.resolve(1).then(box)` never invokes it: `promiseThen`'s
+`callback_arg` (`crates/zun_interp/src/collections.rs`) accepts only a
+`Value::Function`, so an object-wrapped callable silently becomes `None` and
+the reaction is attached with no handler. That stopped **21 of these 227
+files**, every one of them ending in `assert.rejects(…).then(common.mustCall())`
+— because `common.mustCall()` *has* to hand back a box: a function value
+returned out of an object-literal method reads back as `null`, and out of a
+class method as `undefined`.
 
-The issue says such a value cannot exist, and that turns out to be too strong:
-a function routed through a one-element array — the `functionBox` record
-`__evBox` already uses — **is** callable *and* accepts callable properties, at
-top level and from inside a nested function:
+The way out is that a **top-level function** can return a bare function value.
+So `tools/harness/common.ts` grew `__commonMustCall`, `__commonMustCallAtLeast`,
+`__commonMustNotCall` and `__commonMustSucceed` beside the four object-literal
+methods, and `tools/bundle_node_test.sh` rewrites `common.mustCall(` & co. to
+them. Nothing is lost by the bare form for these four: a bare function keeps
+its identity through an array or an object property on this engine, and none of
+the four wrappers carries an own property.
 
-```ts
-function box(fn: any): any { const holder: any[] = [fn]; return holder[0]; }
-const a: any = box(function (v: any, m?: any): void { /* assert.ok */ });
-a.strictEqual = function (x: any, y: any): void { /* … */ };
-a(true, "m");            // calls the box
-a.strictEqual(1, 1);     // calls the property
-```
+**[zun#34](https://github.com/UrubuCode/zun/issues/34) — a top-level
+destructuring is invisible to functions** — also worked around in the bundler.
+`const { sep } = path;` reads correctly at top level and raises a
+`ReferenceError` from inside any function, and `const { x } = require('m')` is
+how Node's tests spell half of their imports. The bundler now splits such a
+line into one member read per name (`const sep = path.sep;`), which is visible
+everywhere; it does so only when the right-hand side is a bare reference and
+every entry is a plain name or a `name: alias` pair.
 
-Both lines work today. Building `src/assert/assert.ts`'s export that way —
-every method assigned onto the box instead of being an object-literal member —
-would make the bare form work for this corpus and for `path`, `events` and `os`
-as well. It is a change to `assert`, not to `fs`, so it is left for whoever
-owns that module to land once.
+**A top-level `return`** is legal in a CommonJS module (the module body is a
+function) and is how seven files here spell an early `common.skip`. A bundle is
+one program, where the parser rejects it — so the bundler now wraps the test
+body in a function of its own when the source has one, and only then.
 
-**A `functionBox` is invisible to `Promise.prototype.then`** (not yet filed).
-`typeof box === "function"` and `box()` calls it, but `Promise.resolve(1).then(box)`
-never invokes it — the reaction is attached with no handler. `promiseThen`'s
-`callback_arg` (`crates/zun_interp/src/collections.rs:60`) accepts only
-`Value::Function`, so an object-wrapped callable silently becomes `None`. That
-is what stops the ten tests whose last line is
-`assert.rejects(…).then(common.mustCall())`: `common.mustCall()` has to return
-a box (a function value cannot be returned out of an object-literal method),
-and the box is then dropped.
+**BigInt `*` and `/` through `any`** (new, not filed): with both operands
+`any`-typed and holding BigInts, `a * b` and `a / b` raise
+`zun: runtime error: unhandled exception`, and a `typeof x === "bigint"`
+narrowing makes `/` **panic the interpreter** ("expected float, found Object",
+`crates/zun_interp/src/value.rs:157`) because the compiler emits float division
+for the narrowed `any`. The gate is `lhs.ty == Ty::BigInt && rhs.ty ==
+Ty::BigInt` in `crates/zun_sema/src/check/expr/operators.rs`, which a dynamic
+operand never satisfies; `+` and `-` happen to survive. `BigIntStats` divides
+nanoseconds by a million, so it goes through a float instead.
+
+**Node's `_write` is reached with a *string*.** `src/stream/stream.ts` keeps a
+written string as a string and only tags its encoding `"buffer"`, where Node's
+`decodeStrings: true` would have handed `_write` a `Buffer`. `src/fs/streams.ts`
+converts it (`__fsStreamBytes`). Without that conversion the string reaches
+`__fsAsBuffer`, whose cast is a lie for a string, and reading `.length` off it
+**abandons the running frame with no exception at all** — the caller resumes as
+though the call had returned, which inside `__sHookWrite`'s
+`return stream._write(...)` looks exactly like "this stream has no `_write`".
+That silent frame abandonment is worth filing on its own.
 
 Two smaller ones, each affecting a handful of files:
 
 * **[zun#9](https://github.com/UrubuCode/zun/issues/9)** — a string literal
   containing U+0000 is truncated at the NUL, so `test-fs-null-bytes.js` cannot
   even express its input.
-* **A top-level `return`** is legal in a CommonJS module (the module wrapper is
-  a function) and is how several tests spell an early `common.skip`. The bundle
-  is one program, not a function, so the parser rejects it. Wrapping the test
-  body in a function would fix it, and that is a bundler change rather than an
-  engine one.
+* **Stack exhaustion is not catchable.** `test-fs-readdir-stack-overflow.js`
+  asserts that an infinitely recursive `readdirSync` throws a `RangeError`
+  whose message is "Maximum call stack size exceeded"; here the run never
+  returns.
+
+One blocker in the old table is **gone**: the bare `assert(value)` form
+([zun#14](https://github.com/UrubuCode/zun/issues/14)) works on this engine
+build — `assert(true)` and `assert(fs.existsSync(dir))` both call through — so
+the nine files it used to stop are now counted under whatever is actually in
+front of them.

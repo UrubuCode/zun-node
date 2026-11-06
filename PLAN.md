@@ -321,17 +321,25 @@ gets deleted; nothing else in the tracker changes.
   errors and libuv-shaped `uvException`s, the recursive `cp`, then the
   **callback** API (argument errors thrown synchronously, operation errors
   delivered on a later tick) and **`fs.promises`** including `FileHandle`.
-  50 crate tests green (`cargo test`). **Not done:** `createReadStream`/
-  `createWriteStream` (needs `node:stream`), `watch`/`watchFile` (needs a
-  filesystem-event source in the VM loop), `glob`/`globSync` (needs a path
-  matcher), `openAsBlob` (needs `node:buffer`'s `Blob`); each throws
-  `ERR_METHOD_NOT_IMPLEMENTED` rather than being absent. The acceptance bar is
-  100% of Node 25's `test-fs-*` suite (227 files); the per-test blocker table is
-  in `test/fs/README.md`, and the two engine bugs that cap it are
+  `src/fs/streams.ts` adds `ReadStream`/`WriteStream` over `src/stream/stream.ts`
+  -- `createReadStream`, `createWriteStream`, `filehandle.createReadStream`, the
+  `options.fs` operations table a program can replace, `start`/`end`/`flush`,
+  and the `kIoDone` handshake that keeps a descriptor open under a pending
+  read; `src/fs/watchers.ts` adds `watch`/`watchFile`/`unwatchFile` and
+  `fsPromises.watch` as **pollers** over `setInterval`, which is what libuv
+  itself does for `watchFile` (`uv_fs_poll_t`, reproduced down to its
+  `busy_polling` tri-state) and what Node's own recursive fallback does for
+  `watch`; and `src/fs/internal.ts` exposes `internal/fs/utils`, the surface
+  six of Node's own tests drive directly under `--expose-internals`.
+  61 crate tests green (`cargo test`). **Not done:** `glob`/`globSync` (needs a
+  path matcher; no file in the corpus reaches them) and `openAsBlob` (needs
+  `node:buffer`'s `Blob`); both throw `ERR_METHOD_NOT_IMPLEMENTED` rather than
+  being absent. The acceptance bar is 100% of Node 25's `test-fs-*` suite
+  (227 files); the per-test blocker table is in `test/fs/README.md`, and what
+  caps it now is a single engine bug,
   [#38](https://github.com/UrubuCode/zun/issues/38) (a `Buffer` is opaque
-  through `any`, so a test body cannot call a method on one this module returns)
-  and [#14](https://github.com/UrubuCode/zun/issues/14) (the bare
-  `assert(value)` form).
+  through `any`, so a test body cannot call a method on one this module
+  returns), which is the first blocker for a third of the corpus.
 - **`node:events`: implemented in `src/events/events.ts`, measured against the
   full Node corpus.** The whole `EventEmitter` surface is there —
   `on`/`addListener`, `prependListener`, `once`, `prependOnceListener`,

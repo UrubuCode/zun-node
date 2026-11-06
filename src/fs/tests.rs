@@ -499,6 +499,32 @@ fn realpath_resolves_to_an_absolute_path_without_the_windows_prefix() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// A *root* keeps its trailing separator, which is what libuv reports and what
+/// `fs::canonicalize` normalises away. Node's own
+/// `test-fs-readfilesync-enoent.js` compares `realpathSync` of a drive or
+/// share root against `path.resolve` of the same string, so that one
+/// character is the whole difference between a pass and a failure there.
+#[cfg(windows)]
+#[test]
+fn realpath_keeps_the_trailing_separator_of_a_root() {
+    let reg = registry();
+
+    let drive = cstr("C:\\");
+    let resolved = payload(&reg, "fsRealpath", &[str_value(&drive)]);
+    assert_eq!(resolved, "C:\\", "a drive root keeps its separator");
+
+    // The share-root rule is exercised directly, because a UNC path needs a
+    // file server this test cannot assume: `\\host\share` gains a separator,
+    // anything deeper does not, and a drive-relative `C:` becomes `C:\`.
+    assert_eq!(crate::fs::meta::with_root_separator(r"\\host\share"), r"\\host\share\");
+    assert_eq!(
+        crate::fs::meta::with_root_separator(r"\\host\share\dir"),
+        r"\\host\share\dir"
+    );
+    assert_eq!(crate::fs::meta::with_root_separator("C:"), "C:\\");
+    assert_eq!(crate::fs::meta::with_root_separator(r"C:\Windows"), r"C:\Windows");
+}
+
 #[test]
 fn descriptor_operations_reach_the_file_through_the_table() {
     let reg = registry();
