@@ -64,6 +64,7 @@ use std::ffi::{CStr, CString};
 use zun_abi::{ZunFunction, ZunRegistry, ZunTy, ZunTyRepr, ZunValue, ZUN_ABI_V1};
 
 pub mod child_process;
+pub mod crypto;
 pub mod fs;
 pub mod os;
 pub mod process;
@@ -374,6 +375,12 @@ const CHILD_PROCESS_MODULE_KEYS: &[&[u8]] = &[b"node:child_process\0"];
 /// no extension at all. See `src/process/mod.rs`.
 const PROCESS_MODULE_KEYS: &[&[u8]] = &[b"node:process\0"];
 
+/// Module key the `crypto` natives are published under, on the same single-key
+/// rule. The Node-shaped module is `src/crypto/crypto.ts`, which imports this
+/// one and reshapes it into `Hash`/`Hmac`/`Cipheriv`/`Decipheriv`, the KDFs
+/// and the `random*` family; see `src/crypto/mod.rs`.
+const CRYPTO_MODULE_KEYS: &[&[u8]] = &[b"node:crypto\0"];
+
 /// Module key the `zlib` natives are published under, on the same single-key
 /// rule. The Node-shaped module is `src/zlib/zlib.ts`, which imports this one
 /// and reshapes it into the nine `Transform` classes and their convenience
@@ -419,6 +426,12 @@ pub unsafe extern "C" fn zun_register_v1(registry: *mut ZunRegistry) -> i32 {
     }
     for module in ZLIB_MODULE_KEYS {
         let status = unsafe { register_module(registry, module, zlib::DESCRIPTORS) };
+        if status != 0 {
+            return status;
+        }
+    }
+    for module in CRYPTO_MODULE_KEYS {
+        let status = unsafe { register_module(registry, module, crypto::DESCRIPTORS) };
         if status != 0 {
             return status;
         }

@@ -886,6 +886,61 @@ gets deleted; nothing else in the tracker changes.
   with 22 Rust tests over the engines plus a differential pass through the
   module's own `crc32`. Blocker table in `test/zlib/README.md`, per-test
   breakdown in `test/zlib/RESULTS.md`.
+- **`node:crypto`: the symmetric half implemented, TS over natives (the `os`
+  kind), in `src/crypto/*.rs` + `src/crypto/crypto.ts`.** The Rust half keeps
+  one hash/HMAC state or one cipher per handle in two handle tables of the
+  shape `src/fs/fd.rs` uses, and is built on RustCrypto one crate per
+  primitive: `md-5`/`sha1`/`sha2`/`sha3`/`ripemd`/`blake2` behind a single
+  `Box<dyn DynDigest>` table (which is why that trait set was chosen — a
+  type-per-algorithm handle table is not expressible), `aes` for the block
+  function with ECB, CBC+PKCS#7, CTR and GCM written over one `BlockKey` enum,
+  `ghash` and `poly1305` for the AEAD tags, `chacha20` for the stream cipher,
+  `scrypt` for RFC 7914, `subtle` for the constant-time compare and
+  `getrandom` for the OS CSPRNG. All pure Rust, which keeps principle 2's "an
+  extension carries no VM and no C toolchain" intact. HMAC, PBKDF2 and HKDF are
+  *not* taken from `hmac`/`pbkdf2`/`hkdf`: each of those is a generic
+  instantiation per digest, and all three are a dozen lines over `DynDigest`.
+  Every AEAD is incremental rather than buffered, because GCM decomposes into
+  CTR plus GHASH and ChaCha20-Poly1305 into ChaCha20 plus Poly1305, so
+  `update()` answers the bytes Node's `update()` answers.
+  The TypeScript half is `lib/crypto.js` plus `lib/internal/crypto/*`:
+  `Hash`/`Hmac`/`Cipheriv`/`Decipheriv` as real `Transform`s, the `create*`
+  factories, `crypto.hash()`'s one-shot in both third-argument forms, the three
+  KDFs in sync and callback form, the `random*` family (`randomInt`'s rejection
+  sampling and `randomUUID`'s layout included), `timingSafeEqual`, secret
+  `KeyObject`s, `generateKey`, `getHashes`/`getCiphers`/`getCurves`/
+  `getCipherInfo` over the real OpenSSL 3 NID table, `constants`, and
+  `subtle.digest`. The encoding handling is Node's instruction for instruction,
+  down to the single `StringDecoder` per cipher that makes a second, different
+  output encoding the `Cannot change encoding` assertion, and the errors carry
+  OpenSSL's own text (`error:1C800064:Provider routines::bad decrypt`) because
+  `test-crypto-padding.js` matches it as a literal. Only the *scheduling*
+  differs, for the reason `zlib` gives: the natives are synchronous and there is
+  no threadpool, so a KDF callback is computed now and delivered on the next
+  tick.
+  **Three things are deliberately not here.** The whole asymmetric surface —
+  `generateKeyPair`, sign/verify, `publicEncrypt`/`privateDecrypt`,
+  Diffie-Hellman, ECDH, X.509, the post-quantum families — which 72 of the
+  115 corpus files reach for and a larger piece of work than the symmetric half; every one
+  of those entry points is present and raises
+  `ERR_CRYPTO_UNSUPPORTED_OPERATION` rather than being absent, so a program
+  that reaches for one gets a diagnosable error. The CCM/OCB/XTS/key-wrap modes
+  and the legacy block ciphers (DES, Camellia, ARIA, SM4), which
+  `getCiphers()`/`getCipherInfo()` still *list* with OpenSSL's real NIDs and
+  sizes because those two functions describe algorithms rather than capability.
+  And WebCrypto beyond `subtle.digest`, which needs the `CryptoKey`
+  normalisation machinery the asymmetric half would bring with it.
+  Two engine gaps shape the corpus result: a typed array is opaque through an
+  `any` binding (zun#38), so a `Buffer` this module returns is unreadable in a
+  test even when its bytes are right — verified instead by 24 Rust vector tests
+  and a 165-value differential pass against Node over every string-valued path
+  — and the prelude's own `crypto` namespace is resolved in place of a user
+  declaration of that name inside a `function` body, which is zun#85's second
+  half (filed for `console`) landing on a second namespace, worked around in
+  `tools/bundle_node_test.sh` by rewriting `crypto` as a receiver to a second
+  name, exactly as it already does for `console` and `performance`. Blocker
+  table in `test/crypto/README.md`, per-test breakdown in
+  `test/crypto/RESULTS.md`.
 - **`node:readline` + `node:readline/promises`: complete, in three files —
   `src/readline/readline.ts`, `src/readline/callback.ts`,
   `src/readline/promises.ts`.** The whole line editor and the whole keypress
