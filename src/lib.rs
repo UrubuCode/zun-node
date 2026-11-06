@@ -63,6 +63,7 @@ use std::ffi::{CStr, CString};
 
 use zun_abi::{ZunFunction, ZunRegistry, ZunTy, ZunTyRepr, ZunValue, ZUN_ABI_V1};
 
+pub mod child_process;
 pub mod fs;
 pub mod os;
 
@@ -356,6 +357,12 @@ const FS_MODULE_KEYS: &[&[u8]] = &[b"node:fs\0"];
 /// `src/os/os.ts`, which imports this module and reshapes it. See `src/os/mod.rs`.
 const OS_MODULE_KEYS: &[&[u8]] = &[b"node:os\0"];
 
+/// Module key the `child_process` natives are published under, on the same
+/// single-key rule. The Node-shaped module is
+/// `src/child_process/child_process.ts`, which imports this one and reshapes it;
+/// see `src/child_process/mod.rs`.
+const CHILD_PROCESS_MODULE_KEYS: &[&[u8]] = &[b"node:child_process\0"];
+
 /// ABI v1 registration entry point. The host calls this once after loading the
 /// library, passing a validated [`ZunRegistry`]; it publishes every module.
 ///
@@ -377,6 +384,12 @@ pub unsafe extern "C" fn zun_register_v1(registry: *mut ZunRegistry) -> i32 {
     }
     for module in OS_MODULE_KEYS {
         let status = unsafe { register_module(registry, module, os::DESCRIPTORS) };
+        if status != 0 {
+            return status;
+        }
+    }
+    for module in CHILD_PROCESS_MODULE_KEYS {
+        let status = unsafe { register_module(registry, module, child_process::DESCRIPTORS) };
         if status != 0 {
             return status;
         }
