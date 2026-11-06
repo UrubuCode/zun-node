@@ -915,6 +915,34 @@ gets deleted; nothing else in the tracker changes.
   discarded (zun#78), and every regular expression is a hand-written scan,
   because a `RegExp` read out of a module-level `const` inside a function has
   lost its methods (zun#7). Table in `test/readline/README.md`.
+- **`node:dns` + `node:dns/promises`: implemented, TS over natives (the `os`
+  kind), in `src/dns/*.rs` + `src/dns/dns.ts`.** The Rust half is the system
+  resolver (`getaddrinfo`/`getnameinfo` through `libc` and `GetAddrInfoW`, with
+  libuv's `AI_*` flags and `NI_NAMEREQD`), the machine's resolver list
+  (`/etc/resolv.conf` on POSIX, `GetAdaptersAddresses` on Windows, with c-ares'
+  loopback fallback) and a stub resolver written against RFC 1035 — one question
+  per query over UDP with the TCP retry on truncation, and the thirteen record
+  types Node's `resolve*` family reports. A resolver crate was rejected for the
+  reason PLAN.md principle 2 gives: `hickory-resolver` in blocking mode still
+  brings a `tokio` reactor and ~90 transitive crates for one question with no
+  cache. The TypeScript half follows `lib/dns.js` and
+  `lib/internal/dns/*`: `isIP`
+  (hand-written, because `test-dns.js` feeds `setServers` 100 000 colons as a
+  ReDoS check), the `setServers` address grammar, the `lookup` argument cascade,
+  both `Resolver` classes, `DNSException`, the record shapes and the error
+  constants. It is deliberately written against a binding object shaped like
+  Node's `internalBinding('cares_wrap')` (`__dnsCares`), because nine files in
+  the corpus replace `getaddrinfo` / `getnameinfo` /
+  `ChannelWrap.prototype.queryA` on it before loading the module —
+  `tools/harness/binding.ts` serves `internal/test/binding` from that object.
+  The queries are synchronous (ABI v1 cannot complete a call later) and their
+  results are delivered through `process.nextTick`, so the callbacks still land
+  on a later tick and a `Resolver` still has a pending-query window for
+  `setServers` to refuse. 6/27, and the ceiling is elsewhere: nine tests need
+  `node:dgram`, three need `--dns-result-order`, and six are blocked by one
+  engine defect (a function returned across a dynamic call boundary becomes a
+  callable `Promise.prototype.then` will not invoke). Table in
+  `test/dns/README.md`.
 - **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
   `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
   `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,

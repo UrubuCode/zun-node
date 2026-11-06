@@ -15,7 +15,7 @@
 #     `zun run <bundle.ts>`, with no --ext. (`buffer` is TypeScript although
 #     `Buffer` itself is an engine realm global: the module is the surface
 #     around that global, not a second Buffer — see test/buffer/README.md.)
-#   * `process`, `os`, `fs`, `child_process` and `zlib` are Zun TypeScript
+#   * `process`, `os`, `fs`, `child_process`, `zlib` and `dns` are Zun TypeScript
 #     *over* a Rust zun_abi cdylib, so they need both: the bundle from
 #     tools/bundle_node_test.sh and `--ext`. The cdylib is therefore built before
 #     any of them is measured. `process` is the one that also changes how the
@@ -34,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       module:
-        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, stream, diagnostics_channel, console, perf_hooks, readline, process, os, fs, child_process, zlib, … or "all")
+        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, stream, diagnostics_channel, console, perf_hooks, readline, process, os, fs, child_process, zlib, dns, … or "all")
         default: all
       limit:
         description: Only the first N tests (0 = all)
@@ -92,7 +92,7 @@ jobs:
           ZUN="$PWD/target/debug/zun"
           EXT="$PWD/zun-node/target/debug/libzun_node.so"
           case "$MODULE" in
-            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks readline process os fs child_process zlib";;
+            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks readline process os fs child_process zlib dns";;
             *)   MODULES="$MODULE";;
           esac
           test -f "$EXT" || { echo "extension cdylib missing: $EXT" >&2; exit 1; }

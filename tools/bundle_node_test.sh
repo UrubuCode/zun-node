@@ -166,6 +166,11 @@ crypto __node_crypto -
 test __node_test test
 tty __node_tty -
 worker_threads __node_worker_threads -
+dns __node_dns Resolver
+dns/promises __node_dns_promises -
+internal/test/binding __node_internal_test_binding -
+internal/errors __node_internal_errors -
+[.][.]/common/internet __node_harness_internet -
 perf_hooks __node_perf_hooks PerformanceEntry,PerformanceMark,PerformanceMeasure,PerformanceObserver,PerformanceObserverEntryList,PerformanceResourceTiming,Performance,createHistogram,monitorEventLoopDelay
 "
 
@@ -306,6 +311,13 @@ internal/util/inspect src/readline/readline.ts
 [.][.]/common/arraystream src/string_decoder/string_decoder.ts
 [.][.]/common/arraystream src/stream/stream.ts
 [.][.]/common/arraystream tools/harness/arraystream.ts
+dns src/dns/dns.ts
+dns/promises src/dns/dns.ts
+internal/test/binding src/dns/dns.ts
+internal/test/binding tools/harness/binding.ts
+internal/errors src/dns/dns.ts
+internal/errors tools/harness/binding.ts
+[.][.]/common/internet tools/harness/internet.ts
 "
 
 # The harness, which stands on everything above it.
@@ -569,6 +581,23 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
   # *format* is an octal escape and would emit a U+0001 instead.
   if requires_module "readline"; then
     printf '%s\n' "s#\([A-Za-z_\$][A-Za-z0-9_\$]*\)\.\([A-Za-z_\$][A-Za-z0-9_\$]*\)\.apply(\1,[[:space:]]*\([^()]*\))#__rlApply(\1, \"\2\", \3)#g"
+  fi
+
+  # Engine workaround (https://github.com/UrubuCode/zun/issues/18):
+  # `<alias>.promises.Resolver` becomes the class `DnsPromiseResolver`.
+  #
+  # `node:dns` and `node:dns/promises` both bind the name `Resolver`, to two
+  # different classes (callback-shaped queries and promise-shaped ones), and
+  # `new <object>.Ctor()` does not reach a constructor in this engine -- while
+  # two top-level declarations of one name are a compile error, so the two
+  # classes cannot both be called `Resolver`. The promise one is therefore
+  # declared as `DnsPromiseResolver` in src/dns/dns.ts, and the spelling
+  # Node's own tests use for it is rewritten to that name. The rule is
+  # semantics-preserving (the two denote the same class) and is emitted only
+  # for a test that requires `dns`, which is also what puts the class in the
+  # bundle.
+  if requires_module "dns"; then
+    printf '%s\n' "s#\([A-Za-z_\$][A-Za-z0-9_\$]*\)\.promises\.Resolver\b#DnsPromiseResolver#g"
   fi
 
   printf '%s\n' "$MODULE_SPECS" | while read -r name obj canons; do
