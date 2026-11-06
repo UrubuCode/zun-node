@@ -91,6 +91,12 @@ case "$MODULE" in
   # src/child_process/*.rs, Node's shape in src/child_process/child_process.ts.
   child_process)
           KIND="zun-ts+ext"; PATTERNS="test-child-process";               PATTERN="test-child-process";;
+  # `diagnostics_channel` and `console` are both pure Zun TypeScript: a channel
+  # is a map and a list, and a console is formatting plus a `write` call, so
+  # neither has a syscall of its own to put behind the ABI.
+  diagnostics_channel)
+          KIND="zun-ts";     PATTERNS="test-diagnostics-channel";         PATTERN="test-diagnostics-channel";;
+  console) KIND="zun-ts";    PATTERNS="test-console";                     PATTERN="test-console";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 

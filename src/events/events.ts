@@ -265,13 +265,17 @@ function __evReceived(value: any): string {
 // carry: this is simply the correct shape.
 //
 // `name` is not overridden: a subclass of `TypeError` already reports
-// `"TypeError"`. `toString()` is, on all three, because Node overrides it: a
+// `"TypeError"`, which is what Node reports too. `toString()` **is**
+// overridden, on all three, because Node overrides it: every error built by
+// `lib/internal/errors.js`' `E()` carries
+// `toString() { return `${this.name} [${code}]: ${this.message}`; }`, so a
 // coded error prints `TypeError [ERR_INVALID_ARG_TYPE]: <message>` although
 // `err.name` stays `"TypeError"`. That is not cosmetic —
 // `assert.throws(fn, /ERR_SOMETHING/)` matches the regular expression against
 // `String(err)`, which is how a large part of Node's corpus spells its
-// expectations (eleven files in the `stream` corpus alone), and without the
-// code in the string form none of them can pass.
+// expectations (eleven files in the `stream` corpus alone, and
+// `test-diagnostics-channel-symbol-named.js` does nothing else), and without
+// the code in the string form none of them can pass.
 class NodeTypeError extends TypeError {
   code: string = "";
   constructor(code: string, message: string) {

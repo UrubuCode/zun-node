@@ -50,6 +50,19 @@ reproduces.
   bundler. All three fail to compile on engine gaps, so the decoder is verified
   by a differential run against Node over 1248 cases with zero divergences; see
   `string_decoder/README.md`.
+- `diagnostics_channel/` — the full 49-file `test-diagnostics-channel*` corpus,
+  through the bundler. Twenty-four of those files instrument `http`, `http2`,
+  `net`, `dgram`, `worker_threads`, `cluster` or the module loader rather than
+  the channels; of the twenty-five that are the module itself, twelve pass, and
+  `diagnostics_channel/README.md` names the blocker for each of the rest —
+  seven of them the same one, `this` not being threaded into a callable held in
+  an `any`. It also records the two engine bugs this corpus found, and the one
+  green result that should not be trusted.
+- `console/` — the full 22-file `test-console*` corpus, through the bundler.
+  Nine of those files need `node:stream` to build something to write into;
+  `console/README.md` names the rest, and documents the two engine behaviours
+  that make the identifier `console` unusable as a method receiver — which is
+  why `tools/bundle_node_test.sh` rewrites it.
 - `fs/` — the full 227-file `test-fs-*` inventory. It measures 0% until the
   Node-API shaping over the extension natives (Buffers, fds, callbacks/promises,
   full `Stats`) and the `test/fixtures/` tree exist; see `fs/README.md`.

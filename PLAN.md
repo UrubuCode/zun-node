@@ -756,6 +756,55 @@ gets deleted; nothing else in the tracker changes.
   and the renamed member spelling — which lifted `events` from 6/35 to 12/35 on
   their own. Blocker-by-blocker table in `test/stream/README.md`, per-test
   breakdown in `test/stream/RESULTS.md`.
+- **`node:diagnostics_channel`: complete, in
+  `src/diagnostics_channel/diagnostics_channel.ts`.** `channel`,
+  `hasSubscribers`, `subscribe`/`unsubscribe`, the `Channel` class (`publish`,
+  `subscribe`, `unsubscribe`, `hasSubscribers`, `name`,
+  `bindStore`/`unbindStore`/`runStores`) and `tracingChannel` with its five
+  sub-channels and `traceSync`/`tracePromise`/`traceCallback`. Pure computation
+  (principle 2), following `lib/diagnostics_channel.js`: the copy-on-write
+  subscriber list, the "reaching zero subscribers does not delete the channel"
+  rule, the nesting order of `bindStore` transforms, and a throwing subscriber
+  contained and re-raised through `process.nextTick` are all observable through
+  the corpus. Two shapes differ: there is **one `Channel` class** branching on
+  `_subscribers === undefined` rather than Node's `Channel`/`ActiveChannel`
+  prototype swap (there is no prototype model to move an object between,
+  [zun#25](https://github.com/UrubuCode/zun/issues/25)), and the channel map's
+  weak references are pruned on access instead of by a `FinalizationRegistry`
+  (whose `register` resolves only where the receiver's static type is known at
+  the call site). The ceiling is `this`: eight of Node's tests assert
+  `this === thisArg` inside the function handed to `runStores`/`trace*`, and no
+  receiver can be threaded into a callable held in an `any`
+  ([zun#1](https://github.com/UrubuCode/zun/issues/1)). Table in
+  `test/diagnostics_channel/README.md`.
+- **`node:async_hooks` (dependency slice): `src/async_hooks/async_hooks.ts`.**
+  `AsyncLocalStorage` only — `getStore`, `run`, `exit`, `enterWith`, `disable`
+  — because `Channel.bindStore`/`runStores` are defined in terms of one
+  (principle 4). It is a **synchronous** context: exact for the synchronous
+  extent of a callback, nesting correctly and restoring on a throw, but a
+  context does not survive an `await` or a scheduled callback. That propagation
+  is a VM facility (V8 promise hooks plus libuv async-resource bookkeeping) with
+  no counterpart in the unified loop of NUCLEUS §9a, and the gap is documented
+  in the file's header rather than faked.
+- **`node:console`: complete, in `src/console/console.ts`.** The `Console`
+  class with both constructor forms, all nineteen methods, per-instance group
+  indentation, the `colorMode`/`inspectOptions` interaction, `console.table`'s
+  exact box rendering (a port of `lib/internal/cli_table.js` with a real
+  `getStringWidth`, so a full-width character takes two columns), the
+  `time`/`timeLog`/`timeEnd`/`formatTime` half of
+  `lib/internal/util/debuglog.js`, and the five `console.<level>` diagnostics
+  channels. It is the **second module inlined into every bundle** after
+  `timers`, for the same kind of reason: `console` is a *global* in Node, and
+  the engine's prelude `console` has five of the nineteen methods with a
+  compile error for the rest. Two engine behaviours make the identifier
+  `console` unusable as a receiver — eleven method names are intercepted and
+  lowered to the prelude with no user-declaration guard, and a module-level
+  `const console` is invisible to `console.<method>` inside a function — so
+  `src/console/global.ts` binds the one object under two names and the bundler
+  rewrites receiver positions to the second. `console.table`'s accumulator is a
+  `Map` rather than Node's `{ __proto__: null }`, which is the CVE-2022-21824
+  fix carried over to an engine where a null-prototype object is not a safe
+  accumulator either (zun#46, zun#47). Table in `test/console/README.md`.
 - **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
   `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
   `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,

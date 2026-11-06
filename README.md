@@ -29,7 +29,17 @@ A Node module lands here in whichever form fits what it actually does:
   *inside* the engine, so there is nothing for a native to do. It reaches that
   tier through `import { timers } from "zun:core"`, and it declares the six
   timer globals itself, which is what gives Node's own signatures to every
-  bundle.
+  bundle. `diagnostics_channel`
+  (`src/diagnostics_channel/diagnostics_channel.ts`) is pure computation again —
+  a channel is a map, a list and a few calls — and it brings an
+  `AsyncLocalStorage` with it (`src/async_hooks/async_hooks.ts`), because
+  `Channel.bindStore`/`runStores` are defined in terms of one. `console`
+  (`src/console/console.ts`) is the second module after `timers` that has to be
+  inlined into *every* bundle, and for the same kind of reason: `console` is a
+  global in Node, while the engine's prelude `console` has five of its nineteen
+  methods and a compile error for the rest. The binding that shadows it is one
+  file of its own (`src/console/global.ts`), so that a test declaring its own
+  `console` can still be bundled.
 - **Zun TypeScript over natives** — both, with the seam drawn where the
   capability changes. `os` is the first: the facts it reports are syscalls
   (`src/os/`, Rust), while the module *Node* exposes is objects, arrays,
@@ -669,3 +679,15 @@ To debug a single test by hand, bundle it and run the bundle:
 bash zun-node/tools/bundle_node_test.sh path/to/test-path-join.js /tmp/bundle.ts
 target/debug/zun run /tmp/bundle.ts
 ```
+
+<!-- node-diagnostics_channel:start -->
+### Node.js v25 `diagnostics_channel` compatibility
+
+`█████░░░░░░░░░░░░░░░░░░░` **24.4%** — 12 / 49 Node `test-diagnostics-channel*` tests passing
+<!-- node-diagnostics_channel:end -->
+
+<!-- node-console:start -->
+### Node.js v25 `console` compatibility
+
+`███████░░░░░░░░░░░░░░░░░` **31.8%** — 7 / 22 Node `test-console*` tests passing
+<!-- node-console:end -->
