@@ -30,6 +30,16 @@
 #     name `EventEmitter` bound to that class; only the *other* destructured
 #     names are taken from `__node_events`.
 #
+#   * `stream` is the same case six times over: `Stream`, `Readable`,
+#     `Writable`, `Duplex`, `Transform` and `PassThrough` all have to stay
+#     bound to their classes, so the canonical column is a comma-separated
+#     **list**. Three further rewrites come with it, all of them engine
+#     workarounds and all generic over that column: a member read through the
+#     module alias (`stream.Readable` -> `Readable`, zun#18), a renamed
+#     destructuring (`const { Readable: R } = require('stream')`, zun#21) and
+#     the renamed member spelling (`const EE = require('events').EventEmitter`).
+#     The last two are why `events` reads 12/35 rather than 6/35.
+#
 #   * `util/types` is the *same object* as `util.types`, and `internal/util` is
 #     `util`'s own implementation surface (`sleep`, `emitExperimentalWarning`,
 #     `pendingDeprecate`, `customPromisifyArgs`), which lives in
@@ -129,7 +139,16 @@ timers __node_timers setTimeout
 timers/promises __node_timers_promises -
 child_process __node_child_process -
 domain __node_domain -
-stream __node_stream -
+stream __node_stream Stream,Readable,Writable,Duplex,Transform,PassThrough
+stream/promises __node_stream_promises -
+stream/web __node_stream_web -
+stream/consumers __node_stream_consumers -
+internal/streams/add-abort-signal __node_internal_streams_add_abort_signal -
+_stream_readable Readable Readable
+_stream_writable Writable Writable
+_stream_duplex Duplex Duplex
+_stream_transform Transform Transform
+_stream_passthrough PassThrough PassThrough
 vm __node_vm -
 crypto __node_crypto -
 test __node_test test
@@ -179,6 +198,24 @@ os src/os/os.ts
 buffer src/buffer/buffer.ts
 string_decoder src/buffer/buffer.ts
 string_decoder src/string_decoder/string_decoder.ts
+stream src/buffer/buffer.ts
+stream src/string_decoder/string_decoder.ts
+stream src/stream/stream.ts
+stream/promises src/buffer/buffer.ts
+stream/promises src/string_decoder/string_decoder.ts
+stream/promises src/stream/stream.ts
+stream/web src/buffer/buffer.ts
+stream/web src/string_decoder/string_decoder.ts
+stream/web src/stream/stream.ts
+stream/consumers src/buffer/buffer.ts
+stream/consumers src/string_decoder/string_decoder.ts
+stream/consumers src/stream/stream.ts
+_stream_readable src/buffer/buffer.ts
+_stream_readable src/string_decoder/string_decoder.ts
+_stream_readable src/stream/stream.ts
+internal/streams/add-abort-signal src/buffer/buffer.ts
+internal/streams/add-abort-signal src/string_decoder/string_decoder.ts
+internal/streams/add-abort-signal src/stream/stream.ts
 test tools/harness/node_test.ts
 punycode src/punycode/deprecation.ts
 fs src/fs/fs.ts
@@ -237,8 +274,13 @@ FILES="$FILES$HARNESS_FILES"
 # ---------------------------------------------------------------------------
 # Build the sed program that rewrites the test body.
 # ---------------------------------------------------------------------------
+# `$LATE` collects the rules that must be the *last* in the sed program: the
+# body-wide alias renames, which may only run once every `require(...)` call
+# has been rewritten. The loop below runs in a pipeline subshell, so a file is
+# the only way to carry them out of it.
 REWRITE="$(mktemp)"
-trap 'rm -f "$REWRITE"' EXIT
+LATE="$(mktemp)"
+trap 'rm -f "$REWRITE" "$LATE"' EXIT
 
 {
   # Strip the CommonJS strict-mode pragma: the bundle is one program and the
@@ -259,54 +301,109 @@ trap 'rm -f "$REWRITE"' EXIT
   printf "s|require('\\(node:\\)\\{0,1\\}path/posix')|posix|g\n"
   printf "s|require('\\(node:\\)\\{0,1\\}path/win32')|win32|g\n"
 
-  printf '%s\n' "$MODULE_SPECS" | while read -r name obj canon; do
+  printf '%s\n' "$MODULE_SPECS" | while read -r name obj canons; do
     [ -n "${name:-}" ] || continue
     pat="require('\\(node:\\)\\{0,1\\}$name')"
 
-    # A module may have SEVERAL canonical bindings, comma-separated: `assert`
-    # is bound three times over -- as the callable module object (`assert`), as
-    # the `Assert` class and as the `strict` surface -- because all three are
-    # top-level declarations in src/assert/assert.ts and all three are spellings
-    # Node's own test files use. The rules below are emitted once per binding;
-    # the generic `require(...)` -> object rewrite is emitted after the whole
-    # list, so a later binding's rules still see the original `require` call.
-    if [ "$canon" != "-" ]; then
-      for one in $(printf '%s' "$canon" | tr ',' ' '); do
+    # The canonical-binding column is a comma-separated **list**, because a
+    # module may be bound several times over: `assert` three times -- as the
+    # callable module object (`assert`), as the `Assert` class and as the
+    # `strict` surface -- and `stream` six (`Stream`, `Readable`, `Writable`,
+    # `Duplex`, `Transform`, `PassThrough`), where `events` has one. Each of
+    # those names is a top-level declaration of its own in the inlined source
+    # and each is a spelling Node's own test files use, so every rule below is
+    # emitted once per name. The generic `require(...)` -> object rewrite is
+    # emitted after the whole list, so a later binding's rules still see the
+    # original `require` call.
+    #
+    # Every sed address here is delimited with `%` rather than `/`, because a
+    # specifier may contain a slash (`internal/assert/myers_diff`,
+    # `stream/promises`, `internal/streams/add-abort-signal`).
+    for canon in $(printf '%s' "$canons" | tr ',' ' '); do
+      [ "$canon" != "-" ] || continue
+
+      # A **renamed** destructuring of a canonical binding --
+      # `const { Readable: R } = require('stream')`, which four of the
+      # `test-stream2-*` files open with -- cannot keep the new name: a class
+      # base must be the original class's own identifier, so `class T extends R`
+      # is rejected outright (https://github.com/UrubuCode/zun/issues/21) and
+      # `new R()` over a class *value* answers undefined at run time. The two
+      # names denote the same class, so the alias is collapsed back to the
+      # canonical one: `Readable: R` in the brace list becomes `Readable`
+      # (which the removal rules below then drop), and every later `R` becomes
+      # `Readable`. That second, body-wide rename is deferred to the end of the
+      # sed program (see $LATE): emitted here it would run *before* the generic
+      # `require(...)` rewrites and could rewrite a specifier still spelled out
+      # on another line -- `const { strict: assert } = require('assert')` would
+      # turn every later `require('assert')` into `require('strict')`.
+      for alias in $(sed -n "s%^[[:space:]]*\(const\|let\|var\)[[:space:]]*{[^}]*$canon[[:space:]]*:[[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)[^}]*}[[:space:]]*=[[:space:]]*require('\(node:\)\{0,1\}$name')[[:space:]]*;.*\$%\2%p" "$SRC" | sort -u); do
+        [ "$alias" != "$canon" ] || continue
+        printf "\%%%s%%{ s#%s[[:space:]]*:[[:space:]]*%s#%s#g; }\n" "$pat" "$canon" "$alias" "$canon"
+        printf "s#\\\\b%s\\\\b#%s#g\n" "$alias" "$canon" >> "$LATE"
+      done
+
+      # The same collapse for the member spelling with a new name:
+      # `const EE = require('events').EventEmitter;` -- `class T extends EE`
+      # is the same rejected alias (zun#21).
+      for alias in $(sed -n "s%^[[:space:]]*\(const\|let\|var\)[[:space:]]\{1,\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=[[:space:]]*require('\(node:\)\{0,1\}$name')\.$canon[[:space:]]*;.*\$%\2%p" "$SRC" | sort -u); do
+        [ "$alias" != "$canon" ] || continue
+        printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}%s[[:space:]]*=[[:space:]]*%s\.%s[[:space:]]*;[[:space:]]*\$##\n" "$alias" "$pat" "$canon"
+        printf "s#\\\\b%s\\\\b#%s#g\n" "$alias" "$canon" >> "$LATE"
+      done
+
       # `const <canon> = require('<name>');`  -> the binding already exists.
-      printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}%s[[:space:]]*=[[:space:]]*%s[[:space:]]*;[[:space:]]*\$##
-" "$one" "$pat"
+      printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}%s[[:space:]]*=[[:space:]]*%s[[:space:]]*;[[:space:]]*\$##\n" "$canon" "$pat"
       # `const <canon> = require('<name>').<canon>;`  (events' two spellings).
-      printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}%s[[:space:]]*=[[:space:]]*%s\.%s[[:space:]]*;[[:space:]]*\$##
-" "$one" "$pat" "$one"
+      printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}%s[[:space:]]*=[[:space:]]*%s\.%s[[:space:]]*;[[:space:]]*\$##\n" "$canon" "$pat" "$canon"
       # A destructuring that names the canonical binding keeps that name bound
       # to the existing one; drop it from the brace list -- wherever it sits in
-      # the list -- and let the rest come from the module object. The address is
-      # delimited with `%` rather than `/` because a specifier may contain a
-      # slash (`internal/assert/myers_diff`).
-      printf "\%%%s%%{ s#,[[:space:]]*%s[[:space:]]*,#,#; }
-" "$pat" "$one"
-      printf "\%%%s%%{ s#{[[:space:]]*%s[[:space:]]*,[[:space:]]*#{ #; }
-" "$pat" "$one"
-      printf "\%%%s%%{ s#,[[:space:]]*%s[[:space:]]*}# }#; }
-" "$pat" "$one"
-      printf "\%%%s%%{ s#{[[:space:]]*%s[[:space:]]*}#{}#; }
-" "$pat" "$one"
+      # the list -- and let the rest come from the module object.
+      printf "\%%%s%%{ s#,[[:space:]]*%s[[:space:]]*,#,#; }\n" "$pat" "$canon"
+      printf "\%%%s%%{ s#{[[:space:]]*%s[[:space:]]*,[[:space:]]*#{ #; }\n" "$pat" "$canon"
+      printf "\%%%s%%{ s#,[[:space:]]*%s[[:space:]]*}# }#; }\n" "$pat" "$canon"
+      printf "\%%%s%%{ s#{[[:space:]]*%s[[:space:]]*}#{}#; }\n" "$pat" "$canon"
       # `const { } = require(...)` after that removal is a no-op line.
-      printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}{}[[:space:]]*=[[:space:]]*%s[[:space:]]*;[[:space:]]*\$##
-" "$pat"
-      printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}{[[:space:]]*}[[:space:]]*=[[:space:]]*%s[[:space:]]*;[[:space:]]*\$##
-" "$pat"
-      done
-    fi
+      printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}{}[[:space:]]*=[[:space:]]*%s[[:space:]]*;[[:space:]]*\$##\n" "$pat"
+      printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}{[[:space:]]*}[[:space:]]*=[[:space:]]*%s[[:space:]]*;[[:space:]]*\$##\n" "$pat"
+    done
 
     # A bare `require('<name>');` for its side effects only.
-    printf "s#^%s[[:space:]]*;[[:space:]]*\$##
-" "$pat"
+    printf "s#^%s[[:space:]]*;[[:space:]]*\$##\n" "$pat"
     # Everything else -- `const x = require('m')`, `require('m').member`,
     # `const { a, b } = require('m')` -- becomes the module object in place.
-    printf "s#%s#%s#g
-" "$pat" "$obj"
+    printf "s#%s#%s#g\n" "$pat" "$obj"
   done
+
+  # Engine workaround (https://github.com/UrubuCode/zun/issues/18): `new
+  # <object>.Ctor()` compiles but answers `undefined is not a function` at run
+  # time, so a test that keeps the module object in a local and constructs
+  # through it -- `const stream = require('stream'); new stream.Readable()`,
+  # which 54 of the 204 files in the stream corpus do -- cannot reach the
+  # class at all. Every canonical binding is already a top-level name in the
+  # bundle, so a member read of one through the local alias is rewritten to
+  # that name: `stream.Readable` becomes `Readable`, which denotes the same
+  # object and only changes the lane the engine takes. The rule is skipped
+  # when the alias *is* the canonical name (`const path = require('path')`
+  # must keep `path.join` as it is).
+  printf '%s\n' "$MODULE_SPECS" | while read -r name obj canons; do
+    [ -n "${name:-}" ] || continue
+    [ "${canons:-}" != "-" ] || continue
+    aliases="$(sed -n "s%^[[:space:]]*\(const\|let\|var\)[[:space:]]\{1,\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=[[:space:]]*require('\(node:\)\{0,1\}$name')[[:space:]]*;.*\$%\2%p" "$SRC" | sort -u)"
+    for alias in $aliases; do
+      for canon in $(printf '%s' "$canons" | tr ',' ' '); do
+        [ "$alias" != "$canon" ] || continue
+        printf "s#\\\\b%s\\.%s\\\\b#%s#g\n" "$alias" "$canon" "$canon"
+      done
+    done
+  done
+
+  # The body-wide alias renames, last of all: by this point every
+  # `require('<specifier>')` in the body has already become its module object,
+  # so a one-letter alias (`R`, `W`, `D`, `EE`, `SD`) can no longer collide
+  # with a specifier that is still spelled out. `__node_assert` and friends are
+  # out of reach too, since `_` is a word character and `\b` does not match
+  # inside them.
+  cat "$LATE"
 } > "$REWRITE"
 
 # ---------------------------------------------------------------------------

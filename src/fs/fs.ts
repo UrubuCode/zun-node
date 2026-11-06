@@ -192,12 +192,6 @@ class ERR_FS_CP_NON_DIR_TO_DIR extends NodeError {
   }
 }
 
-class ERR_METHOD_NOT_IMPLEMENTED extends NodeError {
-  constructor(name: string) {
-    super("ERR_METHOD_NOT_IMPLEMENTED", "The " + name + " method is not implemented");
-  }
-}
-
 class ERR_INVALID_FILE_URL_SCHEME extends NodeTypeError {
   constructor() {
     super(

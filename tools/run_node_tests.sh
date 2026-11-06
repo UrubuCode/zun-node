@@ -36,7 +36,7 @@
 #
 # Usage:
 #   tools/run_node_tests.sh --zun <path> [--ext <lib>] [--tag v25.0.0]
-#       [--module fs|path|events|buffer|string_decoder] [--limit N] [--timeout 20]
+#       [--module fs|path|events|buffer|string_decoder|stream] [--limit N] [--timeout 20]
 set -u
 
 ZUN=""; EXT=""; TAG="v25.0.0"; MODULE="fs"; LIMIT=0; TIMEOUT=20
@@ -74,6 +74,14 @@ case "$MODULE" in
   # `URLPattern` is a `node:url` export in Node 25, so those files are part of
   # this module's bar rather than a different one's.
   url)         KIND="zun-ts"; PATTERNS="test-url";                        PATTERN="test-url";;
+  # `stream`'s corpus is five prefixes, and naming each one is the point:
+  # `test-stream-` is the bulk, `test-stream2-` and `test-stream3-` are the two
+  # historical rewrites Node still ships under their old names, `test-streams-`
+  # is the one file about the module surface itself, and `test-readable-` covers
+  # `Readable.from` and the async iterator -- that last one shares no prefix
+  # with the others at all.
+  stream)      KIND="zun-ts"; PATTERNS="test-stream- test-stream2- test-stream3- test-streams- test-readable-";
+               PATTERN="test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-";;
   fs)     KIND="zun-ts+ext"; PATTERNS="test-fs-";                         PATTERN="test-fs-";;
   # `timers`' corpus is `test-timers*`, which includes `test-timers.js` itself.
   # The module is pure Zun TypeScript: the VM already owns the event loop, so
