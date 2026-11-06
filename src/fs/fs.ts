@@ -212,6 +212,52 @@ class ERR_INVALID_FILE_URL_SCHEME extends NodeTypeError {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The two tables of entry points this file does not itself implement
+// ---------------------------------------------------------------------------
+//
+// `fs.createReadStream`/`createWriteStream` live in `src/fs/streams.ts`, which
+// stands on `node:stream`; `fs.watch`/`watchFile`/`unwatchFile` live in
+// `src/fs/watchers.ts`. Both are appended only when a bundle actually gets
+// them (tools/bundle_node_test.sh's CONDITIONAL_FILES), because this file is
+// inlined for `../common/tmpdir` as well — 160 of the `fs` corpus' files reach
+// it that way — and a `path` or `events` bundle must not grow a stream module
+// it never uses.
+//
+// Until a file overwrites its slots, each one throws
+// `ERR_METHOD_NOT_IMPLEMENTED` with the name Node gives it, so a test that
+// reaches an absent half fails with a named gap rather than
+// "undefined is not a function".
+const __fsStreamHooks: any = {
+  createReadStream(path: any, options?: any): any {
+    throw new ERR_METHOD_NOT_IMPLEMENTED("fs.createReadStream");
+  },
+  createWriteStream(path: any, options?: any): any {
+    throw new ERR_METHOD_NOT_IMPLEMENTED("fs.createWriteStream");
+  },
+  handleReadStream(handle: any, options?: any): any {
+    throw new ERR_METHOD_NOT_IMPLEMENTED("filehandle.createReadStream");
+  },
+  handleWriteStream(handle: any, options?: any): any {
+    throw new ERR_METHOD_NOT_IMPLEMENTED("filehandle.createWriteStream");
+  },
+};
+
+const __fsWatchHooks: any = {
+  watch(path: any, options?: any, listener?: any): any {
+    throw new ERR_METHOD_NOT_IMPLEMENTED("fs.watch");
+  },
+  watchFile(path: any, options?: any, listener?: any): any {
+    throw new ERR_METHOD_NOT_IMPLEMENTED("fs.watchFile");
+  },
+  unwatchFile(path: any, listener?: any): void {
+    throw new ERR_METHOD_NOT_IMPLEMENTED("fs.unwatchFile");
+  },
+  promisesWatch(path: any, options?: any): any {
+    throw new ERR_METHOD_NOT_IMPLEMENTED("fsPromises.watch");
+  },
+};
+
 // Raise the failure the last native call left in the error slots. Every
 // fallible native funnels through here, so the shape of an `fs` error is
 // defined in exactly one place.
@@ -444,7 +490,10 @@ function __fsIsEncoding(value: any): boolean {
 function __fsAssertEncoding(encoding: any): void {
   if (encoding === undefined || encoding === null) return;
   if (!__fsIsEncoding(encoding)) {
-    throw new ERR_INVALID_ARG_VALUE("encoding", encoding, "is invalid");
+    // Node's reason is the two words "is invalid encoding", not "is invalid":
+    // `test-fs-internal-assertencoding.js` exists only to pin that message
+    // (the arguments used to be the other way round in Node itself).
+    throw new ERR_INVALID_ARG_VALUE("encoding", encoding, "is invalid encoding");
   }
 }
 
@@ -580,6 +629,55 @@ class Stats {
   ctime: any = undefined;
   birthtime: any = undefined;
 
+  // Node's `Stats` is a function-constructor taking the fourteen fields
+  // positionally, and two of its own tests build the object they expect that
+  // way: `test-fs-watchfile.js` and `test-fs-watchfile-bigint.js` compare a
+  // hand-built all-zero `Stats` with what a `watchFile` on a missing path
+  // reports. Every parameter is optional because this module's own
+  // `__fsStatsFromFields` constructs an empty one and fills it in field by
+  // field; `dev` standing in for "was anything passed at all" is what keeps
+  // that path from overwriting itself with `undefined`.
+  //
+  // The four `Date`s are own fields here rather than Node's memoising lazy
+  // accessors, so they are computed with the rest. Node rounds the
+  // millisecond value before handing it to `Date` (nodejs/node#43714).
+  constructor(
+    dev?: any,
+    mode?: any,
+    nlink?: any,
+    uid?: any,
+    gid?: any,
+    rdev?: any,
+    blksize?: any,
+    ino?: any,
+    size?: any,
+    blocks?: any,
+    atimeMs?: any,
+    mtimeMs?: any,
+    ctimeMs?: any,
+    birthtimeMs?: any,
+  ) {
+    if (dev === undefined) return;
+    this.dev = dev;
+    this.mode = mode;
+    this.nlink = nlink;
+    this.uid = uid;
+    this.gid = gid;
+    this.rdev = rdev;
+    this.blksize = blksize;
+    this.ino = ino;
+    this.size = size;
+    this.blocks = blocks;
+    this.atimeMs = atimeMs;
+    this.mtimeMs = mtimeMs;
+    this.ctimeMs = ctimeMs;
+    this.birthtimeMs = birthtimeMs;
+    this.atime = new Date(Math.round(Number(atimeMs)));
+    this.mtime = new Date(Math.round(Number(mtimeMs)));
+    this.ctime = new Date(Math.round(Number(ctimeMs)));
+    this.birthtime = new Date(Math.round(Number(birthtimeMs)));
+  }
+
   isDirectory(): boolean {
     return __fsCheckMode(this.mode, __FS_S_IFDIR);
   }
@@ -611,6 +709,70 @@ class BigIntStats extends Stats {
   mtimeNs: any = 0;
   ctimeNs: any = 0;
   birthtimeNs: any = 0;
+
+  // Node's signature takes the *nanosecond* fields in the last four slots and
+  // derives the millisecond ones from them, which is why a hand-built
+  // `BigIntStats` in a test is written with `0n` throughout.
+  constructor(
+    dev?: any,
+    mode?: any,
+    nlink?: any,
+    uid?: any,
+    gid?: any,
+    rdev?: any,
+    blksize?: any,
+    ino?: any,
+    size?: any,
+    blocks?: any,
+    atimeNs?: any,
+    mtimeNs?: any,
+    ctimeNs?: any,
+    birthtimeNs?: any,
+  ) {
+    super(
+      dev,
+      mode,
+      nlink,
+      uid,
+      gid,
+      rdev,
+      blksize,
+      ino,
+      size,
+      blocks,
+      __fsNsToMs(atimeNs),
+      __fsNsToMs(mtimeNs),
+      __fsNsToMs(ctimeNs),
+      __fsNsToMs(birthtimeNs),
+    );
+    if (dev === undefined) return;
+    this.atimeNs = atimeNs;
+    this.mtimeNs = mtimeNs;
+    this.ctimeNs = ctimeNs;
+    this.birthtimeNs = birthtimeNs;
+  }
+}
+
+// `atimeNs / kNsPerMsBigInt` — Node's is exact BigInt division.
+//
+// BigInt `/` cannot be used here: it **panics the interpreter** when the
+// operands are `bigint`-narrowed out of an `any` ("expected float, found
+// Object", crates/zun_interp/src/value.rs:157) and raises an unhandled
+// exception when they are plain `any`s holding BigInts —
+//
+//     const a: any = BigInt(5000000); const b: any = BigInt(1000000);
+//     String(a / b);   // zun: runtime error: unhandled exception
+//
+// — so the division goes through a float, exactly as `__fsStatsFromFields`
+// already does for the same four fields. A nanosecond count is ~1.8e18, which
+// a double cannot hold exactly, but the *quotient* (~1.8e12 ms) is well inside
+// 2^53, so the result is off by under a millisecond rather than rounded.
+function __fsNsToMs(nanoseconds: any): any {
+  if (nanoseconds === undefined || nanoseconds === null) return nanoseconds;
+  if (typeof nanoseconds === "bigint") {
+    return BigInt(Math.trunc(Number(String(nanoseconds)) / __FS_STAT_NS_PER_MS));
+  }
+  return Math.trunc(Number(nanoseconds) / __FS_STAT_NS_PER_MS);
 }
 
 const __FS_STAT_NS_PER_MS: number = 1000000;
@@ -772,9 +934,14 @@ class Dir {
   entries: any[] = [];
   index: number = 0;
   closed: boolean = false;
-  constructor(path: any, entries: any[]) {
+  // Both parameters are optional so that `new fs.Dir()` compiles: Node's own
+  // test-fs-read.js asserts that the no-argument form throws
+  // `ERR_MISSING_ARGS` at **run time**, and a required parameter makes it a
+  // compile error in this engine instead.
+  constructor(path?: any, entries?: any[]) {
+    if (path === undefined) throw new ERR_MISSING_ARGS("handle");
     this.path = path;
-    this.entries = entries;
+    this.entries = entries === undefined ? [] : entries;
   }
   readSync(): any {
     if (this.index >= Number(this.entries.length)) return null;
@@ -950,16 +1117,38 @@ function __fsWriteFileSync(file: any, data: any, options?: any): void {
     flag: "w",
     flush: false,
   });
+  // `flush` is a boolean or nothing, and the check precedes every other piece
+  // of work: `test-fs-write-file-flush.js` and `test-fs-append-file-flush.js`
+  // pass a string, a number, an array, an object and a symbol and want
+  // `ERR_INVALID_ARG_TYPE` from each.
+  const flush: any = resolved.flush;
+  if (flush !== undefined && flush !== null) {
+    __fsValidateBoolean(flush, "options.flush");
+  }
   const base64: string = __fsDataToBase64(data, resolved.encoding);
   const mode: number = __fsParseFileMode(resolved.mode, "mode", 0o666);
 
   if (typeof file === "number") {
     const fd: number = __fsGetValidatedFd(file);
     __fsOne(__fsNative.fsWrite(fd, base64, -1));
+    // A descriptor the caller owns is flushed but never closed.
+    if (flush === true) __fsFsyncSync(fd);
     return;
   }
   const target: string = __fsGetValidatedPath(file);
   const flags: number = __fsStringToFlags(resolved.flag, "flag");
+  if (flush === true) {
+    // Node opens, writes, `fsync`s and closes; the native does the first two
+    // in one call, so the flush needs its own descriptor over the same path.
+    __fsVoid(__fsNative.fsWriteFile(target, base64, flags, mode));
+    const handle: number = __fsOpenSync(target, "r+", mode);
+    try {
+      __fsFsyncSync(handle);
+    } finally {
+      __fsCloseSync(handle);
+    }
+    return;
+  }
   __fsVoid(__fsNative.fsWriteFile(target, base64, flags, mode));
 }
 
@@ -968,6 +1157,7 @@ function __fsAppendFileSync(file: any, data: any, options?: any): void {
     encoding: "utf8",
     mode: 0o666,
     flag: "a",
+    flush: false,
   });
   if (resolved.flag === undefined || resolved.flag === null) resolved.flag = "a";
   __fsWriteFileSync(file, data, resolved);
@@ -1836,13 +2026,23 @@ const fs: any = {
     const answer: boolean = __fsExistsSync(path);
     __fsDeliver(target, [answer]);
   },
+  // `fchmod`/`fchown` validate `fd` and the rest **before** the callback, and
+  // the order is observable: `fs.fchmod(1, '123x')` is an
+  // `ERR_INVALID_ARG_VALUE` about the mode in Node, not an
+  // `ERR_INVALID_ARG_TYPE` about the missing callback
+  // (`test-fs-fchmod.js`, `test-fs-fchown.js`).
   fchmod(fd: any, mode: any, callback?: any): void {
+    __fsGetValidatedFd(fd);
+    __fsParseFileMode(mode, "mode");
     __fsRunAsync(callback, function (): any {
       __fsFchmodSync(fd, mode);
       return undefined;
     });
   },
   fchown(fd: any, uid: any, gid: any, callback?: any): void {
+    __fsGetValidatedFd(fd);
+    __fsValidateInteger(uid, "uid", -1, __FS_UINT32_MAX);
+    __fsValidateInteger(gid, "gid", -1, __FS_UINT32_MAX);
     __fsRunAsync(callback, function (): any {
       __fsFchownSync(fd, uid, gid);
       return undefined;
@@ -2165,22 +2365,32 @@ const fs: any = {
     });
   },
 
-  // ---- the gaps, named rather than absent --------------------------------
+  // ---- the two streams, which live in src/fs/streams.ts -------------------
+  //
+  // `fs.ReadStream`/`fs.WriteStream` stand on `node:stream`, and this file has
+  // to keep compiling in a bundle with no stream module in it (160 of the
+  // corpus' files pull `fs` in only through `../common/tmpdir`). So the
+  // classes are a second file, appended after `src/stream/stream.ts`, and the
+  // two entry points go through the hook table that file overwrites.
   createReadStream(path: any, options?: any): any {
-    throw new ERR_METHOD_NOT_IMPLEMENTED("fs.createReadStream");
+    return __evCall(__fsStreamHooks.createReadStream, [path, options]);
   },
   createWriteStream(path: any, options?: any): any {
-    throw new ERR_METHOD_NOT_IMPLEMENTED("fs.createWriteStream");
+    return __evCall(__fsStreamHooks.createWriteStream, [path, options]);
   },
+
+  // ---- the watchers, src/fs/watchers.ts ------------------------------------
   watch(path: any, options?: any, listener?: any): any {
-    throw new ERR_METHOD_NOT_IMPLEMENTED("fs.watch");
+    return __evCall(__fsWatchHooks.watch, [path, options, listener]);
   },
   watchFile(path: any, options?: any, listener?: any): any {
-    throw new ERR_METHOD_NOT_IMPLEMENTED("fs.watchFile");
+    return __evCall(__fsWatchHooks.watchFile, [path, options, listener]);
   },
   unwatchFile(path: any, listener?: any): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED("fs.unwatchFile");
+    __evCall(__fsWatchHooks.unwatchFile, [path, listener]);
   },
+
+  // ---- the gaps, named rather than absent --------------------------------
   openAsBlob(path: any, options?: any): any {
     throw new ERR_METHOD_NOT_IMPLEMENTED("fs.openAsBlob");
   },
@@ -2384,10 +2594,10 @@ class FileHandle {
     });
   }
   createReadStream(options?: any): any {
-    throw new ERR_METHOD_NOT_IMPLEMENTED("filehandle.createReadStream");
+    return __evCall(__fsStreamHooks.handleReadStream, [this, options]);
   }
   createWriteStream(options?: any): any {
-    throw new ERR_METHOD_NOT_IMPLEMENTED("filehandle.createWriteStream");
+    return __evCall(__fsStreamHooks.handleWriteStream, [this, options]);
   }
 }
 
@@ -2564,7 +2774,7 @@ const __fsPromises: any = {
     });
   },
   watch(path: any, options?: any): any {
-    throw new ERR_METHOD_NOT_IMPLEMENTED("fsPromises.watch");
+    return __evCall(__fsWatchHooks.promisesWatch, [path, options]);
   },
 };
 

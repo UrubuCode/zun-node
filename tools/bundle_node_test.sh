@@ -133,7 +133,8 @@ querystring __node_querystring -
 punycode __node_punycode -
 url __node_url -
 internal/url __node_internal_url -
-fs __node_fs -
+fs __node_fs Stats,BigIntStats,Dirent,Dir,StatsFs,FSWatcher,StatWatcher
+internal/fs/utils __node_internal_fs_utils -
 fs/promises __node_fs_promises -
 timers __node_timers setTimeout
 timers/promises __node_timers_promises -
@@ -266,6 +267,20 @@ src/process/native.ts
 # `Readable`. The serializer itself is pure computation over the engine's
 # `Buffer` and a `DataView`.
 #
+# `fs` is six files rather than one, and the split is the same argument
+# `readline`'s is. `src/fs/fs.ts` is the Node API, `src/fs/streams.ts` is
+# `ReadStream`/`WriteStream` and therefore needs `stream` (and `buffer` and
+# `string_decoder` under it), and `src/fs/watchers.ts` is
+# `watch`/`watchFile`, which needs nothing but `timers`. The reason `fs.ts`
+# does not simply name those classes is `../common/tmpdir` below: 160 of the
+# `fs` corpus' files reach `fs` *only* through it, as do tests in the `zlib`,
+# `readline` and `domain` corpora, and a bundle that wants a temp directory
+# must not grow a 5,000-line stream module. So `tmpdir` lists `fs.ts` and
+# `watchers.ts` and stops there, and `fs.ts` reaches the two stream entry
+# points through a hook table that keeps throwing
+# `ERR_METHOD_NOT_IMPLEMENTED` until `streams.ts` overwrites it.
+# `internal/fs/utils` is the same set plus `src/fs/internal.ts`.
+#
 # One line per module: `<specifier> <file>`. The files are appended in this
 # order, after BUNDLE_FILES and before the harness.
 CONDITIONAL_FILES="
@@ -306,15 +321,33 @@ zlib src/stream/stream.ts
 zlib src/zlib/zlib.ts
 test tools/harness/node_test.ts
 punycode src/punycode/deprecation.ts
+fs src/buffer/buffer.ts
+fs src/string_decoder/string_decoder.ts
+fs src/stream/stream.ts
 fs src/fs/fs.ts
+fs src/fs/streams.ts
+fs src/fs/watchers.ts
+internal/fs/utils src/buffer/buffer.ts
+internal/fs/utils src/string_decoder/string_decoder.ts
+internal/fs/utils src/stream/stream.ts
+internal/fs/utils src/fs/fs.ts
+internal/fs/utils src/fs/streams.ts
+internal/fs/utils src/fs/watchers.ts
+internal/fs/utils src/fs/internal.ts
+fs/promises src/buffer/buffer.ts
+fs/promises src/string_decoder/string_decoder.ts
+fs/promises src/stream/stream.ts
 fs/promises src/fs/fs.ts
+fs/promises src/fs/streams.ts
+fs/promises src/fs/watchers.ts
 child_process src/child_process/child_process.ts
 async_hooks src/async_hooks/async_hooks.ts
 domain src/domain/domain.ts
 diagnostics_channel src/async_hooks/async_hooks.ts
 diagnostics_channel src/diagnostics_channel/diagnostics_channel.ts
-[.][.]/common/tmpdir src/fs/fs.ts
-[.][.]/common/tmpdir tools/harness/tmpdir.ts
+[^']*common/tmpdir src/fs/fs.ts
+[^']*common/tmpdir src/fs/watchers.ts
+[^']*common/tmpdir tools/harness/tmpdir.ts
 [.][.]/common/hijackstdio tools/harness/hijackstdio.ts
 perf_hooks src/perf_hooks/perf_hooks.ts
 readline src/buffer/buffer.ts
@@ -386,7 +419,7 @@ canon_of() { printf '%s\n' "$MODULE_SPECS" | awk -v m="$1" '$1 == m { print $3 }
 #
 # A plain name is tested in-shell against the source read once (a `grep` per
 # conditional file cost ~3 s per bundle on Windows); a name written as a regex
-# (`[.][.]/common/tmpdir`) still goes through grep.
+# (`[^']*common/tmpdir`) still goes through grep.
 SRC_TEXT="$(<"$SRC")"
 module_required() {
   case "$SRC_TEXT" in
@@ -400,6 +433,103 @@ requires_module() {
     *) module_required "$1";;
   esac
 }
+
+# ---------------------------------------------------------------------------
+# Destructuring a module object (https://github.com/UrubuCode/zun/issues/34)
+# ---------------------------------------------------------------------------
+#
+# A top-level destructuring binding is invisible to every function in the
+# program:
+#
+#     const ns = { sep: "/" };
+#     const { sep } = ns;
+#     console.log(sep);                 // "/"
+#     function f() { console.log(sep); }
+#     f();                              // ReferenceError
+#
+# and `const { sep } = require('path')` is how Node's tests spell half of their
+# imports, so a test that uses such a name inside *any* function fails with a
+# ReferenceError that has nothing to do with what it is testing
+# (`test-fs-make-callback.js` is one line of `${tmpdir.path}${sep}` inside a
+# helper).
+#
+# A member read of the same object is visible everywhere, so the pattern is
+# rewritten into one binding per name, on one line so that every later line
+# keeps its number:
+#
+#     const { a, b: c } = __node_path;  ->  const a = __node_path.a; const c = __node_path.b;
+#
+# The right-hand side has to be a **bare reference** -- an identifier, or an
+# identifier followed by a member path (`__node_fs.promises`, which is how
+# `require('fs').promises` lands, or `fs.promises` through the test's own
+# alias) -- and every entry in the brace list has to be a plain name or a
+# `name: alias` pair. That is what makes the split safe: a bare reference is
+# read the same way either side of the rewrite. A call, an `await`, a default,
+# a rest element or a nested pattern is left exactly as written, because the
+# point is to dodge one engine bug rather than to reimplement destructuring.
+#
+# This runs after the whole $REWRITE program, so it sees the module objects the
+# `require` rules have already substituted in.
+UNPACK_MODULE_DESTRUCTURING='
+{
+  line = $0;
+  if (line ~ /^[[:space:]]*(const|let|var)[[:space:]]*\{[^{}]*\}[[:space:]]*=[[:space:]]*[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z0-9_$]+)*[[:space:]]*;[[:space:]]*$/) {
+    kw = line; sub(/^[[:space:]]*/, "", kw); sub(/[[:space:]].*$/, "", kw);
+    obj = line; sub(/^.*=[[:space:]]*/, "", obj); sub(/[[:space:]]*;[[:space:]]*$/, "", obj);
+    inner = line; sub(/^[^{]*\{/, "", inner); sub(/\}[^}]*$/, "", inner);
+    count = split(inner, parts, ",");
+    out = ""; ok = 1;
+    for (i = 1; i <= count; i++) {
+      entry = parts[i];
+      gsub(/^[[:space:]]+/, "", entry); gsub(/[[:space:]]+$/, "", entry);
+      if (entry == "") continue;
+      if (entry ~ /^[A-Za-z_$][A-Za-z0-9_$]*$/) {
+        out = out kw " " entry " = " obj "." entry "; ";
+      } else if (entry ~ /^[A-Za-z_$][A-Za-z0-9_$]*[[:space:]]*:[[:space:]]*[A-Za-z_$][A-Za-z0-9_$]*$/) {
+        key = entry; sub(/[[:space:]]*:.*$/, "", key);
+        name = entry; sub(/^[^:]*:[[:space:]]*/, "", name);
+        out = out kw " " name " = " obj "." key "; ";
+      } else { ok = 0; break; }
+    }
+    if (ok == 1 && out != "") { print out; next; }
+  }
+  print line;
+}
+'
+
+# ---------------------------------------------------------------------------
+# A top-level `return`
+# ---------------------------------------------------------------------------
+#
+# CommonJS runs a module body inside a function wrapper, so a top-level
+# `return` is legal in a Node test, and it is how a dozen of them spell an
+# early `common.skip`:
+#
+#     if (common.isWindows) { common.skip('...'); return; }
+#
+# A bundle is one *program*, where the parser rejects that outright -- the test
+# then fails on a parse error rather than on whatever it is really about, or,
+# as with the seven `fs` files that open this way, rather than skipping
+# cleanly. So the test body -- and only the body, never the inlined modules --
+# is wrapped in a function of its own when the source has such a `return`.
+#
+# The wrapper is conditional rather than unconditional on purpose: it turns
+# every top-level declaration in the test into a function-local one. That is
+# the scope CommonJS gives them, but it is *not* the scope the rest of this
+# bundler's rewriting assumes (a deleted `const assert = require('assert')`
+# resolves to the inlined top-level binding either way, but a test whose own
+# declaration shadows an inlined name behaves differently inside a function),
+# so a file that does not need the wrapper does not get it.
+#
+# The test is lexical: a `return` at an indentation shallow enough to be
+# top-level in a Node test file. Node's style indents a nested `return` by at
+# least four spaces inside a function, and the `if (...) { ...; return; }`
+# skips above are at two.
+if grep -Eq '^[[:space:]]{0,3}return[[:space:]]*;' "$SRC"; then
+  WRAP_BODY=1
+else
+  WRAP_BODY=0
+fi
 
 # The final file list: the always-inlined modules, then the extension-backed
 # ones this test actually requires, then the harness.
@@ -511,6 +641,35 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
   printf "s|^\(const\|let\|var\)[[:space:]]\{1,\}tmpdir[[:space:]]*=[[:space:]]*require('[^']*common/tmpdir\(\.js\)\{0,1\}')[[:space:]]*;[[:space:]]*\$||\n"
   printf "s|require('[^']*common/tmpdir\(\.js\)\{0,1\}')|tmpdir|g\n"
   printf "s|require('\\.\\./common')|common|g\n"
+
+  # A `common` helper handed straight to `Promise.prototype.then` / `.catch` /
+  # `.finally` is rewritten to the top-level spelling in
+  # tools/harness/common.ts.
+  #
+  # An object-literal method cannot return a function value in this engine, so
+  # `common.mustCall()` answers a `functionBox` -- and `then` drops a box
+  # silently, because `promiseThen`'s `callback_arg` accepts only a
+  # `Value::Function` (the full explanation is on `__commonMustCall` in that
+  # file). The top-level functions hand back the bare wrapper, which `then`
+  # does invoke; 21 of the 227 files in the `fs` corpus end in
+  # `assert.rejects(...).then(common.mustCall())` and ran *none* of their
+  # assertions before this.
+  #
+  # The rewrite is deliberately scoped to that one position rather than to
+  # every `common.mustCall` in the file. The box is not a wart: a bare
+  # function reaches `src/domain/domain.ts`' `intercept` and comes back
+  # boxed, so `assert.strictEqual(err.domainBound, mustNotCall)` in
+  # `test-domain-intercept.js` stops holding -- and a reaction position is
+  # exactly where the box is useless, since it is never called at all.
+  # `mustCallAtLeast` is listed before `mustCall` so that the longer name
+  # wins.
+  printf "s|\\.then(common\\.mustCallAtLeast|.then(__commonMustCallAtLeast|g\n"
+  printf "s|\\.then(common\\.mustCall|.then(__commonMustCall|g\n"
+  printf "s|\\.then(common\\.mustNotCall|.then(__commonMustNotCall|g\n"
+  printf "s|\\.then(common\\.mustSucceed|.then(__commonMustSucceed|g\n"
+  printf "s|\\.catch(common\\.mustCall|.catch(__commonMustCall|g\n"
+  printf "s|\\.catch(common\\.mustNotCall|.catch(__commonMustNotCall|g\n"
+  printf "s|\\.finally(common\\.mustCall|.finally(__commonMustCall|g\n"
 
   # `path/posix` and `path/win32` are bound inside path.ts under those names.
   printf "s|require('\\(node:\\)\\{0,1\\}path/posix')|posix|g\n"
@@ -804,7 +963,9 @@ EOF_FILES
   echo "const __filename: string = $(json_string "$TEST_PATH");"
   echo "const __dirname: string = $(json_string "$TEST_DIR");"
   echo "// ==== test body ===="
-  sed -f "$REWRITE" "$SRC"
+  if [ "$WRAP_BODY" = 1 ]; then echo "function __zunTestBody(): void {"; fi
+  sed -f "$REWRITE" "$SRC" | awk "$UNPACK_MODULE_DESTRUCTURING"
+  if [ "$WRAP_BODY" = 1 ]; then echo "}"; echo "__zunTestBody();"; fi
   echo "// ==== harness epilogue: settle the loop, emit 'exit', check call counts ===="
   echo "__zunHarnessFinish();"
 } > "$OUT"

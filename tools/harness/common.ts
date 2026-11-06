@@ -72,7 +72,7 @@ function __harnessFail(message: string): void {
 }
 
 // `common.mustCall` / `common.mustCallAtLeast` share this wrapper.
-function __mustCallInner(fn: any, criteria: any, field: string): any {
+function __mustCallInner(fn: any, criteria: any, field: string, bare?: any): any {
   let target: any = fn;
   let expected: any = criteria;
   if (typeof fn === "number") {
@@ -101,7 +101,73 @@ function __mustCallInner(fn: any, criteria: any, field: string): any {
     for (let i = 0; i < count; i++) passed.push(arguments[i]);
     return __evCall(target, passed);
   };
+  // `bare` asks for the wrapper itself rather than the box -- see the
+  // `__commonMustCall` family below for the one caller that needs it.
+  if (bare === true) return wrapper;
   return __evBox(wrapper);
+}
+
+// ---------------------------------------------------------------------------
+// The un-boxed spellings: `common.mustCall` & co. as top-level functions
+// ---------------------------------------------------------------------------
+//
+// A `functionBox` is invisible to `Promise.prototype.then`. `typeof box` is
+// `"function"` and `box()` calls it, but `Promise.resolve(1).then(box)` never
+// invokes it: `promiseThen`'s `callback_arg`
+// (crates/zun_interp/src/collections.rs) accepts only a `Value::Function`, so
+// an object-wrapped callable silently becomes `None` and the reaction is
+// attached with no handler. That is what stops every test whose last line is
+// `assert.rejects(...).then(common.mustCall())` -- 21 of the 227 files in the
+// `fs` corpus alone.
+//
+// A *bare* function works there, and a bare function is what a **top-level
+// function** can hand back: the value is lost only on the way out of an
+// object-literal method (the caller reads `null`) or a class method
+// (`undefined`), which is why the object above has to box. So the four
+// helpers exist twice: as the object-literal methods, unchanged, and as these
+// top-level functions, which `tools/bundle_node_test.sh` rewrites
+// `.then(common.mustCall` and its siblings to.
+//
+// The rewrite is scoped to a *reaction position* -- `.then(`, `.catch(`,
+// `.finally(` -- and not to every `common.mustCall` in a file, because the
+// box is not a wart. A bare function handed to `src/domain/domain.ts`'
+// `intercept` comes back boxed, so `test-domain-intercept.js`'
+// `assert.strictEqual(err.domainBound, mustNotCall)` stops holding if the
+// helper hands out a bare one everywhere. A reaction is the one position
+// where the box buys nothing, since it is never invoked at all.
+function __commonMustCall(fn?: any, exact?: any): any {
+  return __mustCallInner(fn, exact, "exact", true);
+}
+
+function __commonMustCallAtLeast(fn?: any, minimum?: any): any {
+  return __mustCallInner(fn, minimum, "minimum", true);
+}
+
+function __commonMustNotCall(message?: any): any {
+  const label: string =
+    message === undefined || message === null
+      ? "function should not have been called"
+      : String(message);
+  return function (): any {
+    __harnessFail(label);
+    throw new Error(label);
+  };
+}
+
+function __commonMustSucceed(fn?: any, exact?: any): any {
+  const inner: any = function (): any {
+    const err: any = arguments[0];
+    if (err !== undefined && err !== null) {
+      __harnessFail("mustSucceed received an error: " + String(err.message));
+      throw err;
+    }
+    if (fn === undefined || fn === null) return undefined;
+    const passed: any[] = [];
+    const count = Number(arguments.length);
+    for (let i = 1; i < count; i++) passed.push(arguments[i]);
+    return __evCall(fn, passed);
+  };
+  return __mustCallInner(inner, exact, "exact", true);
 }
 
 function __runCallChecks(): void {

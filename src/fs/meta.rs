@@ -107,10 +107,39 @@ pub(crate) unsafe extern "C" fn fs_realpath(
         Err(status) => return status,
     };
     let payload = match fs::canonicalize(path) {
-        Ok(resolved) => ok_one(&strip_verbatim(&resolved.to_string_lossy())),
+        Ok(resolved) => ok_one(&with_root_separator(&strip_verbatim(
+            &resolved.to_string_lossy(),
+        ))),
         Err(err) => fail_io("realpath", &err, path),
     };
     unsafe { ret_str(out, &payload) }
+}
+
+/// libuv reports a *root* with its trailing separator -- `C:\`,
+/// `\\server\share\` -- while `fs::canonicalize` normalises it away, so it is
+/// put back. Node's own `test-fs-readfilesync-enoent.js` compares
+/// `realpathSync` of a file-server share root against `path.resolve` of the
+/// same string, and the two differ by exactly that character.
+#[cfg(windows)]
+pub(crate) fn with_root_separator(path: &str) -> String {
+    // `C:` -> `C:\`
+    if path.len() == 2 && path.as_bytes()[1] == b':' {
+        return format!("{path}\\");
+    }
+    // `\\server\share` -> `\\server\share\` (exactly two components after the
+    // leading pair of separators; anything deeper is not a root).
+    if let Some(rest) = path.strip_prefix(r"\\") {
+        let separators = rest.matches('\\').count();
+        if !rest.is_empty() && separators == 1 && !rest.ends_with('\\') {
+            return format!("{path}\\");
+        }
+    }
+    path.to_owned()
+}
+
+#[cfg(not(windows))]
+pub(crate) fn with_root_separator(path: &str) -> String {
+    path.to_owned()
 }
 
 /// Drop Windows' extended-length prefix: `\\?\C:\x` → `C:\x`, and

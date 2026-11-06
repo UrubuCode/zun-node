@@ -168,21 +168,29 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-fs:start -->
 ### Node.js v25 `fs` compatibility
 
-`████░░░░░░░░░░░░░░░░░░░░` **18.0%** — 41 / 227 Node `test-fs-*` tests passing
+`██████████░░░░░░░░░░░░░░` **42.2%** — 96 / 227 Node `test-fs-*` tests passing
 <!-- node-fs:end -->
 
 > `fs` is implemented as **TS over natives**, the `os` kind: `src/fs/*.rs` holds
 > the syscalls and the descriptor table, [`src/fs/fs.ts`](src/fs/fs.ts) holds
 > the Node module — the whole synchronous surface with Node's option shapes,
 > `Stats`/`BigIntStats`/`Dirent`/`Dir`/`StatsFs`, `fs.constants`, the `ERR_*`
-> and libuv-shaped errors, the callback API and `fs.promises`. Streams, `watch`
-> and `glob` are named gaps (they need `node:stream`, a loop event source and a
-> path matcher). What caps the number is not the library but two engine limits:
-> a `Buffer` is opaque through `any`
+> and libuv-shaped errors, the callback API and `fs.promises`. Three more files
+> complete it: [`src/fs/streams.ts`](src/fs/streams.ts) is
+> `ReadStream`/`WriteStream` over [`src/stream/stream.ts`](src/stream/stream.ts),
+> [`src/fs/watchers.ts`](src/fs/watchers.ts) is `watch`/`watchFile`/
+> `unwatchFile`/`fsPromises.watch` as pollers — which is what libuv itself is
+> for `watchFile` and what Node's own recursive fallback is for `watch` — and
+> [`src/fs/internal.ts`](src/fs/internal.ts) is the `internal/fs/utils` surface
+> six of Node's tests drive directly. Only `glob` (no file in the corpus
+> reaches it) and `openAsBlob` (needs `node:buffer`'s `Blob`) are still named
+> gaps. What caps the number is not the library but one engine limit: a
+> `Buffer` is opaque through `any`
 > ([zun#38](https://github.com/UrubuCode/zun/issues/38)), so a test file cannot
-> call a method on one this module returns, and the bare `assert(value)` form
-> ([zun#14](https://github.com/UrubuCode/zun/issues/14)) is used by 51 of the
-> 227 files. Per-test breakdown and the full blocker table:
+> call a method on one this module returns, nor pass an `any` to
+> `Buffer.from`/`byteLength`/`alloc`
+> ([zun#58](https://github.com/UrubuCode/zun/issues/58)) — which is how most of
+> the corpus is written. Per-test breakdown and the full blocker table:
 > [`test/fs/README.md`](test/fs/README.md),
 > [`test/fs/RESULTS.md`](test/fs/RESULTS.md).
 
