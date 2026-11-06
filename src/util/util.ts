@@ -33,14 +33,20 @@
 // has:
 //
 //   * **Typed arrays, `ArrayBuffer`, `DataView`.** `const o: any = new
-//     Uint8Array([1,2,3])` loses everything: `o.length`, `o[0]`, `o.byteLength`,
-//     `o.buffer`, `o.constructor` are all `undefined`, `Object.keys(o)` is
-//     empty, and `Object.prototype.toString.call(o)` answers `[object Object]`.
-//     There is therefore no way to tell a typed array from a plain object, let
-//     alone read its elements, so `inspect` prints it as `{}` and every
-//     `types.isTypedArray` / `types.isUint8Array` / `types.isArrayBuffer`
-//     predicate answers `false`. Statically typed code can still index one; the
-//     `any` boundary is where it goes dark. (New bug, reported with this work.)
+//     Uint8Array([1,2,3])` loses almost everything: `o.length`, `o[0]`,
+//     `o.byteLength`, `o.buffer`, `o.constructor` are all `undefined`,
+//     `Object.keys(o)` is empty, and `Object.prototype.toString.call(o)`
+//     answers `[object Object]`. Statically typed code can still index one; the
+//     `any` boundary is where it goes dark.
+//     The two *predicates* the engine still answers through an `any` are
+//     `ArrayBuffer.isView` and `Buffer.isBuffer`, which is what
+//     `types.isArrayBufferView` and `types.isUint8Array` are, and what lets
+//     `inspect` print `<Buffer 61 62>` for a byte view instead of `{}`. The
+//     bytes themselves are reachable only by passing the value *into* a
+//     `Buffer`-typed parameter. Everything else — `types.isTypedArray` (it
+//     would have to exclude `DataView`, and nothing separates them),
+//     `types.isArrayBuffer`, the per-kind predicates — stays `false`.
+//     (zun#38, reported with this work.)
 //   * **Boxed primitives** (`new Number(1)`, `new String('a')`,
 //     `new Boolean(true)`) are indistinguishable from `{}`, so
 //     `[Number: 1]` cannot be produced and `types.isNumberObject` and friends
@@ -1204,6 +1210,26 @@ function __utilFormatValue(ctx: any, value: any, recurseTimes: number): string {
     return __utilFormatFunctionValue(ctx, value, recurseTimes);
   }
 
+  // A byte view is the one built-in whose inspected form Node defines in
+  // `lib/buffer.js` rather than in `lib/internal/util/inspect.js`:
+  // `Buffer.prototype[util.inspect.custom]` answers `<Buffer 61 62>`, and with
+  // `customInspect: false` — which is what `assert` uses for its diff — the
+  // generic typed-array form `Buffer(2) [Uint8Array] [ 97, 98 ]` shows through.
+  // Both are produced here rather than in `src/buffer/buffer.ts` because `util`
+  // is inlined into every bundle while `buffer` is conditional, and because a
+  // byte view read through `any` is opaque in this engine — the bytes have to
+  // be taken by a `Buffer`-typed parameter (zun#38). `INSPECT_MAX_BYTES` is
+  // kept in this file for the same reason, and `node:buffer`'s accessor pair
+  // writes through to it.
+  //
+  // The engine's `Buffer` is a nominal alias for the `Uint8Array` byte-view
+  // floor, so `Buffer.isBuffer` cannot tell the two apart and a real
+  // `Uint8Array` inspects as a `Buffer` here; Node prints
+  // `Uint8Array(2) [ 1, 2 ]` for that one. No engine predicate separates them.
+  if (Buffer.isBuffer(value)) {
+    return __utilFormatByteView(ctx, value, recurseTimes);
+  }
+
   if (ctx.customInspect === true) {
     const maybeCustom: any = value[__inspectCustomSymbol];
     if (__utilIsFn(maybeCustom)) {
@@ -1546,6 +1572,97 @@ function __utilFormatArray(ctx: any, value: any, recurseTimes: number): string[]
     output.push("... " + String(remaining) + " more item" + (remaining > 1 ? "s" : ""));
   }
   return output;
+}
+
+// ---------------------------------------------------------------------------
+// Byte views: `<Buffer 61 62>` and `Buffer(2) [Uint8Array] [ 97, 98 ]`
+// ---------------------------------------------------------------------------
+//
+// `buffer.INSPECT_MAX_BYTES`. The value lives here because `util` is inlined
+// into every bundle while `src/buffer/buffer.ts` is conditional, and Node's own
+// coupling runs the same way round at the point of use: `lib/buffer.js`'s
+// custom inspector reads the module-scoped `INSPECT_MAX_BYTES` that its
+// accessor pair on `module.exports` writes. `node:buffer`'s setter calls
+// `__utilSetInspectMaxBytes` after running Node's `validateNumber`.
+let __utilInspectMaxBytes: number = 50;
+
+function __utilGetInspectMaxBytes(): number {
+  return __utilInspectMaxBytes;
+}
+
+function __utilSetInspectMaxBytes(value: number): void {
+  __utilInspectMaxBytes = value;
+}
+
+// The bytes of a view can only be reached through a `Buffer`-typed parameter:
+// the same value read through `any` answers `undefined` for `.length` and does
+// not resolve a method (zun#38). These three take it that way.
+function __utilByteViewLength(view: Buffer): number {
+  return Number(view.length);
+}
+
+function __utilByteViewByte(view: Buffer, index: number): number {
+  return Number(view[index]);
+}
+
+// Node's `this.hexSlice(0, actualMax)` with a space after every pair, which is
+// `StringPrototypeTrim(RegExpPrototypeSymbolReplace(/(.{2})/g, …, '$1 '))`.
+function __utilByteViewHex(view: Buffer, count: number): string {
+  if (count <= 0) return "";
+  const hex = view.toString("hex", 0 as u64, count as u64);
+  const chars = Number(hex.length);
+  let out = "";
+  for (let i = 0; i < chars; i = i + 2) {
+    if (i > 0) out = out + " ";
+    out = out + hex.slice(i, i + 2);
+  }
+  return out;
+}
+
+function __utilFormatByteView(ctx: any, value: any, recurseTimes: number): string {
+  const length = __utilByteViewLength(value);
+
+  // `lib/buffer.js`: `<Buffer 61 62 ... 3 more bytes>`, with the byte count
+  // capped by `INSPECT_MAX_BYTES` and an empty buffer rendering as `<Buffer >`.
+  // The "inspect special properties as well" tail of Node's inspector has no
+  // counterpart here — a byte view carries no own non-index properties in this
+  // engine — and the constructor-name lookup is always `Buffer`.
+  if (ctx.customInspect === true) {
+    const max = __utilInspectMaxBytes;
+    const actualMax = length < max ? length : max;
+    let str = __utilByteViewHex(value, actualMax);
+    const remaining = length - max;
+    if (remaining > 0) {
+      str = str + " ... " + String(remaining) + " more byte" + (remaining > 1 ? "s" : "");
+    }
+    return "<Buffer " + str + ">";
+  }
+
+  // `customInspect: false` — which is how `assert` renders its diff — falls
+  // through to the generic typed-array body.
+  if ((recurseTimes > Number(ctx.depth) && ctx.depth !== null) || Number(ctx.depth) < 0) {
+    return __utilStylize(ctx, "[Buffer]", "special");
+  }
+  const limit = ctx.maxArrayLength === Infinity ? length : Number(ctx.maxArrayLength);
+  const shown = length < limit ? length : limit;
+  const remaining = length - shown;
+  const output: string[] = [];
+  // `elements` is what Node passes `groupArrayElements` as the backing value:
+  // the view itself, which it indexes one past the shown range when the body is
+  // truncated. Only that many bytes are materialized.
+  const elements: number[] = [];
+  for (let i = 0; i < shown; i++) {
+    const byte = __utilByteViewByte(value, i);
+    elements.push(byte);
+    output.push(__utilStylize(ctx, String(byte), "number"));
+  }
+  if (remaining > 0) {
+    elements.push(__utilByteViewByte(value, shown));
+    output.push("... " + String(remaining) + " more item" + (remaining > 1 ? "s" : ""));
+  }
+  const braces: string[] = ["Buffer(" + String(length) + ") [Uint8Array] [", "]"];
+  if (Number(output.length) === 0) return braces[0] + braces[1];
+  return __utilReduceToSingleString(ctx, output, "", braces, 2, recurseTimes, elements);
 }
 
 function __utilFormatMap(ctx: any, value: any, recurseTimes: number): string[] {
@@ -2525,14 +2642,21 @@ const __utilTypes: any = {
   isArgumentsObject(value: any): boolean {
     return false;
   },
+  // Two of the view predicates *are* answerable: the engine's
+  // `ArrayBuffer.isView` and `Buffer.isBuffer` both work on a value held in an
+  // `any`, and `Buffer.isBuffer` is exactly "a `U8` byte view" — which is
+  // `isUint8Array`, since the engine's `Buffer` is a nominal alias for that
+  // floor. `isTypedArray` stays `false` rather than answering
+  // `ArrayBuffer.isView`, because that would also claim a `DataView`, and
+  // nothing in the engine separates the two.
   isArrayBufferView(value: any): boolean {
-    return false;
+    return ArrayBuffer.isView(value);
   },
   isTypedArray(value: any): boolean {
     return false;
   },
   isUint8Array(value: any): boolean {
-    return false;
+    return Buffer.isBuffer(value);
   },
   isUint8ClampedArray(value: any): boolean {
     return false;

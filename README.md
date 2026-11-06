@@ -365,7 +365,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-buffer:start -->
 ### Node.js v25 `buffer` compatibility
 
-`█░░░░░░░░░░░░░░░░░░░░░░░` **6.2%** — 4 / 64 Node `test-buffer*` tests passing
+`██░░░░░░░░░░░░░░░░░░░░░░` **9.3%** — 6 / 64 Node `test-buffer*` tests passing
 <!-- node-buffer:end -->
 
 > `buffer` is the first module whose central object is **the engine's**, not
@@ -377,19 +377,25 @@ the direct `zun run --ext <lib> <test.js>` path.
 > module *surface* around that global and never a second Buffer: `Buffer` is
 > this module's canonical binding in the bundler, the way `EventEmitter` is
 > `events`'. That surface is complete — `kMaxLength`, `kStringMaxLength`,
-> `constants`, `INSPECT_MAX_BYTES`, a strict WHATWG `atob`/`btoa`, `isUtf8`,
-> `isAscii`, `transcode`, `Blob`, `File`, `resolveObjectURL` (there is no
-> `SlowBuffer`: Node removed it in v25). The number is low because **every
+> `constants`, `INSPECT_MAX_BYTES` as Node's validating accessor pair, a strict
+> WHATWG `atob`/`btoa`, `isUtf8`, `isAscii`, `transcode` with ICU's exact
+> substitution and strictness rules (verified over a 544-case matrix), `Blob`,
+> `File`, `resolveObjectURL` (there is no `SlowBuffer`: Node removed it in v25)
+> — and it carries the one piece of the inspector that `lib/buffer.js` owns, so
+> a byte view prints as `<Buffer 61 62 63>` and, under `customInspect: false`,
+> as `Buffer(3) [Uint8Array] [ 97, 98, 99 ]`. The number is low because **every
 > remaining failure is an engine gap**, and the biggest one is a single rule:
 > the `nodeBuffer` intrinsics take machine integers, so a plain `number` is
 > rejected at the call site (`Buffer.alloc(n)` where `n` is a parameter does not
-> compile), which costs 28 of the 64 tests on their first line. Behind it:
+> compile), which costs 32 of the 64 tests on their first line. Behind it:
 > `compare`/`toJSON`/`entries`/`buffer`/`byteOffset`/`parent`/`isEncoding`/`of`/
 > `allocUnsafeSlow` are absent and absent *at compile time*, a byte view is
-> opaque through `any`, `util.inspect` of one prints `{}`, and — the serious one
-> — **the GC frees a live Buffer's backing `ArrayBuffer`**, reproducibly on the
-> 256th class instance, because a view object carries type RID 0 and the mark
-> phase has no reference slots for it. The four historical Buffer CVEs were
+> opaque through `any` (only `Buffer.isBuffer` and `ArrayBuffer.isView` survive
+> that boundary), and — the serious one — **the GC frees a live Buffer's backing
+> `ArrayBuffer`**, reproducibly on the 256th class instance, because a view
+> object carries type RID 0 and the mark phase has no reference slots for it;
+> reached through a dynamically dispatched call that failure is *silent* and the
+> read answers `undefined`. The four historical Buffer CVEs were
 > checked one by one; two are unreachable rather than fixed, one (UCS-2 `write`
 > near the end) writes a *partial code unit* though never past the end, and a
 > fifth hazard turned up: `Buffer.alloc(-1)` panics the interpreter. The
@@ -415,10 +421,15 @@ the direct `zun run --ext <lib> <test.js>` path.
 > split across successive `write()` calls × 8 encodings = **1216 cases**,
 > including every invalid-UTF-8 vector in the file and both nodejs/node#22626
 > regressions) plus all 32 `testEnd` vectors of
-> `test-string-decoder-end.js`: **zero divergences**. The three failures are
+> `test-string-decoder-end.js`, and re-verified over a further 1056 cases
+> compared code unit by code unit so a surrogate pair cannot hide a bug:
+> **zero divergences**. The caller-supplied buffer is validated with
+> `Buffer.isBuffer` rather than `ArrayBuffer.isView`, which removes a latent
+> crash — a `Uint16Array` or a `DataView` cannot have its bytes read in this
+> engine, and trying is an uncatchable error. The three failures are
 > `Buffer.from`/`Buffer.of` with an `any` argument, `Math.random`, and a
 > function called with one more argument than it declares — all engine gaps,
-> none of them in the decoder. Table in
+> all three re-probed and unchanged, none of them in the decoder. Table in
 > [`test/string_decoder/README.md`](test/string_decoder/README.md), breakdown in
 > [`test/string_decoder/RESULTS.md`](test/string_decoder/RESULTS.md).
 
