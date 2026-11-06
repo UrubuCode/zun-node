@@ -36,7 +36,7 @@
 #
 # Usage:
 #   tools/run_node_tests.sh --zun <path> [--ext <lib>] [--tag v25.0.0]
-#       [--module fs|path|events|buffer|string_decoder|stream] [--limit N] [--timeout 20]
+#       [--module fs|path|events|buffer|string_decoder|stream|readline] [--limit N] [--timeout 20]
 set -u
 
 ZUN=""; EXT=""; TAG="v25.0.0"; MODULE="fs"; LIMIT=0; TIMEOUT=20
@@ -103,6 +103,21 @@ case "$MODULE" in
   diagnostics_channel)
           KIND="zun-ts";     PATTERNS="test-diagnostics-channel";         PATTERN="test-diagnostics-channel";;
   console) KIND="zun-ts";    PATTERNS="test-console";                     PATTERN="test-console";;
+  # `readline`'s corpus is `test-readline*`, which also selects the
+  # `test-readline-promises-*` files: `readline/promises` is the same module's
+  # second surface (src/readline/promises.ts), so those files are part of this
+  # module's bar rather than a different one's.
+  #
+  # The module itself is pure Zun TypeScript -- the line editor is string
+  # arithmetic over `stream`, `events` and `string_decoder`, and the one thing a
+  # terminal would add, `setRawMode`, belongs to the input stream rather than to
+  # readline. The kind is nevertheless `zun-ts+ext`, because three files in the
+  # corpus read their input from a *file*
+  # (`test-readline-async-iterators{,-destroy}.js` and
+  # `test-readline-input-onerror.js` all build a `fs.createReadStream`), and
+  # `fs` is syscalls. Nothing in src/readline imports a native.
+  readline)
+          KIND="zun-ts+ext"; PATTERNS="test-readline";                    PATTERN="test-readline";;
   # `process` is TS over natives too, and the one module every other bundle
   # stands on: src/process/process.ts is inlined everywhere, its natives live in
   # src/process/*.rs, and src/process/native.ts -- the only file that imports

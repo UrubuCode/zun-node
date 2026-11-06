@@ -39,7 +39,17 @@ A Node module lands here in whichever form fits what it actually does:
   global in Node, while the engine's prelude `console` has five of its nineteen
   methods and a compile error for the rest. The binding that shadows it is one
   file of its own (`src/console/global.ts`), so that a test declaring its own
-  `console` can still be bundled.
+  `console` can still be bundled. `readline` and `readline/promises`
+  (`src/readline/`) are pure computation over `events`, `stream`,
+  `string_decoder` and `timers` — a line editor is string arithmetic, and the
+  one thing a terminal adds, `setRawMode`, belongs to the input stream — and
+  they are the first module written as **three** files: the shared base and
+  everything around it in `src/readline/readline.ts`, plus one
+  `class Interface extends __RlInterface` in each of `src/readline/callback.ts`
+  (the callback `question`) and `src/readline/promises.ts` (the promise one),
+  because the two module objects have to bind that one name to two different
+  classes. Their tests are nevertheless run with `--ext`: three files in the
+  corpus read their input from a file, which is `fs`.
 - **Zun TypeScript over natives** — both, with the seam drawn where the
   capability changes. `os` is the first: the facts it reports are syscalls
   (`src/os/`, Rust), while the module *Node* exposes is objects, arrays,
@@ -719,3 +729,9 @@ target/debug/zun run /tmp/bundle.ts
 
 `████████░░░░░░░░░░░░░░░░` **36.3%** — 8 / 22 Node `test-console*` tests passing
 <!-- node-console:end -->
+
+<!-- node-readline:start -->
+### Node.js v25 `readline` compatibility
+
+`██████████░░░░░░░░░░░░░░` **45.4%** — 10 / 22 Node `test-readline*` tests passing
+<!-- node-readline:end -->

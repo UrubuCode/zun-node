@@ -154,6 +154,12 @@ _stream_writable Writable Writable
 _stream_duplex Duplex Duplex
 _stream_transform Transform Transform
 _stream_passthrough PassThrough PassThrough
+readline __node_readline Interface
+readline/promises __node_readline_promises Interface
+internal/readline/utils __node_internal_readline_utils CSI
+internal/readline/callbacks __node_internal_readline_callbacks -
+internal/util/inspect __node_internal_util_inspect -
+[.][.]/common/arraystream __node_harness_arraystream ArrayStream
 vm __node_vm -
 crypto __node_crypto -
 test __node_test test
@@ -217,6 +223,25 @@ src/process/native.ts
 # `lib/string_decoder.js` does `require('buffer')` -- and a file already queued
 # is not appended twice, so a test that requires both gets one copy of each.
 #
+# `readline` is here for a third reason, and it is the strongest one: the module
+# is **three** files, and which of the last two is inlined decides what the name
+# `Interface` means. `node:readline` and `node:readline/promises` both bind that
+# name, to two different classes (a callback `question` and a promise-returning
+# one), and the name has to be a top-level class rather than a module-object
+# member because `new <object>.Ctor()` does not reach the constructor in this
+# engine (zun#18) while Node's tests spell the constructor
+# `new readline.Interface(...)`. Two top-level declarations of one name are a
+# compile error in a single program, so `src/readline/callback.ts` and
+# `src/readline/promises.ts` each declare `Interface` and the shared base lives
+# in `src/readline/readline.ts`. No test in the corpus requires both modules, so
+# exactly one of the two is ever inlined. `internal/readline/utils` and
+# `internal/util/inspect` are two internal surfaces the readline corpus requires
+# under `--expose-internals`; both are served by `src/readline/readline.ts`.
+#
+# `../common/arraystream` is `test/common/arraystream.js`, a fake stream three
+# readline tests push lines into. It stands on `Stream`, so it is listed after
+# `stream`'s own files.
+#
 # One line per module: `<specifier> <file>`. The files are appended in this
 # order, after BUNDLE_FILES and before the harness.
 CONDITIONAL_FILES="
@@ -253,6 +278,27 @@ diagnostics_channel src/diagnostics_channel/diagnostics_channel.ts
 [.][.]/common/tmpdir src/fs/fs.ts
 [.][.]/common/tmpdir tools/harness/tmpdir.ts
 [.][.]/common/hijackstdio tools/harness/hijackstdio.ts
+readline src/buffer/buffer.ts
+readline src/string_decoder/string_decoder.ts
+readline src/readline/readline.ts
+readline src/readline/callback.ts
+readline/promises src/buffer/buffer.ts
+readline/promises src/string_decoder/string_decoder.ts
+readline/promises src/readline/readline.ts
+readline/promises src/readline/promises.ts
+internal/readline/utils src/buffer/buffer.ts
+internal/readline/utils src/string_decoder/string_decoder.ts
+internal/readline/utils src/readline/readline.ts
+internal/readline/callbacks src/buffer/buffer.ts
+internal/readline/callbacks src/string_decoder/string_decoder.ts
+internal/readline/callbacks src/readline/readline.ts
+internal/util/inspect src/buffer/buffer.ts
+internal/util/inspect src/string_decoder/string_decoder.ts
+internal/util/inspect src/readline/readline.ts
+[.][.]/common/arraystream src/buffer/buffer.ts
+[.][.]/common/arraystream src/string_decoder/string_decoder.ts
+[.][.]/common/arraystream src/stream/stream.ts
+[.][.]/common/arraystream tools/harness/arraystream.ts
 "
 
 # The harness, which stands on everything above it.
@@ -430,6 +476,54 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
   # requires `diagnostics_channel`, so no other corpus can be touched by it.
   if requires_module "diagnostics_channel"; then
     printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}{[[:space:]]*Channel[[:space:]]*}[[:space:]]*=[[:space:]]*[A-Za-z_\$][A-Za-z0-9_\$]*[[:space:]]*;[[:space:]]*\$##\n"
+  fi
+
+  # `internal/util/inspect`'s `stripVTControlCharacters`, dropped from a
+  # destructuring list.
+  #
+  # That name is already a top-level *function* in the always-inlined
+  # src/util/util.ts, so a `const { stripVTControlCharacters } = ...` at the top
+  # level of the test body is a second declaration of it, which is a compile
+  # error. The canonical-binding machinery below removes such a name from the
+  # brace list, but only when the whole destructuring sits on one line, and the
+  # two readline tests that reach for this write it across four:
+  #
+  #     const {
+  #       getStringWidth,
+  #       stripVTControlCharacters
+  #     } = require('internal/util/inspect');
+  #
+  # sed is line-based, so the name is dropped by deleting the line it is alone
+  # on. `getStringWidth` is left to come out of the module object, where
+  # src/readline/readline.ts puts it.
+  if requires_module "internal/util/inspect"; then
+    printf "s#^[[:space:]]*stripVTControlCharacters[[:space:]]*,\{0,1\}[[:space:]]*\$##\n"
+  fi
+
+  # Engine workaround (https://github.com/UrubuCode/zun/issues/19 and #10):
+  # `x.m.apply(x, args)` becomes `__rlApply(x, "m", args)`.
+  #
+  # A method a class declared cannot be *read* as a value here -- `rl.write`
+  # answers `undefined` while `rl.write(...)` works -- so `.apply` on one is
+  # unreachable; a field holding the function instead reads back `undefined` as
+  # well (a function stored in a class instance field is lost); and
+  # `x.m(...args)` does not compile either ("spread arguments are not lowered
+  # yet"). `__rlApply` in src/readline/readline.ts unrolls the argument list
+  # into a dynamic method call of fixed arity, which does work.
+  # `test-readline.js` sends every key sequence as `rl.write.apply(rl, key)`,
+  # six times over.
+  #
+  # The rewrite is semantics-preserving wherever it applies, because the match
+  # requires the *same identifier* as receiver and as `apply`'s first argument:
+  # `x.m.apply(x, args)` and `x.m(args[0], ...)` call the same function with the
+  # same `this` and the same arguments. It is emitted only for a test that
+  # requires `readline` -- which is also what puts `__rlApply` in the bundle --
+  # so every other corpus' bundle stays byte-identical.
+  #
+  # `printf '%s\n'`, not a format string: a bare `\1` backreference in a printf
+  # *format* is an octal escape and would emit a U+0001 instead.
+  if requires_module "readline"; then
+    printf '%s\n' "s#\([A-Za-z_\$][A-Za-z0-9_\$]*\)\.\([A-Za-z_\$][A-Za-z0-9_\$]*\)\.apply(\1,[[:space:]]*\([^()]*\))#__rlApply(\1, \"\2\", \3)#g"
   fi
 
   printf '%s\n' "$MODULE_SPECS" | while read -r name obj canons; do
