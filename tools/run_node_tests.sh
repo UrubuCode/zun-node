@@ -179,6 +179,27 @@ case "$MODULE" in
   # CSPRNG) are src/crypto/*.rs. Its corpus is `test-crypto*`, which includes
   # `test-crypto.js` itself.
   crypto) KIND="zun-ts+ext"; PATTERNS="test-crypto";                       PATTERN="test-crypto";;
+  # `worker_threads`' corpus is four prefixes: `test-worker-` (the bulk, which
+  # also selects `test-worker.js` itself), plus `test-messagechannel`,
+  # `test-messageport` and `test-broadcastchannel` -- the three files Node
+  # names after the web classes rather than after the module.
+  #
+  # The module is pure Zun TypeScript: a channel is two queues and a dispatch
+  # rule, and the one capability it needs beyond computation -- a later loop
+  # turn to deliver on -- is the VM's macrotask tier, which
+  # src/timers/timers.ts already publishes. Nothing in src/worker_threads
+  # imports a native.
+  #
+  # The kind is nevertheless `zun-ts+ext`, for the same reason `readline`'s and
+  # `domain`'s are: several files in the corpus require a module that *is*
+  # syscalls (`fs` in the four `-transfer-fake-js-transferable`/`-filehandle`/
+  # `-track-unmanaged-fds` files, `crypto` in `-crypto-sign-transfer-result`,
+  # `child_process` in `-init-failure`, `-on-process-exit` and `-process-env`),
+  # and without `--ext` those bundles fail to compile rather than failing on
+  # their real blocker.
+  worker_threads)
+          KIND="zun-ts+ext"; PATTERNS="test-worker test-messagechannel test-messageport test-broadcastchannel";
+          PATTERN="test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 

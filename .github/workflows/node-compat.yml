@@ -93,7 +93,7 @@ jobs:
           ZUN="$PWD/target/debug/zun"
           EXT="$PWD/zun-node/target/debug/libzun_node.so"
           case "$MODULE" in
-            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks v8 tty readline domain process os fs child_process zlib dns crypto";;
+            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks v8 tty readline domain process os fs child_process zlib dns crypto worker_threads";;
             *)   MODULES="$MODULE";;
           esac
           test -f "$EXT" || { echo "extension cdylib missing: $EXT" >&2; exit 1; }
