@@ -311,7 +311,7 @@ a round trip through a file containing NUL and invalid UTF-8 is covered by
 | `test-fs-write-file-invalid-path.js` | `node:stream` / `createReadStream` | — | runtime — zun: runtime error: unhandled exception: Object(Obj(0x196451a25c0)) |
 | `test-fs-write-file-sync.js` | unresolved `require` | — | bundle failed — bundle_node_test.sh: unresolved require() in test-fs-write-file-sync.js: |
 | `test-fs-write-file-typedarrays.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-file-typedarrays.ts:10910:33: error: [SEM0001] 'Buffer.from' expe… |
-| `test-fs-writefile-with-fd.js` | unresolved `require` | — | bundle failed — /c/Users/nexga/Documents/zun-node-worktrees/fs/tools/bundle_node_test.sh: line 254: … |
+| `test-fs-writefile-with-fd.js` | unresolved `require` | — | bundle failed — tools/bundle_node_test.sh: line 254: … |
 | `test-fs-write-negativeoffset.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | assertion — AssertionError [throws]: Missing expected exception. |
 | `test-fs-write-optional-params.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-optional-params.ts:10977:15: error: [SEM0001] type BufferView(U8)… |
 | `test-fs-write-reuse-callback.js` | `Buffer` through `any` | [zun#38](https://github.com/UrubuCode/zun/issues/38) | type error — bundles/test-fs-write-reuse-callback.ts:10942:28: error: [SEM0001] Buffer size must be … |

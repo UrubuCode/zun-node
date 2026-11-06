@@ -156,7 +156,7 @@ note_of() {
   printf '%s\n' "$1" \
     | tr -d '\r' \
     | grep -m1 . \
-    | sed -e "s|$WORK_NATIVE/||g" -e "s|$WORK/||g" \
+    | sed -e "s|$WORK_NATIVE/||g" -e "s|$WORK/||g" -e "s|$ROOT/||g" \
           ${HOST_NAME:+-e "s|$HOST_NAME|<hostname>|g"} \
           ${USER_NAME:+-e "s|$USER_NAME|<user>|g"} \
           -e 's/OxcDiagnostic *{ *inner: *OxcDiagnosticInner *{ *message: /parse error: /' \

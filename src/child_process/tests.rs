@@ -170,6 +170,8 @@ fn writes_input_to_the_child_stdin() {
     request.input = crate::fs::base64::encode(b"b\na\n");
     let fields = call(&request);
     let out = decode_base64(&fields[3]);
+    // Some Windows hosts' `sort` writes a UTF-8 byte-order mark first.
+    let out = out.trim_start_matches('\u{feff}');
     assert!(out.starts_with('a'), "sorted output was {out:?}");
 }
 
