@@ -110,6 +110,16 @@ json_string() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"
 # are still armed), so `timers` is inlined ahead of `tools/harness/common.ts` for
 # every module, not only for `test-timers-*`.
 #
+# `src/io/io.ts` is inlined unconditionally for the same reason, one level
+# down: it is the shared asynchronous-I/O readiness loop, and the harness
+# settle loop asks it how many ref'd handles are live
+# (`__ioPendingRefs()`) exactly as it asks `timers` how many ref'd timers are
+# armed. That question has to compile in a bundle with no extension, so the
+# `import * as native from "node:io"` lives in `src/io/native.ts` and is
+# appended through EXT_FILES below — the split `src/process/native.ts`
+# documents. Without it `__ioAvailable()` is false and the file costs a bundle
+# nothing but its declarations.
+#
 # `os` is the first module whose bundle also needs `--ext`: the Node-shaped API
 # is this TypeScript file, but the facts underneath it are syscalls in the
 # `node:os` extension, which `src/os/os.ts` reaches with
@@ -171,6 +181,8 @@ internal/tty __node_internal_tty -
 worker_threads __node_worker_threads -
 dns __node_dns Resolver
 dns/promises __node_dns_promises -
+net __node_net Socket,Server,Stream,BlockList,SocketAddress
+internal/net __node_net -
 internal/test/binding __node_internal_test_binding -
 internal/errors __node_internal_errors -
 [.][.]/common/internet __node_harness_internet -
@@ -188,6 +200,7 @@ src/querystring/querystring.ts
 src/punycode/punycode.ts
 src/url/url.ts
 src/timers/timers.ts
+src/io/io.ts
 src/console/console.ts
 "
 
@@ -208,6 +221,7 @@ src/console/console.ts
 # in the same position needs no second mechanism.
 EXT_FILES="
 src/process/native.ts
+src/io/native.ts
 "
 
 # Modules inlined **only when the test actually requires them**.
@@ -353,6 +367,14 @@ v8 src/stream/stream.ts
 v8 src/v8/v8.ts
 dns src/dns/dns.ts
 dns/promises src/dns/dns.ts
+net src/buffer/buffer.ts
+net src/string_decoder/string_decoder.ts
+net src/stream/stream.ts
+net src/net/net.ts
+internal/net src/buffer/buffer.ts
+internal/net src/string_decoder/string_decoder.ts
+internal/net src/stream/stream.ts
+internal/net src/net/net.ts
 internal/test/binding src/dns/dns.ts
 internal/test/binding tools/harness/binding.ts
 internal/errors src/dns/dns.ts

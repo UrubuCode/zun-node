@@ -116,6 +116,38 @@ A Node module lands here in whichever form fits what it actually does:
   `tty` is the one module here that depends on `readline` rather than the
   other way round.
 
+  **`net` is the first module of this kind whose natives are not its own**, and
+  that is worth a paragraph, because what it needed first was not `net` but a
+  piece of *infrastructure* this library did not have. Every native above
+  blocks: `os` asks the kernel a question and gets an answer, `fs` reads a
+  file, `dns` resolves a name, and the asynchrony of Node's API is restored on
+  the TypeScript side by delivering the result through `process.nextTick` — the
+  pattern [`src/dns/dns.ts`](src/dns/dns.ts) documents as "synchronous natives,
+  asynchronous API". A socket cannot work that way: a server has to be
+  *waiting* for a connection while the program runs, two sockets have to make
+  progress at once, and a read has to complete after the call that armed it
+  returned. ABI v1 gives an extension no way to complete a call later, so the
+  direction is inverted instead — no native waits for a *particular* event
+  (each one either completes or answers "not yet"), and **one** native waits
+  for *any* registered handle. That is the readiness model (`select`/`poll`),
+  and it is the only asynchronous I/O this ABI can express.
+  So the lower half of `net` is not `src/net/*.rs` but
+  [`src/io/mod.rs`](src/io/mod.rs) + [`src/io/sys.rs`](src/io/sys.rs) — a table
+  of non-blocking handles, the eleven verbs on one, and `ioPoll(timeoutMs)` —
+  published under `node:io`, with its scheduling half in
+  [`src/io/io.ts`](src/io/io.ts): `ref`/`unref` accounting, the pump, and the
+  dispatch to callbacks. Nothing in either file is socket-shaped beyond TCP's
+  own verbs, because `dgram`, `child_process.spawn`'s pipes, `fs`' streams and
+  `http` are meant to register with that same loop rather than start a second
+  one. [`src/net/net.ts`](src/net/net.ts) is then `net` as Node exposes it:
+  `Socket` as a `stream.Duplex` whose `_read`/`_write`/`_final`/`_destroy` are
+  the loop's events, `Server` over one listening handle, and
+  `isIP`/`BlockList`/`SocketAddress`/the argument cascades as pure shape.
+  `io.ts` is inlined into **every** bundle for the reason `process.ts` and
+  `timers.ts` are — the harness asks it how many ref'd handles are live — so
+  its `import` lives in `src/io/native.ts` and is appended only for a bundle
+  that gets `--ext`.
+
 Support slices exist to run Node's own tests, and are Zun TypeScript for the
 same reason: `src/assert/assert.ts` is the strict-mode `assert` surface the
 tests assert with. `src/util/util.ts` and `src/process/process.ts` used to be
@@ -969,3 +1001,49 @@ target/debug/zun run /tmp/bundle.ts
 > [`test/dns/README.md`](test/dns/README.md) with the other findings, alongside
 > the per-test blocker table; the per-test run is in
 > [`test/dns/RESULTS.md`](test/dns/RESULTS.md).
+
+<!-- node-net:start -->
+### Node.js v25 `net` compatibility
+
+`██████░░░░░░░░░░░░░░░░░░` **27.5%** — 41 / 149 Node `test-net-*` tests passing
+<!-- node-net:end -->
+
+> `net` is **TS over natives, and the first module here whose natives are not
+> its own**. What it needed before it needed anything else was a piece of
+> infrastructure this library did not have: an asynchronous-I/O readiness loop.
+> Every other native in this repository blocks, with Node's asynchrony restored
+> on the TypeScript side by `process.nextTick` (the pattern
+> [`src/dns/dns.ts`](src/dns/dns.ts) documents). A socket cannot work that way,
+> and ABI v1 cannot complete a call later — so the direction is inverted: no
+> native waits for a *particular* event, and one native, `ioPoll(timeoutMs)`,
+> waits for *any* registered handle. That loop is [`src/io/`](src/io/) under the
+> module key `node:io` — a handle table and the eleven verbs on one
+> (`src/io/mod.rs`), the raw non-blocking primitives with `poll(2)` on POSIX and
+> `select` on Windows (`src/io/sys.rs`, **not** `WSAPoll`, which never reports a
+> refused connection), the scheduling half with `ref`/`unref` and the pump
+> (`src/io/io.ts`), and the one file that names the extension
+> (`src/io/native.ts`). That loop deliberately owns **no macrotask chain of
+> its own**: with the VM's virtual clock every armed task is due at once and
+> the most recently armed one wins, so a pump that re-armed itself starved
+> the whole program (a four-line probe shows `setTimeout(f, 1)` never firing
+> while a server is registered; it cost 20 of the 149 tests). It exposes one
+> turn and the existing loop driver calls it. Nothing in it is socket-shaped beyond TCP's own verbs,
+> because `dgram`, `child_process.spawn`'s pipes, `fs`' streams and `http` are
+> meant to register with the same loop. Thirteen Rust tests drive it below the
+> ABI. [`src/net/net.ts`](src/net/net.ts) is then the module Node exposes:
+> `Socket` as a `stream.Duplex` whose `_read`/`_write`/`_final`/`_destroy` are
+> the loop's events, `Server`, `isIP*`, `BlockList`, `SocketAddress`, the
+> argument cascades, `readyState`, `allowHalfOpen`, the socket options,
+> `maxConnections` with `'drop'`, a real abortive `resetAndDestroy`, and
+> `socket._handle` in libuv's `TCP`-wrap shape because four files in the corpus
+> replace a method on it. Named gaps: no pipes / Unix sockets, no `fd`
+> adoption, blocking name resolution, and a *sequential* rather than raced
+> Happy Eyeballs. **The largest blocker is not in the module**: Node's `net`
+> tests constantly write `server.listen(0, function () { this.address() })`, and
+> `this` inside a listener is `undefined` here
+> ([zun#1](https://github.com/UrubuCode/zun/issues/1)) — this corpus narrows
+> that issue to receiver threading alone, because the argument *shifting* it also
+> describes is gone (`apply`/`call` now pass the right arguments, just no
+> receiver; `bind` does not exist at all). Per-test breakdown and the full
+> blocker table: [`test/net/README.md`](test/net/README.md),
+> [`test/net/RESULTS.md`](test/net/RESULTS.md).

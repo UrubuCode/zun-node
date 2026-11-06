@@ -67,6 +67,7 @@ pub mod child_process;
 pub mod dns;
 pub mod crypto;
 pub mod fs;
+pub mod io;
 pub mod os;
 pub mod process;
 pub mod zlib;
@@ -388,6 +389,15 @@ const DNS_MODULE_KEYS: &[&[u8]] = &[b"node:dns\0"];
 /// and the `random*` family; see `src/crypto/mod.rs`.
 const CRYPTO_MODULE_KEYS: &[&[u8]] = &[b"node:crypto\0"];
 
+/// Module key the shared I/O readiness loop is published under, on the same
+/// single-key rule. This one is **not** a Node module: `node:io` does not
+/// exist in Node, and the name is deliberately the capability rather than a
+/// module — the table and the readiness query behind it are what `net` is
+/// built on today and what `dgram`, `child_process`' pipes, `fs`' streams and
+/// `http` will reuse. Its TypeScript counterpart is `src/io/io.ts`, reached by
+/// `src/io/native.ts`; see `src/io/mod.rs`.
+const IO_MODULE_KEYS: &[&[u8]] = &[b"node:io\0"];
+
 /// Module key the `zlib` natives are published under, on the same single-key
 /// rule. The Node-shaped module is `src/zlib/zlib.ts`, which imports this one
 /// and reshapes it into the nine `Transform` classes and their convenience
@@ -433,6 +443,12 @@ pub unsafe extern "C" fn zun_register_v1(registry: *mut ZunRegistry) -> i32 {
     }
     for module in DNS_MODULE_KEYS {
         let status = unsafe { register_module(registry, module, dns::DESCRIPTORS) };
+        if status != 0 {
+            return status;
+        }
+    }
+    for module in IO_MODULE_KEYS {
+        let status = unsafe { register_module(registry, module, io::DESCRIPTORS) };
         if status != 0 {
             return status;
         }

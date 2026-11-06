@@ -166,6 +166,16 @@ case "$MODULE" in
   # CSPRNG) are src/crypto/*.rs. Its corpus is `test-crypto*`, which includes
   # `test-crypto.js` itself.
   crypto) KIND="zun-ts+ext"; PATTERNS="test-crypto";                       PATTERN="test-crypto";;
+  # `net` is TS over natives, and the first module here whose natives are not
+  # its own. `src/io/*.rs` is the shared asynchronous-I/O readiness loop -- a
+  # handle table of non-blocking sockets plus one `ioPoll` that blocks for at
+  # most a requested timeout -- published under `node:io` rather than
+  # `node:net`, because `dgram`, `child_process`' pipes, `fs`' streams and
+  # `http` are meant to register with that same loop instead of starting a
+  # second one. `src/io/io.ts` is its scheduling half (ref/unref, the pump, the
+  # dispatch) and `src/net/net.ts` is the module Node exposes: `Socket` as a
+  # `stream.Duplex`, `Server`, `isIP*`, `BlockList` and `SocketAddress`.
+  net)    KIND="zun-ts+ext"; PATTERNS="test-net-";                         PATTERN="test-net-";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 

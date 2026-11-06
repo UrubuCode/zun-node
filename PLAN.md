@@ -1099,6 +1099,70 @@ gets deleted; nothing else in the tracker changes.
   has no `EventEmitter`-derived prototype; `versions` names only `node` and
   `zun`, because no V8, libuv, OpenSSL or ICU is embedded. Table in
   `test/process/README.md`.
+- **`node:io` (não é um módulo do Node): o laço de I/O assíncrono
+  compartilhado, em `src/io/*.rs` + `src/io/io.ts` + `src/io/native.ts`.**
+  Esta é a peça de infraestrutura que a biblioteca não tinha, e sem a qual
+  `net` não existiria. Até aqui todo native desta crate era **bloqueante** e a
+  assincronia da API do Node era restaurada por `process.nextTick` (o padrão
+  que `src/dns/dns.ts` documenta como "synchronous natives, asynchronous
+  API"). Isso é honesto para uma resolução de nome; não funciona para um
+  socket, que precisa estar *esperando* enquanto o programa roda.
+  A ABI v1 não permite que um native complete uma chamada depois, então a
+  direção é invertida: nenhum native espera por um evento *específico* — cada
+  operação completa ou responde "ainda não" (`+A`) — e **um** native,
+  `ioPoll(timeoutMs)`, espera por *qualquer* handle registrado, bloqueando no
+  máximo o timeout pedido. Esse é o modelo de *readiness* (`select`/`poll`), e
+  é a única assincronia que esta ABI consegue expressar.
+  O lado Rust é a tabela de handles não bloqueantes e os onze verbos sobre um
+  (criar, bind, listen, accept, connect, recv, send, shutdown, close, nome,
+  readiness) mais as opções de socket que o Node expõe; em POSIX é `poll(2)`,
+  no Windows é `select` e **não** `WSAPoll` — este último tem o defeito
+  documentado de nunca reportar uma tentativa de conexão *recusada*, o que
+  penduraria o laço em vez de levantar `ECONNREFUSED` (a libuv o evita pelo
+  mesmo motivo). O limite clássico do `select`, `FD_SETSIZE`, não se aplica:
+  o `fd_set` do Windows é um *array contado* e `src/io/sys.rs` monta esse
+  layout num `Vec` do tamanho necessário.
+  O lado TypeScript é o escalonamento: quem quer qual evento, quais handles
+  mantêm o processo vivo (`ref`/`unref` — `test-net-server-unref.js` verifica
+  isso diretamente), quando bombear e quem chamar. `io.ts` entra em **todo**
+  bundle (como `process.ts` e `timers.ts`), porque `tools/harness/common.ts`
+  pergunta a ele quantos handles ref'd estão vivos exatamente como pergunta ao
+  `timers`; o `import` fica em `src/io/native.ts`, anexado só quando há `--ext`.
+  Três pontos de projeto que as próximas trilhas (`dgram`,
+  `child_process.spawn`, streams de `fs`, `http`) herdam de graça. **A espera
+  real acontece dentro do native**, porque o tier de macrotasks da VM roda num
+  relógio *virtual* que salta para o próximo vencimento em vez de dormir
+  (NUCLEUS §9a) — um pump armado com `setTimeout(…, 20)` reentra na hora e
+  queimaria um núcleo; medido, um servidor ocioso *referenciado* gasta 31 ms de
+  CPU em 5 s, 0,6% de um núcleo. **O laço não tem cadeia própria**: a primeira
+  versão armava a si mesma a cada turno, e isso *não funciona* aqui — com o
+  relógio saltando, toda tarefa armada fica vencida ao mesmo tempo, e entre
+  tarefas vencidas esta engine roda a armada mais recentemente, então um pump
+  que se rearma no fim do próprio turno vence sempre e **nada mais no programa
+  roda outra vez** (uma sonda de quatro linhas mostra: um servidor `net` mais
+  `setTimeout(f, 1)`, e `f` nunca dispara; custou 20 dos 149 testes, que
+  morriam no timeout do runner em vez de nas próprias asserções). Então
+  `src/io/io.ts` expõe **um turno**, `__ioPumpOnce()`, e quem já dirige as
+  macrotasks do programa o chama — hoje o laço de assentamento do harness,
+  amanhã um gancho "antes de bloquear" da VM. E **o `pause()` é de verdade**,
+  porque um handle sem interesse de leitura simplesmente não é esperado, então
+  os dados do peer ficam no buffer do kernel e a janela TCP fecha.
+- **`node:net`: implementado, TS sobre o laço de I/O, em `src/net/net.ts`.**
+  `Socket` é um `stream.Duplex` cujos `_read`/`_write`/`_final`/`_destroy` são
+  os eventos do laço; `Server` é um `EventEmitter` sobre um handle de escuta; e
+  o resto é forma — `isIP`/`isIPv4`/`isIPv6` (gramática escrita à mão, porque
+  um `RegExp` perde seus métodos através de `any`, zun#7, e porque `BlockList`
+  compara endereços *numericamente*), `BlockList`, `SocketAddress`, as cascatas
+  de argumentos de `connect`/`listen`, `readyState`, `allowHalfOpen`,
+  `setTimeout`/`setNoDelay`/`setKeepAlive`, `maxConnections` com o evento
+  `'drop'`, `getConnections`, `ref`/`unref` e os quatro acessores de
+  `autoSelectFamily`. **Desvios documentados**: a resolução de nomes bloqueia
+  (`getaddrinfo` síncrono entregue por `process.nextTick`, como em `dns`), não
+  há *pipes* / Unix domain sockets (um objeto de kernel diferente, com outra
+  história de readiness — `listen(path)` e `connect(path)` levantam um erro em
+  vez de fingir), e o Happy Eyeballs é *sequencial* em vez de corrido: um nome
+  com A e AAAA tem a segunda candidata como fallback, que é a metade
+  observável de `autoSelectFamily`. Tabela em `test/net/README.md`.
 
 ### Module keys and host dispatch
 
