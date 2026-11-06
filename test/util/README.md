@@ -148,10 +148,27 @@ run, so they — not this page — are the current number.
 that does not exist, two need one *and* an engine feature, and the remaining
 eight are engine gaps — four of them new, found while writing this module.
 
+One file left the table: `test-util-deprecate.js` passes after a real bug was
+fixed one module over. `ProcessWarning.code` in `src/process/process.ts` was
+declared `string = ""`, so a warning raised with no code reported `''` where
+Node reports `undefined`, and the file asserts
+`warning.code === expected.code` with `expected.code` `undefined` for a
+`util.deprecate()` that was given no code. The field is `any = undefined` now,
+which is Node's shape — a warning has a `code` only when one was passed. The
+`deprecate` path itself (`length` preservation, once-per-function, once-per-code
+across different functions, twice for two codeless functions) was already
+right.
+
+(`test-util-sigint-watchdog.js` *does* pass when the bundle is run with `--ext`,
+because its `common.skip` path reaches `internal/test/binding`, whose harness
+pulls in `src/dns/dns.ts`. `util` is a `zun-ts` module, so the tracker runs it
+with no extension at all — which is the honest configuration for this corpus —
+and the file stays in the table.)
+
 | Test | Blocked by | What happens |
 |---|---|---|
 | `test-util.js` | harness: `internal/errors`, `vm` | `require('internal/errors')` for `errors.codes.ERR_IPC_CHANNEL_CLOSED` and `require('vm').runInNewContext` for the cross-realm `Array`/`Error` checks |
-| `test-util-callbackify.js` | [zun#25](https://github.com/UrubuCode/zun/issues/25); harness: `child_process` | the first expectation after the resolution loop is `cbAsyncFn.length === 1` and `cbAsyncFn.name === 'asyncFnCallbackified'`; a function reports `length` 0 and `name` `undefined`, so `callbackify` cannot carry the `+1`/`Callbackified` rename Node's `ObjectDefineProperties` applies. The tail re-runs itself through `child_process.execFile` |
+| `test-util-callbackify.js` | [zun#95](https://github.com/UrubuCode/zun/issues/95), [zun#25](https://github.com/UrubuCode/zun/issues/25); harness: `child_process` | the whole resolution and rejection matrix passes now; the first failure is `assert.strictEqual(cbAsyncFn.length, 1)`, which reads `undefined`. A function's declared arity is always 0 here (#95) and its `name` is unavailable (#25), so `callbackify` cannot carry the `+1`/`Callbackified` rename Node's `ObjectDefineProperties` applies — and `cbAsyncFn.name === 'asyncFnCallbackified'` two lines later is unreachable for the same reason. The tail re-runs itself through `child_process.execFile` |
 | `test-util-format.js` | engine: `class … extends Array`; [zun#25](https://github.com/UrubuCode/zun/issues/25) | `class Foobar extends Array { aaa = true; }` is rejected with ``unknown base class `Array` ``. The block it sits in also needs `Object.setPrototypeOf(new Foo(), null)`, `D.prototype = { __proto__: C.prototype }` and a `constructor` accessor that throws — the whole function-prototype model |
 | `test-util-getcallsites.js` | engine: no structured call sites; harness: `child_process` | `callSites[0].scriptName` has to match `/test-util-getcallsites/`, but the program the engine is running is the *bundle*, so the recovered frame names the bundle. The rest of the file spawns itself with `spawnSync` |
 | `test-util-inherits.js` | [zun#1](https://github.com/UrubuCode/zun/issues/1), [zun#25](https://github.com/UrubuCode/zun/issues/25) | ``error: `call` passes 1 argument`` on `A.call(this)` — `Function.prototype.call` threads no receiver. The file is a function-constructor inheritance exercise end to end (`B.prototype.b = …`, `C.super_`, `new B('b')`), which needs the prototype model `util.inherits` cannot be given here |
@@ -165,8 +182,8 @@ eight are engine gaps — four of them new, found while writing this module.
 | `test-util-isDeepStrictEqual.js` | engine: boxed primitives | ``no field or setter `slow` `` on `boxedString.slow = true`. Boxed primitives are also indistinguishable from `{}` once held in an `any`, so `isDeepStrictEqual(new Number(2), new Number(1))` cannot be answered. The `skipPrototype` block at the end of the file *is* implemented |
 | `test-util-parse-env.js` | harness: `node:fs`, `../../test/common/fixtures` | it reads `fixtures/dotenv/valid.env` off disk and compares 50 parsed entries |
 | `test-util-primordial-monkeypatching.js` | engine: assigning to a built-in namespace member panics (**new**) | `Object.keys = () => { throw … }` aborts the interpreter with `expected object, found Any(Any { tag: ClassDescriptor, … })`. `inspect` already reads `Object.keys` defensively (`__utilOwnKeys` catches), so the moment the assignment itself works, this test passes |
-| `test-util-promisify.js` | harness: `node:fs`, `node:vm` | `promisify(fs.readFile)` and a cross-context `Promise` |
-| `test-util-sigint-watchdog.js` | harness: `internal/test/binding` | the SIGINT watchdog is a native facility |
+| `test-util-promisify.js` | engine: a symbol-keyed store onto a function declaration; harness: `node:fs`, `node:vm` | the first failure is a compile error, not the missing modules: `fn[promisify.custom] = promisifedFn` on a `function fn() {}` is `indexing requires an Array` — a function is not a target the object model accepts ([zun#49](https://github.com/UrubuCode/zun/issues/49)). Past it the file still needs `promisify(fs.readFile)` and a cross-context `Promise` |
+| `test-util-sigint-watchdog.js` | harness: `internal/test/binding` | the SIGINT watchdog is a native facility; the file reaches it only on its `common.skip` path, which needs the binding harness and therefore `--ext` |
 | `test-util-text-decoder.js` | engine: `TextDecoder` arity (**new**) | ``error: `TextDecoder` has 0`` — the prelude's `TextDecoder` constructor takes no encoding label, so `new TextDecoder('windows-1252')` does not compile. The test body is inside a `skip: !common.hasIntl` test that would not even run |
 | `test-util-types.js` | harness: `vm`, `internal/test/binding`, `crypto`; engine: opaque value classes | the file asks `types.isUint8Array`, `types.isArrayBuffer`, `types.isNumberObject`, `types.isGeneratorObject`… of values the engine keeps opaque once they ride an `any` lane (see below) |
 

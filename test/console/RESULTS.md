@@ -20,11 +20,11 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-console-diagnostics-channels.js` | ✅ pass | |
 | `test-console-formatTime.js` | ✅ pass | |
 | `test-console-group.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-console-instance.js` | ❌ type error | bundles/test-console-instance.ts:23785:9: error: [SEM0001] no field or setter 'write' on this type |
+| `test-console-instance.js` | ❌ type error | bundles/test-console-instance.ts:24521:9: error: [SEM0001] no field or setter 'write' on this type |
 | `test-console-issue-43095.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-console-log-stdio-broken-dest.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-console-log-throw-primitive.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-console-methods.js` | ❌ type error | bundles/test-console-methods.ts:17378:41: error: [SEM0001] 'Reflect.construct' target must be a class |
+| `test-console-methods.js` | ❌ type error | bundles/test-console-methods.ts:17824:41: error: [SEM0001] 'Reflect.construct' target must be a class |
 | `test-console-no-swallow-stack-overflow.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-console-not-call-toString.js` | ✅ pass | |
 | `test-console-self-assign.js` | ✅ pass | |
@@ -32,6 +32,6 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-console-sync-write-error.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-console-table.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-console-tty-colors-per-stream.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-console-tty-colors.js` | ❌ type error | bundles/test-console-tty-colors.ts:23755:10: error: [SEM0001] no field or setter 'isTTY' on this type |
+| `test-console-tty-colors.js` | ❌ type error | bundles/test-console-tty-colors.ts:24491:10: error: [SEM0001] no field or setter 'isTTY' on this type |
 | `test-console-with-frozen-intrinsics.js` | ✅ pass | |
 | `test-console.js` | ❌ assertion | foo |

@@ -202,6 +202,22 @@ function __evIsSymbol(value: any): boolean {
   return typeof value === "symbol";
 }
 
+// An event name as a *property key*.
+//
+// Node stores listeners on a plain object, so an event name that is not a
+// symbol goes through the ordinary ToPropertyKey coercion: `ee.on(123, fn)`
+// occupies the slot `"123"`, `ee.emit(123)` finds it, and `ee.eventNames()`
+// answers `["123"]`. This engine keeps a numeric computed key on a dynamic
+// object in a different place from the string of the same digits — the write
+// lands somewhere `in`, `Object.keys` and the string-keyed read cannot see it,
+// so `ee.on(123, fn)` followed by `ee.listenerCount(123)` answered 0. Every
+// slot key and every `__evTypes` entry therefore passes through here, which is
+// the coercion Node gets from the object model for free.
+function __evKeyOf(type: any): any {
+  if (__evIsSymbol(type)) return type;
+  return String(type);
+}
+
 // `__evTypes` used to be keyed by a *description-derived* id, because a symbol
 // never compared equal to itself (`s === s` was `false`) and a dynamic object
 // keyed a symbol-valued property by its description. Both are fixed
@@ -680,7 +696,8 @@ class MaxListenersExceededWarning extends Error {
 // slot read asks it first. `sym in obj` throws ("Cannot convert a Symbol value
 // to a string"), and a symbol can never collide with an `Object.prototype`
 // member, so a symbol key skips the question.
-function __evRawGet(events: any, type: any): any {
+function __evRawGet(events: any, rawType: any): any {
+  const type: any = __evKeyOf(rawType);
   if (!__evIsSymbol(type) && !(type in events)) return undefined;
   return events[type];
 }
@@ -703,7 +720,8 @@ function __evRawGet(events: any, type: any): any {
 // written over a slot that holds an object is no longer swallowed, so the
 // unconditional `delete` first is unnecessary, and a function value under a
 // symbol key round-trips.
-function __evRawSet(events: any, type: any, value: any): void {
+function __evRawSet(events: any, rawType: any, value: any): void {
+  const type: any = __evKeyOf(rawType);
   if (!__evIsSymbol(type) && type === "__proto__" && !__evIsBareFn(value)) {
     Object.defineProperty(events, type, {
       value: value,
@@ -721,7 +739,8 @@ function __evRawSet(events: any, type: any, value: any): void {
 // instead; `__evRawGet` reports `undefined` either way and `eventNames()` reads
 // `__evTypes`, so the key that lingers costs nothing. `delete` does clear a
 // function-valued property now (zun#32), so a string key needs no special case.
-function __evRawDelete(events: any, type: any): void {
+function __evRawDelete(events: any, rawType: any): void {
+  const type: any = __evKeyOf(rawType);
   if (__evIsSymbol(type)) {
     events[type] = undefined;
     return;
@@ -751,11 +770,12 @@ function __evSlotDelete(target: any, type: any): void {
   __evRawDelete(events, type);
   const types: any = target.__evTypes;
   if (types === undefined) return;
-  const at = Number(types.indexOf(type));
+  const at = Number(types.indexOf(__evKeyOf(type)));
   if (at >= 0) types.splice(at, 1);
 }
 
-function __evTrackType(target: any, type: any): void {
+function __evTrackType(target: any, rawType: any): void {
+  const type: any = __evKeyOf(rawType);
   let types: any = target.__evTypes;
   if (types === undefined) {
     types = [];
@@ -901,12 +921,19 @@ function __evAddListener(target: any, type: any, listener: any, prepend: boolean
 // unwraps and `rawListeners()` exposes.
 function __evOnceWrap(target: any, type: any, listener: any): any {
   const state: any = { fired: false };
-  const wrapped: any = function (): any {
+  // A **rest parameter**, not the implicit call-arguments object. The
+  // parser looks for that word textually anywhere inside a function's
+  // source span and, where it finds it, injects a synthetic trailing rest
+  // parameter into the *enclosing* function too
+  // (https://github.com/UrubuCode/zun/issues/40); a dynamic call through an
+  // `any` receiver -- which `events.once(...)` and `events.on(...)` are, as
+  // the module object is the only lane to them -- then leaves that synthetic
+  // parameter unbound and the injected spread aborts with "spread: value is
+  // not iterable". The listener is invoked as `fn(...args)` by `__evCall`,
+  // so a real rest parameter sees exactly the same list.
+  const wrapped: any = function (...passed: any[]): any {
     if (state.fired === true) return undefined;
     state.fired = true;
-    const passed: any[] = [];
-    const count = Number(arguments.length);
-    for (let i = 0; i < count; i++) passed.push(arguments[i]);
     __evRemoveListener(target, type, state.wrapFn);
     return __evCall(listener, passed);
   };
@@ -1157,6 +1184,26 @@ function __evListeners(target: any, type: any, unwrap: boolean): any[] {
   return out;
 }
 
+// `listenerCount` for one target, shared by the instance method and the
+// prototype method so the two spellings cannot drift. The optional `listener`
+// argument counts only the matching registrations, and a once-wrapper is
+// matched through its `.listener` slot, as Node does.
+function __evListenerCountOf(target: any, type: any, listener: any): number {
+  if (listener === undefined) return __evCountOf(target, type);
+  __evCheckListener(listener);
+  const list: any = __evListOf(target, type);
+  if (list === undefined) return 0;
+  let total = 0;
+  const count = __evLen(list);
+  for (let i = 0; i < count; i++) {
+    const stored: any = list[i];
+    const original: any =
+      stored === undefined || stored === null ? undefined : stored.listener;
+    if (__evSame(stored, listener) || __evSame(original, listener)) total = total + 1;
+  }
+  return total;
+}
+
 // `Reflect.ownKeys(_events)` order: integer-like string keys ascending, then the
 // remaining string keys in insertion order, then symbols in insertion order.
 function __evEventNames(target: any): any[] {
@@ -1325,22 +1372,13 @@ class EventEmitter {
   // Node has `listenerCount` on the instance *and* as a module/class static.
   // A class here may not carry a static and an instance method of the same name
   // ("instance method `listenerCount` must be called through an object"), so the
-  // instance form wins and the static is reachable only through the module
-  // object (`__node_events.listenerCount`).
+  // instance form wins and the static is reachable through the module object
+  // (`__node_events.listenerCount`) -- which is the same function in Node, and
+  // which is why `tools/bundle_node_test.sh` routes `EventEmitter.listenerCount(`
+  // there. The body is `__evListenerCountOf` so that this method and
+  // `EventEmitter.prototype.listenerCount` cannot drift apart.
   listenerCount(type: any, listener?: any): number {
-    if (listener === undefined) return __evCountOf(this, type);
-    __evCheckListener(listener);
-    const list: any = __evListOf(this, type);
-    if (list === undefined) return 0;
-    let total = 0;
-    const count = __evLen(list);
-    for (let i = 0; i < count; i++) {
-      const stored: any = list[i];
-      const original: any =
-        stored === undefined || stored === null ? undefined : stored.listener;
-      if (__evSame(stored, listener) || __evSame(original, listener)) total = total + 1;
-    }
-    return total;
+    return __evListenerCountOf(this, type, listener);
   }
 
   eventNames(): any[] {
@@ -1384,6 +1422,134 @@ class EventEmitter {
     return __eventsAddAbortListener(signal, listener);
   }
 }
+
+// ---------------------------------------------------------------------------
+// EventEmitter.prototype
+// ---------------------------------------------------------------------------
+//
+// `EventEmitter.prototype` is a documented, reachable object in Node, and three
+// spellings in Node's own corpus go through it:
+// `EventEmitter.prototype.on.call(recv, type, listener)` (an emitter method
+// applied to a plain object), `EventEmitter.prototype.emit.apply(ee, args)` (the
+// variadic-emit exercise) and `EventEmitter.prototype.constructor.name`.
+//
+// This engine's class prototype object carries neither `constructor` nor the
+// class's methods (https://github.com/UrubuCode/zun/issues/51), and a class
+// method may not be read as a value (https://github.com/UrubuCode/zun/issues/19)
+// — but the prototype object itself is real, stable and writable, so Node's
+// shape is installed onto it here.
+//
+// The **shape of each entry matters**, and only one shape works. A plain
+// function value threads no receiver: `f.call(recv, a, b)` and
+// `f.apply(recv, [a, b])` both deliver the arguments correctly on this build but
+// leave `this` undefined (https://github.com/UrubuCode/zun/issues/1). An
+// **object-literal method** is the one callable the engine does thread a
+// receiver into — `m.call(recv, a, b)` and `m.apply(recv, [a, b])` bind `this`
+// to `recv` *and* pass the arguments through, and it keeps doing so after being
+// read out of the literal and stored in a property. So every prototype entry
+// below is an object-literal method whose body forwards `this` to the same free
+// function the class method calls; the class and the prototype are therefore two
+// spellings of one implementation, never two implementations.
+//
+// Each method value also carries its own `name`, because a function's `name` is
+// otherwise unavailable here (https://github.com/UrubuCode/zun/issues/25) and
+// `test-event-emitter-method-names.js` asserts `E[name].name === name` for
+// every function on the prototype. `on` and `off` are *aliases* of the
+// `addListener` and `removeListener` values, exactly as `lib/events.js` writes
+// them — which is why `E.on === E.addListener` holds and why `E.on.name` is
+// `"addListener"` in Node too.
+const __evProtoMethods: any = {
+  setMaxListeners(n: any): any {
+    const self: any = this;
+    __evValidateNumber(n, "setMaxListeners", 0);
+    self._maxListeners = n;
+    return self;
+  },
+  getMaxListeners(): number {
+    return __evMaxListenersOf(this);
+  },
+  emit(type: any, ...args: any[]): boolean {
+    return __evEmit(this, type, args);
+  },
+  addListener(type: any, listener: any): any {
+    return __evAddListener(this, type, listener, false);
+  },
+  prependListener(type: any, listener: any): any {
+    return __evAddListener(this, type, listener, true);
+  },
+  once(type: any, listener: any): any {
+    const self: any = this;
+    __evCheckListener(listener);
+    return __evAddListener(self, type, __evOnceWrap(self, type, listener), false);
+  },
+  prependOnceListener(type: any, listener: any): any {
+    const self: any = this;
+    __evCheckListener(listener);
+    return __evAddListener(self, type, __evOnceWrap(self, type, listener), true);
+  },
+  removeListener(type: any, listener: any): any {
+    return __evRemoveListener(this, type, listener);
+  },
+  removeAllListeners(type?: any): any {
+    return __evRemoveAllListeners(this, type, type !== undefined);
+  },
+  listeners(type?: any): any[] {
+    return __evListeners(this, type, true);
+  },
+  rawListeners(type?: any): any[] {
+    return __evListeners(this, type, false);
+  },
+  listenerCount(type: any, listener?: any): number {
+    return __evListenerCountOf(this, type, listener);
+  },
+  eventNames(): any[] {
+    return __evEventNames(this);
+  },
+};
+
+// Install one method under its own name. The `name` write is what makes the
+// value self-describing; it has to happen before the value is aliased, so an
+// alias reports the name of the function it aliases (Node's behaviour).
+function __evInstallProtoMethod(proto: any, name: string, method: any): void {
+  const callable: any = method;
+  callable.name = name;
+  proto[name] = callable;
+}
+
+const __evPrototype: any = EventEmitter.prototype;
+
+__evPrototype.constructor = EventEmitter;
+// `lib/events.js` puts the three bookkeeping slots on the prototype as the
+// defaults an emitter that skipped `init()` inherits.
+__evPrototype._events = undefined;
+__evPrototype._eventsCount = 0;
+__evPrototype._maxListeners = undefined;
+
+__evInstallProtoMethod(__evPrototype, "setMaxListeners", __evProtoMethods.setMaxListeners);
+__evInstallProtoMethod(__evPrototype, "getMaxListeners", __evProtoMethods.getMaxListeners);
+__evInstallProtoMethod(__evPrototype, "emit", __evProtoMethods.emit);
+__evInstallProtoMethod(__evPrototype, "addListener", __evProtoMethods.addListener);
+__evInstallProtoMethod(__evPrototype, "prependListener", __evProtoMethods.prependListener);
+__evInstallProtoMethod(__evPrototype, "once", __evProtoMethods.once);
+__evInstallProtoMethod(
+  __evPrototype,
+  "prependOnceListener",
+  __evProtoMethods.prependOnceListener,
+);
+__evInstallProtoMethod(__evPrototype, "removeListener", __evProtoMethods.removeListener);
+__evInstallProtoMethod(
+  __evPrototype,
+  "removeAllListeners",
+  __evProtoMethods.removeAllListeners,
+);
+__evInstallProtoMethod(__evPrototype, "listeners", __evProtoMethods.listeners);
+__evInstallProtoMethod(__evPrototype, "rawListeners", __evProtoMethods.rawListeners);
+__evInstallProtoMethod(__evPrototype, "listenerCount", __evProtoMethods.listenerCount);
+__evInstallProtoMethod(__evPrototype, "eventNames", __evProtoMethods.eventNames);
+// `on` is `addListener` and `off` is `removeListener` — the same value under a
+// second key, as `lib/events.js` assigns them.
+__evPrototype.on = __evPrototype.addListener;
+__evPrototype.off = __evPrototype.removeListener;
 
 // ---------------------------------------------------------------------------
 // Module statics
@@ -1601,10 +1767,9 @@ function __eventsOnce(emitter: any, name: any, options?: any): any {
       reject(err);
     };
 
-    const resolver: any = function (): any {
-      const passed: any[] = [];
-      const count = Number(arguments.length);
-      for (let i = 0; i < count; i++) passed.push(arguments[i]);
+    // A rest parameter, for the reason given above `__evOnceWrap`'s wrapper
+    // (https://github.com/UrubuCode/zun/issues/40).
+    const resolver: any = function (...passed: any[]): any {
       if (__eventsIsEmitterLike(emitter)) {
         emitter.removeListener("error", state.errorListener);
       }
@@ -1717,10 +1882,9 @@ function __eventsOn(emitter: any, event: any, options?: any): any {
     state.attached.push([source, name, handler]);
   };
 
-  const collector: any = function (): void {
-    const passed: any[] = [];
-    const count = Number(arguments.length);
-    for (let i = 0; i < count; i++) passed.push(arguments[i]);
+  // A rest parameter, for the reason given above `__evOnceWrap`'s wrapper
+  // (https://github.com/UrubuCode/zun/issues/40).
+  const collector: any = function (...passed: any[]): void {
     eventHandler(passed);
   };
 
