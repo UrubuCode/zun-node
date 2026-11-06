@@ -34,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       module:
-        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, stream, diagnostics_channel, console, perf_hooks, process, os, fs, child_process, zlib, … or "all")
+        description: Node module to measure (util, assert, path, events, buffer, string_decoder, querystring, punycode, url, timers, stream, diagnostics_channel, console, perf_hooks, readline, process, os, fs, child_process, zlib, … or "all")
         default: all
       limit:
         description: Only the first N tests (0 = all)
@@ -92,14 +92,15 @@ jobs:
           ZUN="$PWD/target/debug/zun"
           EXT="$PWD/zun-node/target/debug/libzun_node.so"
           case "$MODULE" in
-            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks process os fs child_process zlib";;
+            all) MODULES="util assert path events buffer string_decoder querystring punycode url timers stream diagnostics_channel console perf_hooks readline process os fs child_process zlib";;
             *)   MODULES="$MODULE";;
           esac
           test -f "$EXT" || { echo "extension cdylib missing: $EXT" >&2; exit 1; }
           for m in $MODULES; do
             # A pure Zun TypeScript module takes no --ext. An extension module
             # needs it, and so does a TypeScript-over-natives module (`os`),
-            # whose bundle calls into the cdylib.
+            # whose bundle calls into the cdylib -- and `readline`, which calls
+            # into no native itself but whose corpus reads input from files.
             case "$m" in
               util|assert|path|events|buffer|string_decoder|querystring|punycode|url|timers|stream|diagnostics_channel|console|perf_hooks) EXT_ARGS="";;
               *)           EXT_ARGS="--ext $EXT";;

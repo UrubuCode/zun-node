@@ -886,6 +886,35 @@ gets deleted; nothing else in the tracker changes.
   with 22 Rust tests over the engines plus a differential pass through the
   module's own `crc32`. Blocker table in `test/zlib/README.md`, per-test
   breakdown in `test/zlib/RESULTS.md`.
+- **`node:readline` + `node:readline/promises`: complete, in three files —
+  `src/readline/readline.ts`, `src/readline/callback.ts`,
+  `src/readline/promises.ts`.** The whole line editor and the whole keypress
+  decoder: `Interface` with every option (`input`, `output`, `completer`,
+  `terminal`, `historySize`, `history`, `removeHistoryDuplicates`, `prompt`,
+  `crlfDelay`, `escapeCodeTimeout`, `tabSize`, `signal`), the
+  `line`/`close`/`pause`/`resume`/`history`/`SIGINT`/`SIGTSTP`/`SIGCONT`
+  events, `question` in both the callback and the promise shape with an
+  `AbortSignal`, `prompt`, `write` with the full key-sequence grammar,
+  `line`/`cursor`/`getCursorPos`, async iteration over lines with the high/low
+  watermark and `Symbol.for('nodejs.watermarkData')`, `emitKeypressEvents`, the
+  four cursor callbacks (`clearLine`, `clearScreenDown`, `cursorTo`,
+  `moveCursor`) and the `Readline` class of `readline/promises`. The history
+  manager is `lib/internal/repl/history.js`' `ReplHistory` without its
+  file-backed half, which only the REPL reaches. **It is the first module that
+  is three files, and the split is forced:** both module objects bind the name
+  `Interface` to a different class, the name has to be a top-level class
+  because `new <object>.Ctor()` does not reach a constructor (zun#18) while
+  Node's own tests spell `new readline.Interface(...)`, and two top-level
+  declarations of one name do not compile — so `callback.ts` and `promises.ts`
+  each declare one and the bundler inlines whichever the test requires. Node's
+  symbol-keyed internal surface is spelled with the underscore names
+  `lib/readline.js` re-exposes (`_ttyWrite`, `_refreshLine`, …), since there is
+  no define-property-over-a-prototype model here (zun#25). Three
+  function-valued fields (`completer`, `_questionCallback`, `_questionReject`)
+  are boxed, because a function written into a class instance field is silently
+  discarded (zun#78), and every regular expression is a hand-written scan,
+  because a `RegExp` read out of a module-level `const` inside a function has
+  lost its methods (zun#7). Table in `test/readline/README.md`.
 - **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
   `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
   `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,

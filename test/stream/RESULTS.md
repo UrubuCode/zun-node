@@ -89,7 +89,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-pipeline-uncaught.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-stream-pipeline-with-empty-string.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-stream-pipeline.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-stream-pipeline.js: |
-| `test-stream-preprocess.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-stream-preprocess.js: |
+| `test-stream-preprocess.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-stream-promises.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-stream-push-order.js` | ✅ pass | |
 | `test-stream-push-strings.js` | ❌ type error | bundles/test-stream-push-strings.ts:23760:10: error: [SEM0001] no field or setter '_chunks' on this type |
