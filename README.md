@@ -19,7 +19,10 @@ A Node module lands here in whichever form fits what it actually does:
   (`src/punycode/punycode.ts`) and `url` (`src/url/url.ts`) are the same kind;
   `url` stands on the other two plus `path`, and re-exports the engine's
   prelude `URL`/`URLSearchParams`, which is the relationship `node:url` has with
-  the globals in Node.
+  the globals in Node. `stream` (`src/stream/stream.ts`) is the largest of
+  them: pure computation over `events`, `process.nextTick`, the global `Buffer`
+  and `string_decoder` — exactly the dependency set `lib/internal/streams/*`
+  has.
 - **Zun TypeScript over natives** — both, with the seam drawn where the
   capability changes. `os` is the first: the facts it reports are syscalls
   (`src/os/`, Rust), while the module *Node* exposes is objects, arrays,
@@ -64,7 +67,7 @@ Because the engine has no CommonJS `require` or module resolution
 tests are first passed through
 [`tools/bundle_node_test.sh`](tools/bundle_node_test.sh), which inlines the
 util/events/process/assert/path/querystring/punycode/url modules, the modules
-the test actually requires (`os`, `buffer`, `string_decoder`) and the
+the test actually requires (`os`, `buffer`, `string_decoder`, `stream`) and the
 `common` harness (plus `node:test` when the test requires it) ahead of the test body,
 rewrites its `require` lines to the one object each
 inlined module exposes (`__node_events`, `__node_assert`, …), and appends the
@@ -156,7 +159,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
 
-`████░░░░░░░░░░░░░░░░░░░░` **17.1%** — 6 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+`████████░░░░░░░░░░░░░░░░` **34.2%** — 12 / 35 Node `test-event-emitter-*|test-events-*` tests passing
 <!-- node-events:end -->
 
 > `events` is implemented end to end — the whole `EventEmitter` surface plus every
@@ -182,7 +185,17 @@ the direct `zun run --ext <lib> <test.js>` path.
 > prototype instead of creating an own property). The one file now standing on a
 > single line is `test-event-emitter-listeners-side-effects.js`:
 > `Object.create(null) instanceof Object` answers `true`
-> ([zun#26](https://github.com/UrubuCode/zun/issues/26)). The full
+> ([zun#26](https://github.com/UrubuCode/zun/issues/26)).
+>
+> Six more files came in with `stream`, and none of them needed a line of
+> `events.ts`: the bundler learned to collapse a **renamed alias** of a
+> canonical binding — `const { EventEmitter: EE } = require('events')` and
+> `const EE = require('events').EventEmitter;` both leave `EE` bound to the
+> class now — because a class base must be the original class's own identifier
+> ([zun#21](https://github.com/UrubuCode/zun/issues/21)) and `new EE()` over a
+> class *value* answers `undefined` at run time. A seventh came from the
+> coded-error bases printing their `code` in `String(err)` the way Node's do,
+> which is what `assert.throws(fn, /ERR_SOMETHING/)` matches against. The full
 > blocker-by-blocker table is in [`test/events/README.md`](test/events/README.md),
 > the per-test breakdown in [`test/events/RESULTS.md`](test/events/RESULTS.md).
 
@@ -368,6 +381,97 @@ the direct `zun run --ext <lib> <test.js>` path.
 > spread into a built-in. The blocker-by-blocker table is in
 > [`test/url/README.md`](test/url/README.md), the per-test breakdown in
 > [`test/url/RESULTS.md`](test/url/RESULTS.md).
+
+<!-- node-stream:start -->
+### Node.js v25 `stream` compatibility
+
+`████████░░░░░░░░░░░░░░░░` **33.3%** — 68 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
+<!-- node-stream:end -->
+
+> `stream` is the largest module here by a wide margin — 204 Node files against
+> `src/stream/stream.ts` — and it is implemented end to end: `Stream` with the
+> legacy `pipe`, `Readable` (flowing and paused modes, `read`, `push`,
+> `unshift`, `setEncoding` over `string_decoder`, `pipe`/`unpipe` with the
+> `awaitDrainWriters` set, backpressure, objectMode, `destroy`, async
+> iteration, `Readable.from`, `wrap`), `Writable`
+> (`write`/`end`/`cork`/`uncork`, `_writev` batching, `_final`, `drain`),
+> `Duplex` (+ `Duplex.from` in all seven shapes), `Transform`, `PassThrough`,
+> `pipeline` in both forms, `finished`, `addAbortSignal`, `compose`, `destroy`,
+> `duplexPair`, the `is*` predicates, the default-high-water-mark pair,
+> `stream/promises`, and all eleven async operators. The state machines are
+> Node's `lib/internal/streams/*.js` transcribed instruction for instruction,
+> because which of `'end'`, `'finish'`, `'close'`, `'error'` and `'drain'`
+> fires in which `process.nextTick` turn is pinned by this corpus and derivable
+> from nothing else — Node 25's bit-packed `kState` is plain properties here
+> only because the tests read two dozen state fields straight off the state
+> object. Since most of the corpus is blocked before its first assertion, the
+> module is verified the way `os`, `string_decoder` and `url` are: **two
+> differential runs against Node** over 46 scenarios — the event order of every
+> class, the whole error matrix, `cork`/`_writev`, the option flags, `read(n)`
+> slicing, every operator, async iteration, `pipeline`, `compose`,
+> `duplexPair`, `addAbortSignal` — with **one divergence**, an interleaving
+> between two *independent* streams rather than a reordering inside one. Three
+> real bugs came out of those runs rather than out of the corpus, which is the
+> point of them.
+>
+> Two shapes the engine forces, both argued at the top of the file. The two
+> states are **plain objects**, because a function assigned to a class *field*
+> stops being callable (a new engine bug, one of five found here) and
+> `onwrite`, the eight option hooks and the parked Transform callback are all
+> functions. And the eight overridable hooks (`_read`, `_write`, `_writev`,
+> `_final`, `_destroy`, `_construct`, `_transform`, `_flush`) are **accessor
+> pairs over `state.fns`** rather than methods: 51 of the 204 files assign a
+> hook onto an instance and 26 subclass, a class member cannot be both, and the
+> "is there an implementation?" question cannot be asked without making the
+> call — so the dispatchers make it and read the engine's own
+> `TypeError: _read is not a function` as the answer. One deliberate deviation:
+> a byte-mode **string** chunk stays a string instead of becoming a Buffer,
+> because `Buffer.from` rejects an `any`
+> ([zun#58](https://github.com/UrubuCode/zun/issues/58)), a view is opaque
+> through one ([zun#38](https://github.com/UrubuCode/zun/issues/38)) and the GC
+> frees its backing store
+> ([zun#55](https://github.com/UrubuCode/zun/issues/55)); the accounting still
+> charges Node's UTF-8 byte length, so every high water mark and `drain`
+> threshold agrees with Node.
+>
+> The number is what it is because the corpus reaches for language features
+> rather than for stream features. The largest single group is the twenty-one
+> files that require a module which does not exist yet (`fs`, `http`, `http2`,
+> `net`, `timers/promises`, `readline`, `async_hooks`, `child_process`,
+> `internal/test/binding`), and the two after it are new engine bugs found by
+> this work: **a derived class cannot introduce an instance field** (10 files) (`class MyReadable extends Readable { constructor() { super();
+> this.n = 0; } }` does not compile — field inference from a constructor
+> assignment is gated on the class having no base), and **a constructor's
+> declared parameters are all required** (11 files; `new MyWritable()` on a
+> `constructor(options)` is a compile error, although
+> [zun#61](https://github.com/UrubuCode/zun/issues/61) records that a plain
+> function accepts too few). Behind them: `setTimeout`/`setImmediate` reject a
+> dynamic callback ([zun#29](https://github.com/UrubuCode/zun/issues/29)), a
+> `number` cannot be a Buffer size
+> ([zun#58](https://github.com/UrubuCode/zun/issues/58)), `this` inside a
+> listener is `undefined` ([zun#1](https://github.com/UrubuCode/zun/issues/1)),
+> there is no function-constructor model for `Readable.call(this)`
+> ([zun#25](https://github.com/UrubuCode/zun/issues/25)), and a `functionBox`
+> handed to `Promise.prototype.then` is silently never called — which is what
+> `promise.then(common.mustCall())` is, so the harness cannot verify those
+> counts at all (a fifth new engine bug). **Every failure traced so far lands
+> outside `stream.ts`** — those groups account for every bundle failure and
+> every compile error in the corpus.
+>
+> `stream` also brought three *generic* bundler rules for canonical bindings,
+> all of them engine workarounds over the module table's new comma-separated
+> third column: a member read through the module alias
+> (`stream.Readable` → `Readable`, because `new <object>.Ctor()` answers
+> `undefined is not a function` at run time —
+> [zun#18](https://github.com/UrubuCode/zun/issues/18)), a renamed
+> destructuring (`const { Readable: R } = require('stream')`, because a class
+> base must be the original identifier —
+> [zun#21](https://github.com/UrubuCode/zun/issues/21)), and the renamed member
+> spelling (`const EE = require('events').EventEmitter`). The last two lifted
+> **`events` from 6/35 to 12/35** on their own: six of its files were blocked on
+> nothing but the alias. The blocker-by-blocker table is in
+> [`test/stream/README.md`](test/stream/README.md), the per-test breakdown in
+> [`test/stream/RESULTS.md`](test/stream/RESULTS.md).
 
 ## Running the tracker locally
 

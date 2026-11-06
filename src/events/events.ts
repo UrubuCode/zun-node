@@ -265,12 +265,21 @@ function __evReceived(value: any): string {
 // carry: this is simply the correct shape.
 //
 // `name` is not overridden: a subclass of `TypeError` already reports
-// `"TypeError"`, and `toString()` / `${err}` compose it correctly.
+// `"TypeError"`. `toString()` is, on all three, because Node overrides it: a
+// coded error prints `TypeError [ERR_INVALID_ARG_TYPE]: <message>` although
+// `err.name` stays `"TypeError"`. That is not cosmetic —
+// `assert.throws(fn, /ERR_SOMETHING/)` matches the regular expression against
+// `String(err)`, which is how a large part of Node's corpus spells its
+// expectations (eleven files in the `stream` corpus alone), and without the
+// code in the string form none of them can pass.
 class NodeTypeError extends TypeError {
   code: string = "";
   constructor(code: string, message: string) {
     super(message);
     this.code = code;
+  }
+  toString(): string {
+    return this.name + " [" + this.code + "]: " + this.message;
   }
 }
 
@@ -280,6 +289,9 @@ class NodeRangeError extends RangeError {
     super(message);
     this.code = code;
   }
+  toString(): string {
+    return this.name + " [" + this.code + "]: " + this.message;
+  }
 }
 
 class NodeError extends Error {
@@ -287,6 +299,9 @@ class NodeError extends Error {
   constructor(code: string, message: string) {
     super(message);
     this.code = code;
+  }
+  toString(): string {
+    return this.name + " [" + this.code + "]: " + this.message;
   }
 }
 

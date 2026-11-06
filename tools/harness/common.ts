@@ -404,12 +404,6 @@ const __node_domain: any = {
   },
 };
 
-// `node:stream` is required by `test-event-emitter-prepend.js`. `stream` is its
-// own library in the roadmap (PLAN.md), so this is a declared gap, not a shim.
-const __node_stream: any = {
-  Stream: undefined,
-};
-
 // `node:vm` is required by `test-querystring.js`, which uses
 // `vm.runInNewContext('({"foo": ["bar", "baz"]})')` to obtain a plain object
 // from *another realm* and check that `querystring.stringify` handles it. A

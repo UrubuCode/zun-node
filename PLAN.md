@@ -568,6 +568,51 @@ gets deleted; nothing else in the tracker changes.
   class has no constructor body, so `new URL(...)` fills its fields
   positionally and the lazy parser short-circuits). Table in
   `test/url/README.md`.
+- **`node:stream`: implemented in `src/stream/stream.ts`, measured against the
+  full Node corpus (204 files in `test/parallel`).** `Stream` (the legacy base,
+  with the old `pipe`), `Readable` (flowing and paused modes, `read`, `push`,
+  `unshift`, `setEncoding` over `string_decoder`, `pipe`/`unpipe` with the
+  `awaitDrainWriters` set, backpressure, objectMode, `destroy`,
+  `Symbol.asyncIterator`, `iterator(options)`, `Readable.from`, `wrap`, and
+  every `readable*` accessor), `Writable` (`write`/`end`/`cork`/`uncork`,
+  `_writev` batching, `_final`, `drain`, `setDefaultEncoding`, and every
+  `writable*` accessor), `Duplex` (+ `Duplex.from` over a Duplex, a
+  `{ readable, writable }` pair, a Readable, a Writable, a function, an
+  iterable and a promise), `Transform`, `PassThrough`, `pipeline` (callback and
+  promise forms, with function stages and the `AbortSignal` option),
+  `finished`, `addAbortSignal`, `compose`, `destroy`, `duplexPair`,
+  `isReadable`/`isWritable`/`isErrored`/`isDisturbed`/`isDestroyed`,
+  `getDefaultHighWaterMark`/`setDefaultHighWaterMark`, `stream/promises`, and
+  the eleven async operators (`map`, `filter`, `forEach`, `toArray`, `some`,
+  `find`, `every`, `flatMap`, `drop`, `take`, `reduce`). The state machines are
+  Node's `lib/internal/streams/*.js` transcribed instruction for instruction,
+  because which of `'end'`/`'finish'`/`'close'`/`'error'`/`'drain'` fires in
+  which `nextTick` turn is pinned by the corpus and derivable from nothing
+  else; Node 25's bit-packed `kState` is plain properties here, because the
+  tests read two dozen state fields directly. Verified by **two differential
+  runs against Node** — 46 scenarios over both drivers, covering the event
+  order of every class, the whole error matrix, `cork`/`_writev`, the option
+  flags, `read(n)` slicing, all eleven operators, async iteration, `pipeline`,
+  `compose`, `duplexPair` and `addAbortSignal`: **one divergence**, and it is an
+  interleaving between two independent streams rather than a reordering inside
+  one. Two shapes the engine forces, both documented at the top of the file:
+  the two states are **plain objects** (a function assigned to a class field
+  stops being callable — a new engine bug), and the eight overridable hooks are
+  **accessor pairs over `state.fns`** rather than methods, because 51 of the
+  204 files assign a hook onto an instance while 26 subclass, and a class
+  member cannot be both. One deliberate deviation: a byte-mode **string** chunk
+  stays a string instead of becoming a Buffer, since `Buffer.from` rejects an
+  `any`, a view is opaque through one, and the GC does not trace its backing
+  store — the accounting still charges Node's UTF-8 byte length, so every high
+  water mark and `drain` threshold agrees. **Not done, by capability:**
+  `toWeb`/`fromWeb`, `stream/web` and `stream/consumers.arrayBuffer`/`blob`
+  (the engine has no WHATWG stream globals), `instanceof Writable` for a Duplex
+  (needs `Symbol.hasInstance`) and the `ReadableState`/`WritableState`
+  constructors. `stream` also brought three generic bundler rules for canonical
+  bindings — a member read through the module alias, a renamed destructuring,
+  and the renamed member spelling — which lifted `events` from 6/35 to 12/35 on
+  their own. Blocker-by-blocker table in `test/stream/README.md`, per-test
+  breakdown in `test/stream/RESULTS.md`.
 - **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
   `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
   `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,

@@ -30,6 +30,16 @@
 #     name `EventEmitter` bound to that class; only the *other* destructured
 #     names are taken from `__node_events`.
 #
+#   * `stream` is the same case six times over: `Stream`, `Readable`,
+#     `Writable`, `Duplex`, `Transform` and `PassThrough` all have to stay
+#     bound to their classes, so the canonical column is a comma-separated
+#     **list**. Three further rewrites come with it, all of them engine
+#     workarounds and all generic over that column: a member read through the
+#     module alias (`stream.Readable` -> `Readable`, zun#18), a renamed
+#     destructuring (`const { Readable: R } = require('stream')`, zun#21) and
+#     the renamed member spelling (`const EE = require('events').EventEmitter`).
+#     The last two are why `events` reads 12/35 rather than 6/35.
+#
 #   * `util/types` is the *same object* as `util.types`, and `internal/util` is
 #     `util`'s own implementation surface (`sleep`, `emitExperimentalWarning`,
 #     `pendingDeprecate`, `customPromisifyArgs`), which lives in
@@ -111,7 +121,16 @@ url __node_url -
 internal/url __node_internal_url -
 child_process __node_child_process -
 domain __node_domain -
-stream __node_stream -
+stream __node_stream Stream,Readable,Writable,Duplex,Transform,PassThrough
+stream/promises __node_stream_promises -
+stream/web __node_stream_web -
+stream/consumers __node_stream_consumers -
+internal/streams/add-abort-signal __node_internal_streams_add_abort_signal -
+_stream_readable Readable Readable
+_stream_writable Writable Writable
+_stream_duplex Duplex Duplex
+_stream_transform Transform Transform
+_stream_passthrough PassThrough PassThrough
 vm __node_vm -
 test __node_test test
 tty __node_tty -
@@ -159,6 +178,24 @@ os src/os/os.ts
 buffer src/buffer/buffer.ts
 string_decoder src/buffer/buffer.ts
 string_decoder src/string_decoder/string_decoder.ts
+stream src/buffer/buffer.ts
+stream src/string_decoder/string_decoder.ts
+stream src/stream/stream.ts
+stream/promises src/buffer/buffer.ts
+stream/promises src/string_decoder/string_decoder.ts
+stream/promises src/stream/stream.ts
+stream/web src/buffer/buffer.ts
+stream/web src/string_decoder/string_decoder.ts
+stream/web src/stream/stream.ts
+stream/consumers src/buffer/buffer.ts
+stream/consumers src/string_decoder/string_decoder.ts
+stream/consumers src/stream/stream.ts
+_stream_readable src/buffer/buffer.ts
+_stream_readable src/string_decoder/string_decoder.ts
+_stream_readable src/stream/stream.ts
+internal/streams/add-abort-signal src/buffer/buffer.ts
+internal/streams/add-abort-signal src/string_decoder/string_decoder.ts
+internal/streams/add-abort-signal src/stream/stream.ts
 test tools/harness/node_test.ts
 tty tools/harness/node_test.ts
 punycode src/punycode/deprecation.ts
@@ -231,11 +268,40 @@ trap 'rm -f "$REWRITE"' EXIT
   printf "s|require('\\(node:\\)\\{0,1\\}path/posix')|posix|g\n"
   printf "s|require('\\(node:\\)\\{0,1\\}path/win32')|win32|g\n"
 
-  printf '%s\n' "$MODULE_SPECS" | while read -r name obj canon; do
+  printf '%s\n' "$MODULE_SPECS" | while read -r name obj canons; do
     [ -n "${name:-}" ] || continue
     pat="require('\\(node:\\)\\{0,1\\}$name')"
 
+    # The canonical-binding column is a comma-separated LIST, because
+    # `stream` has six of them (`Stream`, `Readable`, `Writable`, `Duplex`,
+    # `Transform`, `PassThrough`) where `events` has one. Every rule below
+    # is emitted once per name.
+    for canon in $(printf '%s' "$canons" | tr ',' ' '); do
     if [ "$canon" != "-" ]; then
+      # A **renamed** destructuring of a canonical binding --
+      # `const { Readable: R } = require('stream')`, which four of the
+      # `test-stream2-*` files open with -- cannot keep the new name: a class
+      # base must be the original class's own identifier, so `class T extends R`
+      # is rejected outright (https://github.com/UrubuCode/zun/issues/21) and
+      # `new R()` over a class *value* answers undefined at run time. The two
+      # names denote the same class, so the alias is collapsed back to the
+      # canonical one: `Readable: R` in the brace list becomes `Readable`
+      # (which the removal rules below then drop), and every later `R` becomes
+      # `Readable`.
+      for alias in $(sed -n "s%^[[:space:]]*\(const\|let\|var\)[[:space:]]*{[^}]*$canon[[:space:]]*:[[:space:]]*\([A-Za-z_][A-Za-z0-9_]*\)[^}]*}[[:space:]]*=[[:space:]]*require('\(node:\)\{0,1\}$name')[[:space:]]*;.*\$%\2%p" "$SRC" | sort -u); do
+        printf "/%s/{ s#%s[[:space:]]*:[[:space:]]*%s#%s#g; }
+" "$pat" "$canon" "$alias" "$canon"
+        printf "s#\\\\b%s\\\\b#%s#g
+" "$alias" "$canon"
+      done
+      # The same collapse for the member spelling with a new name:
+      # `const EE = require('events').EventEmitter;` -- `class T extends EE`
+      # is the same rejected alias (zun#21).
+      for alias in $(sed -n "s%^[[:space:]]*\(const\|let\|var\)[[:space:]]\{1,\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=[[:space:]]*require('\(node:\)\{0,1\}$name')\.$canon[[:space:]]*;.*\$%\2%p" "$SRC" | sort -u); do
+        [ "$alias" != "$canon" ] || continue
+        printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}%s[[:space:]]*=[[:space:]]*%s\.%s[[:space:]]*;[[:space:]]*\$##\n" "$alias" "$pat" "$canon"
+        printf "s#\\\\b%s\\\\b#%s#g\n" "$alias" "$canon"
+      done
       # `const <canon> = require('<name>');`  -> the binding already exists.
       printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}%s[[:space:]]*=[[:space:]]*%s[[:space:]]*;[[:space:]]*\$##
 " "$canon" "$pat"
@@ -259,6 +325,7 @@ trap 'rm -f "$REWRITE"' EXIT
       printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}{[[:space:]]*}[[:space:]]*=[[:space:]]*%s[[:space:]]*;[[:space:]]*\$##
 " "$pat"
     fi
+    done
 
     # A bare `require('<name>');` for its side effects only.
     printf "s#^%s[[:space:]]*;[[:space:]]*\$##
@@ -268,6 +335,31 @@ trap 'rm -f "$REWRITE"' EXIT
     printf "s#%s#%s#g
 " "$pat" "$obj"
   done
+  # Engine workaround (https://github.com/UrubuCode/zun/issues/18): `new
+  # <object>.Ctor()` compiles but answers `undefined is not a function` at run
+  # time, so a test that keeps the module object in a local and constructs
+  # through it -- `const stream = require('stream'); new stream.Readable()`,
+  # which 54 of the 204 files in the stream corpus do -- cannot reach the
+  # class at all. Every canonical binding is already a top-level name in the
+  # bundle, so a member read of one through the local alias is rewritten to
+  # that name: `stream.Readable` becomes `Readable`, which denotes the same
+  # object and only changes the lane the engine takes. The rule is skipped
+  # when the alias *is* the canonical name (`const path = require('path')`
+  # must keep `path.join` as it is).
+  printf '%s
+' "$MODULE_SPECS" | while read -r name obj canons; do
+    [ -n "${name:-}" ] || continue
+    [ "${canons:-}" != "-" ] || continue
+    aliases="$(sed -n "s%^[[:space:]]*\(const\|let\|var\)[[:space:]]\{1,\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=[[:space:]]*require('\(node:\)\{0,1\}$name')[[:space:]]*;.*\$%\2%p" "$SRC" | sort -u)"
+    for alias in $aliases; do
+      for canon in $(printf '%s' "$canons" | tr ',' ' '); do
+        [ "$alias" != "$canon" ] || continue
+        printf "s#\\\\b%s\\.%s\\\\b#%s#g
+" "$alias" "$canon" "$canon"
+      done
+    done
+  done
+
 } > "$REWRITE"
 
 # ---------------------------------------------------------------------------
