@@ -817,6 +817,43 @@ gets deleted; nothing else in the tracker changes.
   `Map` rather than Node's `{ __proto__: null }`, which is the CVE-2022-21824
   fix carried over to an engine where a null-prototype object is not a safe
   accumulator either (zun#46, zun#47). Table in `test/console/README.md`.
+- **`node:zlib`: implemented except zstd, TS over natives (the `os` kind), in
+  `src/zlib/*.rs` + `src/zlib/zlib.ts`.** The Rust half keeps one `z_stream`
+  (or Brotli encoder/decoder) per handle in a handle table of the shape
+  `src/fs/fd.rs` uses, and follows Node's own `src/node_zlib.cc` call for call:
+  the per-mode `windowBits` rewriting (negative for raw, +16 for gzip, +32 for
+  auto-detect, 0 for "read it from the header"), the `Z_NEED_DICT` retry that
+  keeps "Missing dictionary" distinguishable from "Bad dictionary", the
+  concatenated-gzip member loop, and the error classification that turns a
+  truncated stream into `Z_BUF_ERROR`/`unexpected end of file`. The engines are
+  `libz-rs-sys` (the C API of `zlib-rs`, a memory-safe Rust rewrite of zlib
+  whose output is byte-identical to zlib's) and the `brotli` crate (a port of
+  the reference encoder and decoder) — both pure Rust, which keeps principle 2's
+  "an extension carries no VM and no C toolchain" intact; `miniz_oxide` was
+  rejected because it is deliberately not output-compatible and offers neither
+  `windowBits`, `memLevel`, `strategy`, dictionaries nor `deflateParams`.
+  The TypeScript half is `lib/zlib.js`: the nine `Transform` classes, the
+  `create*` factories, the nine `*Sync` and nine callback convenience methods
+  with `maxOutputLength`/`ERR_BUFFER_TOO_LARGE` and `info`, `crc32`, the frozen
+  `constants`/`codes` tables and the legacy top-level `Z_*` aliases,
+  `flush`/`params`/`reset`/`close`, `bytesWritten`, and
+  `checkRangesOrGetDefault` over every option. The chunking loop is Node's
+  `processChunk`/`processChunkSync` instruction for instruction, including
+  `_outOffset`, so the chunk boundaries a `'data'` listener sees are Node's;
+  only the *scheduling* differs, because the natives are synchronous and the
+  engine has no threadpool to hand a compression job to — which is the whole
+  content of the one deviation, a `writableEnded` guard in `params()` where
+  Node relies on the write still being queued.
+  **Three things are deliberately not here.** zstd (`ZstdCompress` and its
+  methods): every pure-Rust zstd crate today is decompression-only, so it would
+  cost the no-`cc` build. `zlib.Deflate()` without `new` (Node's DEP0184 form):
+  a class is not callable in this engine (zun#25). And the bytes are invisible
+  to the corpus: a typed array is opaque through an `any` binding (zun#38), so
+  `zlib.gzipSync(x).length` reads `undefined` in a test even though the bytes
+  are right — which is why the module is verified the way `os` and `stream` are,
+  with 22 Rust tests over the engines plus a differential pass through the
+  module's own `crc32`. Blocker table in `test/zlib/README.md`, per-test
+  breakdown in `test/zlib/RESULTS.md`.
 - **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
   `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
   `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,

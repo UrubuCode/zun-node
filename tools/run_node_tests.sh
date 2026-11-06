@@ -108,6 +108,11 @@ case "$MODULE" in
   # src/process/*.rs, and src/process/native.ts -- the only file that imports
   # them -- is inlined by the bundler just for the bundles that get `--ext`.
   process) KIND="zun-ts+ext"; PATTERNS="test-process-";                   PATTERN="test-process-";;
+  # `zlib` is TS over natives: the nine `Transform` classes and the whole
+  # convenience surface are src/zlib/zlib.ts, and the compression engines
+  # (zlib-rs and the Rust Brotli port) are src/zlib/*.rs. Its corpus is
+  # `test-zlib*`, which includes `test-zlib.js` itself.
+  zlib)   KIND="zun-ts+ext"; PATTERNS="test-zlib";                         PATTERN="test-zlib";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 

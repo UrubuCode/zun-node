@@ -1,0 +1,11 @@
+# Fixtures Node's own `test-zlib*` files open, as repository-relative paths.
+# `tools/run_node_tests.sh` downloads each one next to the test file so the
+# harness's `path.join(__dirname, "..", "fixtures")` finds it.
+test/fixtures/person.jpg
+test/fixtures/person.jpg.gz
+test/fixtures/person.jpg.br
+test/fixtures/pseudo-multimember-gzip.gz
+test/fixtures/pseudo-multimember-gzip.z
+test/fixtures/pss-vectors.json
+test/fixtures/elipses.txt
+test/fixtures/empty.txt

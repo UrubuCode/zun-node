@@ -154,6 +154,7 @@ _stream_writable Writable Writable
 _stream_duplex Duplex Duplex
 _stream_transform Transform Transform
 _stream_passthrough PassThrough PassThrough
+zlib __node_zlib Deflate,Inflate,Gzip,Gunzip,DeflateRaw,InflateRaw,Unzip,BrotliCompress,BrotliDecompress
 vm __node_vm -
 crypto __node_crypto -
 test __node_test test
@@ -242,6 +243,10 @@ _stream_readable src/stream/stream.ts
 internal/streams/add-abort-signal src/buffer/buffer.ts
 internal/streams/add-abort-signal src/string_decoder/string_decoder.ts
 internal/streams/add-abort-signal src/stream/stream.ts
+zlib src/buffer/buffer.ts
+zlib src/string_decoder/string_decoder.ts
+zlib src/stream/stream.ts
+zlib src/zlib/zlib.ts
 test tools/harness/node_test.ts
 punycode src/punycode/deprecation.ts
 fs src/fs/fs.ts

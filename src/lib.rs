@@ -67,6 +67,7 @@ pub mod child_process;
 pub mod fs;
 pub mod os;
 pub mod process;
+pub mod zlib;
 
 thread_local! {
     /// Backing storage for the most recent `Str` result on this thread.
@@ -373,6 +374,12 @@ const CHILD_PROCESS_MODULE_KEYS: &[&[u8]] = &[b"node:child_process\0"];
 /// no extension at all. See `src/process/mod.rs`.
 const PROCESS_MODULE_KEYS: &[&[u8]] = &[b"node:process\0"];
 
+/// Module key the `zlib` natives are published under, on the same single-key
+/// rule. The Node-shaped module is `src/zlib/zlib.ts`, which imports this one
+/// and reshapes it into the nine `Transform` classes and their convenience
+/// methods; see `src/zlib/mod.rs`.
+const ZLIB_MODULE_KEYS: &[&[u8]] = &[b"node:zlib\0"];
+
 /// ABI v1 registration entry point. The host calls this once after loading the
 /// library, passing a validated [`ZunRegistry`]; it publishes every module.
 ///
@@ -406,6 +413,12 @@ pub unsafe extern "C" fn zun_register_v1(registry: *mut ZunRegistry) -> i32 {
     }
     for module in PROCESS_MODULE_KEYS {
         let status = unsafe { register_module(registry, module, process::DESCRIPTORS) };
+        if status != 0 {
+            return status;
+        }
+    }
+    for module in ZLIB_MODULE_KEYS {
+        let status = unsafe { register_module(registry, module, zlib::DESCRIPTORS) };
         if status != 0 {
             return status;
         }
