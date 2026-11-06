@@ -22,33 +22,39 @@
 // Engine workarounds in this file, each tied to an open zun issue
 // (https://github.com/UrubuCode/zun/issues)
 // ---------------------------------------------------------------------------
-//   * `__evUnbox` / `__evIsFn` — a function stored in an array still arrives as
-//     a `functionBox` record, so `typeof arr[0]` is `"object"` and
-//     `arr.indexOf(fn)` answers -1 (zun#17). Identity itself was fixed —
-//     `arr[0] === fn` is `true` again — but a callability test and an `indexOf`
-//     still have to go through the record's readable `__boxedFn` slot, so every
-//     one in this file does. (`__evSame` is now plain `===` under the hood and
-//     is kept as the one place that would change if boxing came back.)
+//   * `__evUnbox` / `__evIsBox` / `__evIsFn` — a function stored in an array
+//     still arrives as a `functionBox` record, and `arr.indexOf(fn)` answers -1
+//     for a bare one (zun#17). Identity holds (`arr[0] === fn`) and `typeof` a
+//     box now says `"function"` rather than `"object"` — which is *why* the
+//     unwrap helpers probe both: guarding on `"object"` alone left every boxed
+//     callable unopened. `__evBox` is still needed where a listener has to
+//     carry a property (a once-wrapper's `.listener`), because a **bare**
+//     function loses its own properties on the way into an array.
 //   * `__evCall` — a listener is invoked as `fn(...args)` and never as
-//     `fn.apply(this, args)`: `apply`/`call` still thread no receiver, so `this`
-//     inside a listener is always `undefined` (zun#1; the argument-shifting half
-//     of that issue *is* fixed — `f.apply(null, [a, b])` now passes `a, b`).
-//     That is the single biggest gap of this module — see
-//     ../../test/events/README.md.
-//   * symbol-keyed slots hold an **array** even for a single listener: assigning
-//     a function value under a symbol key on a dynamic object silently stores
-//     nothing (`o[sym] = fn; o[sym] === undefined`), while an array value
-//     round-trips (zun#32). String-keyed slots keep Node's exact shape.
-//   * `__evTypes` — a function-valued property is still invisible to
-//     `Object.keys`, `Object.getOwnPropertyNames`, `Reflect.ownKeys` and
-//     `hasOwnProperty` (zun#32), so `eventNames()` cannot read the key set back
-//     out of `_events`; the insertion order is tracked alongside it. Only the
-//     `in` operator sees such a property now.
-//   * `__evRawDelete` — `delete` does not clear a function-valued property and
-//     `delete o[sym]` throws "Cannot convert a Symbol value to a string"
-//     (zun#32). Writing `undefined` is the only clear that works for both. The
-//     third part of that issue is fixed: a function written over a slot that
-//     holds `undefined` is no longer shadowed by it.
+//     `fn.apply(this, args)`: `apply` threads no receiver into a plain function
+//     value, so `this` inside a listener is always `undefined`, and the
+//     argument-shifting half of zun#1 is **not** fixed for one either —
+//     `f.apply(recv, [a, b])` reaches `f` as `f(recv, a)`. Only an
+//     object-literal **method** gets both right. That is the single biggest gap
+//     of this module — see ../../test/events/README.md.
+//   * `__evRawGet` — a computed read with a *variable* key resolves
+//     `Object.prototype`'s members even on a null-prototype object, so
+//     `_events[type]` answers `Object.prototype.toString` for the event name
+//     `toString`. Every slot read asks `in` first (a new engine regression).
+//   * `__evRawSet` — `events.__proto__ = value` sets the *prototype* of a
+//     null-prototype object instead of creating an own property, except when
+//     the value is a bare callable. `Object.defineProperty` is exact for every
+//     other value and is what the helper uses (a new engine regression).
+//   * `__evTypes` — the key insertion order is tracked alongside `_events`,
+//     because a **symbol** key is invisible to `Object.getOwnPropertySymbols`
+//     and `sym in obj` throws (zun#32's remaining half), so `eventNames()`
+//     cannot read the full key set back out. String keys *are* visible to
+//     `Object.keys`/`getOwnPropertyNames`/`Reflect.ownKeys`/`for-in` in
+//     insertion order now, function-valued ones included.
+//   * `__evRawDelete` — `delete obj[sym]` is rejected by the checker outright
+//     ("`delete obj[k]` requires a string key"), so a symbol slot is blanked
+//     with `undefined` instead. A *string* key needs no special case any more:
+//     `delete` clears a function-valued property (zun#32).
 //   * `splice`'s start index must be an integer, which only an `any`-typed array
 //     receiver accepts; array-held flags such as `warned` likewise need an `any`
 //     receiver.
@@ -67,17 +73,21 @@
 //     types `.length` as `u64`, so it can be neither assigned to nor passed as a
 //     `number` (zun#3).
 //
-// Four workarounds this file used to carry are gone, because the engine fixed
-// what forced them: `emit` is spelled `emit(type, ...args)` again rather than
-// ten optional slots (a class method's rest parameter is a real array — the
-// `any`-binding half of zun#11 is still open); `prependListener` uses
-// `Array.prototype.unshift`, which accepts a function argument again (zun#17);
-// `EventEmitter.defaultMaxListeners`, `.errorMonitor` and
-// `.captureRejectionSymbol` are real class statics (zun#20, partly); the
+// Workarounds this file used to carry and no longer does, because the engine
+// fixed what forced them: `emit` is spelled `emit(type, ...args)` again rather
+// than ten optional slots, and a rest parameter is a real array through an
+// `any` binding and on an `any` receiver too, so zun#11 is closed;
+// `prependListener` uses `Array.prototype.unshift`, which accepts a function
+// argument again (zun#17); `EventEmitter.defaultMaxListeners`, `.errorMonitor`
+// and `.captureRejectionSymbol` are real class statics (zun#20, partly); the
 // event-name bookkeeping compares symbols by identity instead of by description
-// (zun#23); and a class field may be declared without an initializer again
+// (zun#23); a class field may be declared without an initializer again
 // (zun#27) — the explicit initializers stay because they are what the code
-// means, not because the engine demands them.
+// means, not because the engine demands them; a **symbol**-keyed slot holds
+// Node's own shape, the bare listener while there is one, because a function
+// value under a symbol key round-trips now, and a function written over a slot
+// that holds an object is no longer swallowed, so `__evRawSet` stopped deleting
+// first (all three zun#32).
 
 // ---------------------------------------------------------------------------
 // Well-known symbols
@@ -114,13 +124,15 @@ const __kCaptureKey: string = "__zunEventsCapture";
 // ---------------------------------------------------------------------------
 
 // Unwrap a `functionBox` record back to its callable (zun#17). A box reports
-// `typeof === "object"` and an empty `Object.keys`, but its `__boxedFn` slot
-// reads back the original function with identity intact.
+// `typeof === "function"` now (it used to say `"object"`), so the `__boxedFn`
+// slot has to be probed for both kinds; the slot reads back the original
+// function with identity intact.
 function __evUnbox(value: any): any {
-  if (value !== null && value !== undefined && typeof value === "object") {
-    const inner: any = value["__boxedFn"];
-    if (inner !== undefined) return inner;
-  }
+  if (value === null || value === undefined) return value;
+  const kind = typeof value;
+  if (kind !== "object" && kind !== "function") return value;
+  const inner: any = value["__boxedFn"];
+  if (inner !== undefined) return inner;
   return value;
 }
 
@@ -133,30 +145,44 @@ function __evIsFn(value: any): boolean {
   return typeof __evUnbox(value) === "function";
 }
 
+// A bare callable, as opposed to a `functionBox` record holding one. The two
+// are indistinguishable by `typeof` now, and the storage layer has to tell them
+// apart for the `__proto__` key (see `__evRawSet`).
+function __evIsBareFn(value: any): boolean {
+  return typeof value === "function" && !__evIsBox(value);
+}
+
 // Wrap a callable in a `functionBox` record *deliberately*.
 //
 // Boxing is normally something this engine does to a function on its way into
 // an array; routing a function through a one-element array is therefore the way
-// to obtain the box, and the box is far more useful than the bare callable
-// here, because it is an object:
-//   * it survives being returned from an object-literal method or a class
-//     method, which a function value does not (both answer `null`/`undefined`);
-//   * it can be stored under a symbol key, which a function value cannot (the
-//     assignment is silently dropped);
-//   * it keeps a stable identity when it enters another array, where a bare
-//     function is re-boxed and stops comparing equal to itself;
-//   * it can carry properties, which is how a once-wrapper exposes `.listener`.
-// It stays callable through an `any` binding, with the exact argument count.
+// to obtain the box, and the box is still more useful than the bare callable
+// for a once-wrapper, because it is a real object:
+//   * it survives being returned from an object-literal method, which a
+//     function value does not (the return degrades to an opaque object that no
+//     longer compares equal to the original);
+//   * it keeps the properties written onto it when it enters an array, where a
+//     bare function loses every one of them — that is how a once-wrapper
+//     carries `.listener`;
+//   * it is found by `indexOf`/`includes`, which answer -1/`false` for a bare
+//     function (zun#17).
+// Two reasons this helper used to exist are gone: a function value assigned
+// under a **symbol** key now round-trips, and a function written over a slot
+// holding an object is no longer swallowed (zun#32).
+// Re-boxing a box is identity-preserving (`[box][0] === box`).
 function __evBox(fn: any): any {
+  if (__evIsBox(fn)) return fn;
   if (fn !== null && fn !== undefined && typeof fn === "object") return fn;
   const holder: any[] = [fn];
   return holder[0];
 }
 
-// Is this value one of those records (as opposed to a bare callable)?
+// Is this value one of those records (as opposed to a bare callable)? A box
+// reports `typeof === "function"` now, so both kinds are probed.
 function __evIsBox(value: any): boolean {
   if (value === null || value === undefined) return false;
-  if (typeof value !== "object") return false;
+  const kind = typeof value;
+  if (kind !== "object" && kind !== "function") return false;
   return value["__boxedFn"] !== undefined;
 }
 
@@ -546,37 +572,65 @@ class MaxListenersExceededWarning extends Error {
 // `Object.keys`.
 // ---------------------------------------------------------------------------
 
-// Write a slot, clearing whatever was there first.
+// `_events` is `Object.create(null)`, exactly as in Node, so that an event
+// named `toString` or `__proto__` is an ordinary key rather than a collision
+// with `Object.prototype`. Two engine faults make the plain
+// `events[type] = value` / `events[type]` pair wrong on such a name, and the
+// three raw helpers below are the whole of the compensation.
+
+// Read a slot. A computed read with a **variable** key resolves
+// `Object.prototype`'s members even on a null-prototype object: for the event
+// name "toString", `events[type]` answers `Object.prototype.toString` instead
+// of `undefined`, so `on('toString', fn)` saw a listener already in the slot
+// and stored a two-element list. (The same read spelled with a literal key —
+// `events["toString"]` — is correct, so this is the dynamic-key path alone.)
+// `in` reports the truth, including for a function-valued property, so every
+// slot read asks it first. `sym in obj` throws ("Cannot convert a Symbol value
+// to a string"), and a symbol can never collide with an `Object.prototype`
+// member, so a symbol key skips the question.
+function __evRawGet(events: any, type: any): any {
+  if (!__evIsSymbol(type) && !(type in events)) return undefined;
+  return events[type];
+}
+
+// Write a slot.
 //
-// A dynamic object keeps function values in a slot of their own, so assigning a
-// function over a key that currently holds an object leaves the old object
-// value shadowing the new function — `o.k = fn` after `o.k = [1]` is *swallowed*
-// and `o.k` is still the array (https://github.com/UrubuCode/zun/issues/32).
-// `_events[type]` goes function → array → function on every
-// add-second-then-remove-back-to-one cycle, so this is on the hot path, not an
-// edge case. Deleting the key first makes the write unconditional.
+// `events.__proto__ = value` sets the **prototype** of a null-prototype object
+// rather than creating an own property, so the slot for an event named
+// `__proto__` is simply lost: the engine applies its `__proto__` rule without
+// asking whether `Object.prototype`'s accessor is on the chain at all, which is
+// the only thing that makes `__proto__` special. A **bare callable** happens to
+// take the ordinary path and land correctly; every other value — an array of
+// listeners, or a `functionBox` once-wrapper, which is a record object however
+// much `typeof` now calls it a function — has to be installed with
+// `Object.defineProperty`, which is exact. The two paths cannot be merged in
+// either direction: `defineProperty` with a bare callable stores nothing
+// readable, and assignment with anything else loses the slot.
 //
-// The `undefined` form of the same bug is fixed: `o.k = undefined; o.k = fn`
-// now stores the function. The object form is not, which is why this helper
-// stays.
+// Two reasons this helper used to carry more are gone (zun#32): a function
+// written over a slot that holds an object is no longer swallowed, so the
+// unconditional `delete` first is unnecessary, and a function value under a
+// symbol key round-trips.
 function __evRawSet(events: any, type: any, value: any): void {
-  // `delete obj[sym]` throws in this engine, and a symbol slot only ever holds
-  // an array here, so the shadowing it guards against cannot arise for one.
-  if (!__evIsSymbol(type)) delete events[type];
+  if (!__evIsSymbol(type) && type === "__proto__" && !__evIsBareFn(value)) {
+    Object.defineProperty(events, type, {
+      value: value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+    return;
+  }
   events[type] = value;
 }
 
-// Clear a slot. A symbol-keyed property cannot be deleted (the `delete`
-// intrinsic throws for a symbol key), so it is blanked instead; `__evSlotGet`
-// reports `undefined` either way, and `eventNames()` reads `__evTypes`.
+// Clear a slot. `delete obj[sym]` is rejected by the checker outright
+// ("`delete obj[k]` requires a string key"), so a symbol slot is blanked
+// instead; `__evRawGet` reports `undefined` either way and `eventNames()` reads
+// `__evTypes`, so the key that lingers costs nothing. `delete` does clear a
+// function-valued property now (zun#32), so a string key needs no special case.
 function __evRawDelete(events: any, type: any): void {
-  // `delete obj[sym]` throws, and `delete` does not clear a *function*-valued
-  // property at all (the function lives in a slot of its own, which the delete
-  // leaves in place and then re-exposes). Writing `undefined` is the only clear
-  // that works for both; it costs a key that lingers in `Object.keys(_events)`,
-  // which `eventNames()` does not read.
-  const current: any = events[type];
-  if (__evIsSymbol(type) || __evIsFn(current)) {
+  if (__evIsSymbol(type)) {
     events[type] = undefined;
     return;
   }
@@ -586,19 +640,16 @@ function __evRawDelete(events: any, type: any): void {
 function __evSlotGet(target: any, type: any): any {
   const events: any = target._events;
   if (events === undefined || events === null) return undefined;
-  return events[type];
+  return __evRawGet(events, type);
 }
 
 function __evSlotSet(target: any, type: any, value: any): void {
   const events: any = target._events;
   if (events === undefined || events === null) return;
-  // A bare function assigned under a symbol key is dropped by this engine, so a
-  // symbol slot holds the boxed form of the same callable.
-  if (__evIsSymbol(type) && __evIsFn(value)) {
-    __evRawSet(events, type, __evBox(value));
-  } else {
-    __evRawSet(events, type, value);
-  }
+  // A symbol-keyed slot used to hold the *boxed* form of a callable, because a
+  // bare function assigned under a symbol key was silently dropped (zun#32).
+  // It round-trips now, so a symbol slot keeps Node's shape like every other.
+  __evRawSet(events, type, value);
   __evTrackType(target, type);
 }
 
@@ -645,11 +696,11 @@ function __evSlotIsSingle(type: any, slot: any): boolean {
   return __evIsFn(slot);
 }
 
-// The value to store when a slot holds exactly one listener: the bare callable
-// under a string key (so `_events.foo === listener` holds, as in Node), and the
-// boxed form under a symbol key (where a bare callable would be dropped).
+// The value to store when a slot holds exactly one listener: the bare callable,
+// so that `_events.foo === listener` holds as in Node. A symbol key used to
+// need the boxed form here, because a bare callable under a symbol key was
+// dropped; it round-trips now (zun#32).
 function __evSingleFor(type: any, listener: any): any {
-  if (__evIsSymbol(type)) return __evBox(listener);
   if (__evIsBox(listener) && listener.listener !== undefined) {
     // A once-wrapper: keep the box, it is what carries `.listener`.
     return listener;
@@ -1137,8 +1188,9 @@ class EventEmitter {
   // the way Node spells it. It used to be ten explicit optional slots with the
   // trailing `undefined`s trimmed, because the rest parameter was `undefined`
   // with no rest arguments and the bare value with one
-  // (https://github.com/UrubuCode/zun/issues/11, whose `any`-binding half is
-  // still open). That cost two observable deviations which are now gone:
+  // (https://github.com/UrubuCode/zun/issues/11, now closed: a rest parameter
+  // is a real array through an `any` binding and on an `any` receiver too).
+  // That cost two observable deviations which are now gone:
   // `emit('x', undefined)` is a one-argument emit again, and an emit may carry
   // more than ten arguments.
   emit(type: any, ...args: any[]): boolean {
@@ -1284,10 +1336,10 @@ function __eventsGetEventListeners(emitterOrTarget: any, type: any): any[] {
 // left over from; the three accessors stay so the call sites read the same
 // either way.
 //
-// A `WeakMap` is still the structurally right answer and is still unusable: it
-// loses its methods through an `any` binding and rejects a non-object value
-// (`wm.set(key, 5)` fails with "set is not a function",
-// https://github.com/UrubuCode/zun/issues/28). So these tables keep their keys
+// A `WeakMap` is still the structurally right answer and is still unusable, and
+// worse than before: `new WeakMap().set(key, 1)` now aborts the VM outright
+// with "call did not resolve to a method", which no `try`/`catch` can contain
+// (https://github.com/UrubuCode/zun/issues/28). So these tables keep their keys
 // alive, which is a leak traded for working lookups — one entry per EventTarget
 // a program touches.
 function __evTableNew(): any {

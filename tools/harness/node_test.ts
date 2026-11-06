@@ -129,11 +129,17 @@ function __testBox(fn: any): any {
   return holder[0];
 }
 
+// A `functionBox` record reports `typeof === "function"` now rather than
+// `"object"`, so the `__boxedFn` slot is probed for both kinds; guarding on
+// `"object"` alone left a boxed callable unopened and uncallable.
 function __testCall(fn: any, args: any[]): any {
   let callable: any = fn;
-  if (fn !== null && fn !== undefined && typeof fn === "object") {
-    const inner: any = fn["__boxedFn"];
-    if (inner !== undefined) callable = inner;
+  if (fn !== null && fn !== undefined) {
+    const kind = typeof fn;
+    if (kind === "object" || kind === "function") {
+      const inner: any = fn["__boxedFn"];
+      if (inner !== undefined) callable = inner;
+    }
   }
   return callable(...args);
 }

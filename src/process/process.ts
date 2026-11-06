@@ -29,11 +29,11 @@
 //     reactions; here the two share one queue, so a `nextTick` scheduled from
 //     inside a promise reaction runs after it rather than before. The relative
 //     order *within* the nextTick queue is FIFO, as in Node.
-//   * every function stored into an object property goes through
-//     `__evRawSet`-style delete-then-assign, because a function written over a
-//     property that currently holds an **object** is swallowed and the object
-//     stays (https://github.com/UrubuCode/zun/issues/32). The `undefined` form
-//     of that bug is fixed; the object form is not.
+//   * a function stored into an object property is now written plainly: both
+//     halves of the swallowed-write bug are fixed (a function written over a
+//     property holding `undefined` *or* an object lands —
+//     https://github.com/UrubuCode/zun/issues/32), so the delete-then-assign
+//     detour this file used to take through `__evRawSet` is gone.
 //   * `process.emitWarning` builds a `ProcessWarning`, a declared class, rather
 //     than attaching `name`/`code`/`detail` to a plain `Error`: an undeclared
 //     key written onto a typed instance through an `any` alias poisons every
@@ -68,17 +68,15 @@ function __processEnvGet(name: string): any {
 // `process.env`.
 //
 // A live `Proxy` lookup would be the right shape, since `zun:core` can read a
-// variable by name but cannot enumerate the environment block. It is still not
-// usable. https://github.com/UrubuCode/zun/issues/6 is partly fixed — the `get`
-// and `set` traps do fire through an `any`-typed receiver now — but only for a
-// **literal** key: `env.PATH` and `env["PATH"]` reach the trap, while
-// `env[name]` with `name` a variable answers `undefined` and never calls it.
-// `env[name]` is precisely how `path.ts` reads it, so a Proxy would break the
-// one real consumer. The `has`, `deleteProperty` and `ownKeys` traps do not fire
-// at all, so a Proxy would additionally lose `'X' in process.env`,
-// `delete process.env.X` — which Node's own `os` and `path` tests both use — and
-// a non-empty `Object.keys(process.env)`. Measured on this engine, that is a net
-// loss, so the snapshot stays.
+// variable by name but cannot enumerate the environment block, and
+// https://github.com/UrubuCode/zun/issues/6 has come most of the way: the
+// `get`, `set`, `has` and `deleteProperty` traps all fire through an `any`-typed
+// receiver, and `get`/`set` now reach the trap for a **variable** key as well as
+// a literal one — `env[name]`, which is precisely how `path.ts` reads it. One
+// trap is still missing: `ownKeys` never runs, so `Object.keys(process.env)`
+// over a Proxy comes back empty, and Node's own `os` and `path` tests read it.
+// Measured on this engine that is still a net loss, so the snapshot stays — but
+// it is one trap away from being the better shape.
 //
 // `env` is a snapshot over a fixed list of names: the variables Node's own tests
 // touch, plus the per-drive `=X:` cwd variables `win32.resolve` consults.
@@ -177,8 +175,10 @@ function __processNextTick(fn: any, ...args: any[]): void {
     const count = Number(args.length);
     for (let i = 0; i < count; i++) passed.push(args[i]);
   }
-  const entry: any = { args: passed };
-  __evRawSet(entry, "fn", fn);
+  // `{ args: passed, fn: fn }` outright: a function written onto a property
+  // that currently holds something else is no longer swallowed (zun#32), so the
+  // `__evRawSet` detour this used to take is gone.
+  const entry: any = { args: passed, fn: fn };
   __tickQueue.items.push(entry);
   if (!__tickQueue.scheduled) {
     __tickQueue.scheduled = true;

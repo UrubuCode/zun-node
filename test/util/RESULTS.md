@@ -18,9 +18,9 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-util-deprecate.js` | ✅ pass | |
 | `test-util-deprecate-invalid-code.js` | ✅ pass | |
 | `test-util-emit-experimental-warning.js` | ✅ pass | |
-| `test-util-format.js` | ❌ type error | bundles/test-util-format.ts:8490:24: error: [SEM0001] unknown base class 'Array' |
+| `test-util-format.js` | ❌ type error | bundles/test-util-format.ts:8635:24: error: [SEM0001] unknown base class 'Array' |
 | `test-util-getcallsites.js` | ❌ assertion | AssertionError [match]: node:util should be ignored |
-| `test-util-inherits.js` | ❌ type error | bundles/test-util-inherits.ts:8300:3: error: [SEM0001] 'call' passes 1 argument(s) including 'this', but the f |
+| `test-util-inherits.js` | ❌ type error | bundles/test-util-inherits.ts:8445:3: error: [SEM0001] 'call' passes 1 argument(s) including 'this', but the f |
 | `test-util-inspect.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-util-inspect.js: |
 | `test-util-inspect-getters-accessing-this.js` | ❌ assertion | AssertionError [strictEqual]: 'X { _y: 123 }' !== 'X { _y: 123, [y]: [Getter: 123] }' |
 | `test-util-inspect-long-running.js` | ❌ timeout |  |
@@ -28,14 +28,14 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-util-inspect-proxy.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-util-inspect-proxy.js: |
 | `test-util-inspect-regexp.js` | ❌ runtime | zun: runtime error: regex parse error: |
 | `test-util-internal.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-util-internal.js: |
-| `test-util-isDeepStrictEqual.js` | ❌ type error | bundles/test-util-isDeepStrictEqual.ts:8413:69: error: [SEM0001] no field or setter 'y' on this type |
+| `test-util-isDeepStrictEqual.js` | ❌ type error | bundles/test-util-isDeepStrictEqual.ts:8558:69: error: [SEM0001] no field or setter 'y' on this type |
 | `test-util-parse-env.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-util-parse-env.js: |
-| `test-util-primordial-monkeypatching.js` | ❌ engine panic | thread '<unnamed>' (39812) panicked at crates\zun_interp\src\value.rs:226:25: |
+| `test-util-primordial-monkeypatching.js` | ❌ engine panic | thread '<unnamed>' (40296) panicked at crates\zun_interp\src\value.rs:226:25: |
 | `test-util-promisify.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-util-promisify.js: |
 | `test-util-sigint-watchdog.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-util-sigint-watchdog.js: |
 | `test-util-sleep.js` | ✅ pass | |
 | `test-util-stripvtcontrolcharacters.js` | ✅ pass | |
 | `test-util-styletext.js` | ✅ pass | |
-| `test-util-text-decoder.js` | ❌ type error | bundles/test-util-text-decoder.ts:8298:19: error: [SEM0001] 'TextDecoder' has 0 field(s), found 1 initializer( |
+| `test-util-text-decoder.js` | ❌ type error | bundles/test-util-text-decoder.ts:8443:19: error: [SEM0001] 'TextDecoder' has 0 field(s), found 1 initializer( |
 | `test-util-types.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-util-types.js: |
 | `test-util-types-exists.js` | ✅ pass | |

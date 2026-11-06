@@ -57,10 +57,27 @@
 //     undefined` and `length === 0` (zun#25), so `[Function: foo]` degrades to
 //     `[Function (anonymous)]` for function declarations. A **class** does
 //     report its name, so `[class Foo]` and the `Foo { … }` prefix are right.
-//   * **Getters.** `Object.getOwnPropertyDescriptor(K.prototype, 'y')` answers
-//     `undefined` for a class accessor, and for an object-literal accessor the
-//     descriptor comes back without its `get` slot, so `getters: true` cannot
-//     find an accessor to invoke and `showHidden` cannot list one.
+//   * **Function kind.** Every callable is tagged `[object Function]` — an
+//     `async function`, a `function*`, an `async function*` and a bound
+//     function alike — so `[AsyncFunction: f]`, `[GeneratorFunction: f]` and
+//     `[Function: bound f]` all come out as `[Function (anonymous)]`.
+//     `__utilFormatFunctionValue` derives the word from the tag the way Node
+//     does, so each kind appears on its own the day the engine tags it.
+//   * **Getters.** Accessors *are* reflectable now:
+//     `Object.getOwnPropertyDescriptor(K.prototype, 'y')` comes back with
+//     working `get` and `set` slots for a class accessor and for an
+//     object-literal one. What is still missing is the step after that —
+//     **invoking** the getter against the instance. `desc.get.apply(obj, [])`
+//     aborts the interpreter (`expected object, found Void`), and `apply`
+//     threads no receiver into a plain function value anyway (zun#1), so
+//     `[Getter: 123]` cannot be produced for the getters that read `this`,
+//     which is what `getters: true` exists for. Two smaller gaps sit on the
+//     same path: `Object.getOwnPropertyNames(K.prototype)` omits
+//     `constructor`, and `Object.getOwnPropertyDescriptor(Object.prototype,
+//     'constructor')` is `undefined`, so Node's "stop at a built-in
+//     prototype" rule in `addPrototypeProperties` has nothing to test. The
+//     prototype-accessor walk is therefore still absent rather than half
+//     built.
 //   * **Symbol `description`.** Reading `.description` off a symbol held in an
 //     `any` panics the interpreter (new bug, reported with this work), so the
 //     description is recovered from `String(sym)` instead.
@@ -71,18 +88,26 @@
 // ---------------------------------------------------------------------------
 //   * `inspect`, `format`, `formatWithOptions`, `promisify`, `deprecate`,
 //     `debuglog`, `highlightRegExp` and `styleText` are **top-level function
-//     declarations** that are only then placed on the `util` object, because a
-//     method defined inline in an object literal cannot carry properties
-//     (zun#14) and `inspect.custom`, `inspect.colors`, `inspect.styles`,
-//     `promisify.custom` and `inspect.styles.regexp.colors` are exactly that.
-//   * `__utilBox` — a function cannot be returned out of an object-literal
-//     method (the caller receives `null`), so every entry point that answers a
-//     function (`promisify`, `callbackify`, `deprecate`, `debuglog`) hands back
-//     the engine's own `functionBox` record instead (zun#17). The record stays
-//     callable and keeps one identity.
-//   * `__utilCall` — `fn.apply(thisArg, args)` threads no receiver (zun#1), so a
-//     callback is always invoked as `fn(...args)`; `promisify`/`callbackify`
-//     therefore cannot forward `this`, which is the one behavioural gap in them.
+//     declarations** that are only then placed on the `util` object. An
+//     object-literal method can carry properties now (zun#14), so this is no
+//     longer forced — it stays because it is the clearer shape for the eight
+//     entry points that own properties (`inspect.custom`, `inspect.colors`,
+//     `inspect.styles`, `promisify.custom`, `inspect.styles.regexp.colors`).
+//   * `__utilUnbox` / `__utilIsBox` — a `functionBox` record reports
+//     `typeof === "function"` now rather than `"object"`, so the `__boxedFn`
+//     slot is probed for both: a record left unopened is tagged
+//     `[object Object]`, which `__utilFormatFunctionValue` reads as a class.
+//   * `__utilBox` — a function still cannot be returned out of an
+//     object-literal method (the caller receives an opaque object that no
+//     longer compares equal to the original), so every entry point that answers
+//     a function (`promisify`, `callbackify`, `deprecate`, `debuglog`) hands
+//     back the engine's own `functionBox` record instead (zun#17). The record
+//     stays callable and keeps one identity.
+//   * `__utilCall` — `fn.apply(thisArg, args)` threads no receiver into a plain
+//     function value and *shifts* its arguments there (`f.apply(r, [a, b])`
+//     arrives as `f(r, a)` — zun#1), so a callback is always invoked as
+//     `fn(...args)`; `promisify`/`callbackify` therefore cannot forward `this`,
+//     which is the one behavioural gap in them.
 //   * Every closure here collects its call arguments through a **rest
 //     parameter**, never the implicit object the word `arg`+`uments` names: the
 //     parser looks for that word textually anywhere inside a function's span —
@@ -91,9 +116,10 @@
 //     an `any` receiver leaves unbound. See the note above `deprecate`. (New
 //     bug; this is also why the word is spelled with a seam in this file.)
 //   * `util.format` and `util.formatWithOptions` are reached through forwarding
-//     object-literal methods rather than shorthand properties, because a
-//     rest-parameter function read as a property value off an `any` receiver
-//     panics the interpreter (zun#11).
+//     object-literal methods rather than shorthand properties. zun#11 is
+//     closed — a rest-parameter function read as a property value off an `any`
+//     receiver works now, and so does a rest method called on one — so the
+//     forwarding is kept for shape, not for survival.
 //   * `__cc()` instead of `.charCodeAt()` — an out-of-range index is a *runtime
 //     abort*, not a catchable throw (zun#2).
 //   * `Number(x.length)` everywhere: the checker still types `.length` as `u64`,
@@ -128,18 +154,36 @@ function __cc(value: string, index: number): number {
 // A function value that has ridden through an `any` lane inside an array is a
 // `functionBox` record, not a callable (zun#17). The `__boxedFn` slot reads the
 // callable back with its identity intact.
+//
+// A box now reports `typeof === "function"` rather than `"object"`, so the
+// `__boxedFn` slot has to be probed for both: guarding on `"object"` alone let
+// every boxed callable through unopened, and since a box is also tagged
+// `[object Object]`, `__utilFormatFunctionValue` then read it as a class and
+// printed `[class (anonymous)]` for every ordinary function.
 function __utilUnbox(value: any): any {
-  if (value !== null && value !== undefined && typeof value === "object") {
-    const inner: any = value["__boxedFn"];
-    if (inner !== undefined) return inner;
-  }
+  if (value === null || value === undefined) return value;
+  const kind = typeof value;
+  if (kind !== "object" && kind !== "function") return value;
+  const inner: any = value["__boxedFn"];
+  if (inner !== undefined) return inner;
   return value;
+}
+
+// Is this value a `functionBox` record rather than a bare callable?
+function __utilIsBox(value: any): boolean {
+  if (value === null || value === undefined) return false;
+  const kind = typeof value;
+  if (kind !== "object" && kind !== "function") return false;
+  return value["__boxedFn"] !== undefined;
 }
 
 // Hand a function value out of an object-literal method: route it through a
 // one-element array, which yields the engine's own box record. The record is an
-// object, so it survives the return, and it stays callable.
+// object, so it survives the return, and it stays callable. Re-boxing a box is
+// identity-preserving (`[box][0] === box`), so the guard is an optimisation
+// rather than a correctness requirement.
 function __utilBox(fn: any): any {
+  if (__utilIsBox(fn)) return fn;
   if (fn !== null && fn !== undefined && typeof fn === "object") return fn;
   const holder: any[] = [fn];
   return holder[0];
@@ -1081,9 +1125,10 @@ function __utilNewCtx(options: any): any {
         ctx.userOptions = options;
       }
     }
-    // A function-valued property is invisible to `Object.keys` (zun#32), so the
-    // two options that may hold a function — `stylize` and a `sorted`
-    // comparator — are read by name rather than found by the loop above.
+    // A function-valued property *is* visible to `Object.keys` now (zun#32), so
+    // the loop above does find `stylize` and a `sorted` comparator. These two
+    // reads by name are kept as a safety net: they are the only options that may
+    // hold a function, and a caller who passes one must not silently lose it.
     if (__utilIsFn(options["stylize"])) ctx.userStylize = options["stylize"];
     if (__utilIsFn(options["sorted"])) ctx.sorted = options["sorted"];
   }
@@ -1252,16 +1297,38 @@ function __utilFormatFunctionValue(ctx: any, value: any, recurseTimes: number): 
   const named = typeof name === "string" && name !== "";
   // Node tells a class from a function with `Function.prototype.toString()`
   // ("class …"), which this engine answers `[any]` to
-  // (https://github.com/UrubuCode/zun/issues/36). It does, however, tag a class
-  // value `[object Object]` while tagging a function `[object Function]` —
-  // itself a divergence from the standard, where both are `[object Function]`,
-  // but a usable and stable signal today. The tag is taken from the *unboxed*
-  // callable, so a `functionBox` record is not mistaken for a class.
+  // (https://github.com/UrubuCode/zun/issues/36). Two engine signals stand in,
+  // and they agree with each other on every form tested (declaration,
+  // expression, arrow, class, subclass, anonymous class expression, boxed and
+  // unboxed):
+  //   * a class value is tagged `[object Object]`, a function
+  //     `[object Function]` — itself a divergence from the standard, where both
+  //     are `[object Function]`;
+  //   * a class exposes `.prototype`, while a function value answers
+  //     `undefined` for it (it carries none of its own properties — zun#25).
+  // Both are read off the *unboxed* callable, and a record that could not be
+  // opened is excluded explicitly, because a `functionBox` is tagged
+  // `[object Object]` exactly like a class: that is what made every ordinary
+  // function print as `[class (anonymous)]`.
   // `[class Foo extends Bar]` is not reachable: the base is not readable.
-  if (__utilTag(callable) === "[object Object]") {
+  if (
+    !__utilIsBox(callable) &&
+    (__utilTag(callable) === "[object Object]" || callable.prototype !== undefined)
+  ) {
     return __utilStylize(ctx, named ? "[class " + name + "]" : "[class (anonymous)]", "special");
   }
-  const label = named ? "[Function: " + name + "]" : "[Function (anonymous)]";
+  // Node builds the prefix from the kind — `[AsyncFunction: f]`,
+  // `[GeneratorFunction: f]`, `[Function: bound f]` — which it reads off the
+  // object tag. This engine tags every callable `[object Function]`, so every
+  // one prints `[Function …]`; deriving the word from the tag the way Node does
+  // means the other kinds appear on their own if the engine ever tags them.
+  let type = "Function";
+  const tag = __utilTag(callable);
+  const inner = tag.slice(8, Number(tag.length) - 1);
+  if (inner !== "Function" && inner.slice(Number(inner.length) - 8) === "Function") {
+    type = inner;
+  }
+  const label = named ? "[" + type + ": " + name + "]" : "[" + type + " (anonymous)]";
   return __utilStylize(ctx, label, "special");
 }
 

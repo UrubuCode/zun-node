@@ -107,7 +107,7 @@ ways:
 
 | Test | Blocked by | What happens |
 |---|---|---|
-| `test-os.js` | **callable `assert`** — [zun#14](https://github.com/UrubuCode/zun/issues/14) | The file's own `is` helper is built on the bare `assert(value, message)` form (`is.number` is `assert(!Number.isNaN(value), …)`), and it uses `assert(…)` directly a dozen more times. A value that is callable *and* carries `strictEqual` & co. cannot exist in this engine, so the first `is.number(priority)` fails with `call did not resolve to a method`. The same blocker stops `test-path-parse-format.js`. Behind it sits a second one: the file's last third asserts `` `${os.hostname}` === os.hostname() `` for ten getters and `+os.totalmem === os.totalmem()`, which needs ToPrimitive to consult a *function's* own `Symbol.toPrimitive` ([zun#36](https://github.com/UrubuCode/zun/issues/36)) — see the note below. |
+| `test-os.js` | **ToPrimitive on a function** — [zun#36](https://github.com/UrubuCode/zun/issues/36) | The callable-`assert` blocker is gone: [zun#14](https://github.com/UrubuCode/zun/issues/14) is fixed, `src/assert/assert.ts` is a real function carrying the methods, and the file's own `is` helper — built on the bare `assert(value, message)` form — now runs, as does every `assert(…)` after it. (That same fix is what turned `test-path-parse-format.js` into a pass.) The blocker behind it stands: the file's last third asserts `` `${os.hostname}` === os.hostname() `` for ten getters and `+os.totalmem === os.totalmem()`, and template interpolation of a function value still ignores the function's own `Symbol.toPrimitive`, `toString` and `valueOf` — `` `${os.hostname}` `` is the literal string `[function]`, so the run stops at `'[function]' !== '<this host>'`. The `Symbol.toPrimitive` block in `os.ts` is already the code Node writes; see the note below. |
 | `test-os-process-priority.js` *(Windows only)* | **destructured top-level bindings are invisible to functions** — [zun#34](https://github.com/UrubuCode/zun/issues/34) | **This test passes on Linux**, which is what the measurement above reports. On Windows it reaches line 110 of 145 — every priority constant, all four validation paths and the whole `PRIORITY_HIGHEST..PRIORITY_LOW` set/get sweep, including the Windows range mapping — and then `checkPriority()` throws `ReferenceError: PRIORITY_HIGH is not defined`. A top-level `const { PRIORITY_HIGH } = os.constants.priority;` never becomes a module global, so no function body can read it; only the Windows branch of `checkPriority` reads one, which is why Linux never hits it. |
 | `test-os-checked-function.js`, `test-os-fast.js` | **`internal/` modules** | Both require `internal/test/binding` to monkey-patch or instrument the `os` binding — a Node-internal binding, not a public module, so the bundler reports an unresolved require and fails the bundle rather than guessing. `test-os-fast.js` additionally needs V8 natives syntax (`eval('%OptimizeFunctionOnNextCall(…)')`). |
 | `test-os-homedir-no-envvar.js`, `test-os-userinfo-handles-getter-errors.js` | **`node:child_process`** | Both re-run the test body in a child process (`cp.spawnSync(process.execPath, …)`, `execFile(node, ['-e', script])`) to observe `os` with `HOME`/`USERPROFILE` deleted from the *real* environment, or a getter throwing in a fresh process. `child_process` is its own library and needs process spawning, which no native here provides; the harness reports `child_process is not available in the zun harness`. The behavior each one checks is covered by the differential run: `homedir()` falls back to the passwd entry / `GetUserProfileDirectoryW`, and a throwing `encoding` getter propagates out of `userInfo()`. |
@@ -152,10 +152,19 @@ file header.
   called through an `any` where a bare function value does not
   ([zun#17](https://github.com/UrubuCode/zun/issues/17)).
 * failures cross the ABI **in band** as the result `"-"` rather than as a
-  non-zero status, because an exception thrown out of an extension call escapes
-  an enclosing `try`/`catch` in the host ([zun#33](https://github.com/UrubuCode/zun/issues/33)) — so a status-based failure could not
-  become an `ERR_SYSTEM_ERROR` at all. The grammar is documented in
-  `../../src/os/mod.rs`.
+  non-zero status. The reason changed with this engine update rather than going
+  away: [zun#33](https://github.com/UrubuCode/zun/issues/33)'s own complaint is
+  fixed — a failing extension call no longer escapes an enclosing `try`/`catch`,
+  it is caught — but the value that reaches the handler is wrong. With
+  `import * as fsn from "node:fs"`, a failing `fsn.readFileSync("<missing>")`
+  throws an error whose `message` is the literal `"fsn is not defined"` rather
+  than the extension's `(code, message)`; the host appears to raise a
+  `ReferenceError` naming the module namespace instead of surfacing the status.
+  A status-based failure therefore still cannot become a Node-accurate
+  `ERR_SYSTEM_ERROR`. The in-band convention has two merits of its own anyway:
+  one call captures a whole table as a coherent snapshot, and the C0 separators
+  admit no quoting rule for the two sides to disagree about. The grammar is
+  documented in `../../src/os/mod.rs`.
 * `node:os` spells its error-slot readers `errorCode`/`errorMessage`/
   `errorSyscall`/`errorErrno` instead of reusing `node:fs`'s `lastError*`,
   because the checker rejects a program as soon as one *name* is registered by

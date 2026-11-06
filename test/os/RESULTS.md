@@ -13,10 +13,10 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-os.js` | ❌ runtime | zun: runtime error: call did not resolve to a method at <closure@334654> [334705..334731] |
+| `test-os.js` | ❌ assertion | AssertionError [strictEqual]: '[function]' !== '<hostname>' |
 | `test-os-checked-function.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-os-checked-function.js: |
 | `test-os-eol.js` | ✅ pass | |
 | `test-os-fast.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-os-fast.js: |
-| `test-os-homedir-no-envvar.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x1bf5cf5e470)) |
-| `test-os-process-priority.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x27fd2efdda0)) |
-| `test-os-userinfo-handles-getter-errors.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x1d7a1edf950)) |
+| `test-os-homedir-no-envvar.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x1d1731f6000)) |
+| `test-os-process-priority.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x28e0c8ae620)) |
+| `test-os-userinfo-handles-getter-errors.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x1cd2667fc50)) |

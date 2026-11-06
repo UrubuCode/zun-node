@@ -12,10 +12,12 @@
 //
 // Engine note: every identity comparison goes through `__sameValue`, because a
 // function stored in an array arrives as a `functionBox` record rather than the
-// callable (https://github.com/UrubuCode/zun/issues/17) — `[fn][0] === fn` is
-// `false`, and `typeof [fn][0]` is `"object"`. The record's `__boxedFn` slot
-// reads the original function back with its identity intact, so unwrapping both
-// sides restores JavaScript's `===` for functions. Without it every
+// callable (https://github.com/UrubuCode/zun/issues/17). `[fn][0] === fn` is
+// `true` again and `typeof [fn][0]` says `"function"` now rather than
+// `"object"` — which is exactly why `__unboxFn` probes the `__boxedFn` slot for
+// both kinds: a record that goes unopened is tagged `[object Object]`, loses an
+// `indexOf` and is reported as a class by `util.inspect`. Unwrapping both sides
+// restores JavaScript's `===` for functions; without it every
 // `deepStrictEqual(ee.listeners('x'), [listener])` in Node's events corpus
 // would fail for a reason that has nothing to do with the module under test.
 
@@ -122,12 +124,14 @@ function __regexTest(value: any, subject: string): boolean {
   return re.test(subject);
 }
 
-// Unwrap a `functionBox` record back to its callable. See the header note.
+// Unwrap a `functionBox` record back to its callable. See the header note. A
+// box reports `typeof === "function"` now, so both kinds are probed.
 function __unboxFn(value: any): any {
-  if (value !== null && value !== undefined && typeof value === "object") {
-    const inner: any = value["__boxedFn"];
-    if (inner !== undefined) return inner;
-  }
+  if (value === null || value === undefined) return value;
+  const kind = typeof value;
+  if (kind !== "object" && kind !== "function") return value;
+  const inner: any = value["__boxedFn"];
+  if (inner !== undefined) return inner;
   return value;
 }
 
@@ -225,239 +229,254 @@ function __expectationMatches(error: any, boxedExpected: any): boolean {
   return false;
 }
 
-const assert: any = {
-  AssertionError,
+// `assert` is a **function** that carries the methods, which is how Node
+// exports it: `lib/assert.js` ends with `module.exports = assert = ok`, so
+// `assert(value)` and `assert.ok(value)` are the same assertion, and the module
+// object is callable. Several of Node's own test files depend on that —
+// `test-path-parse-format.js`, `test-os.js` and
+// `test-event-emitter-listeners-side-effects.js` all call `assert(...)`
+// directly — and until recently this engine could not express it: a function
+// could not carry callable properties, so the surface had to be a plain object
+// and the call form was unreachable
+// (https://github.com/UrubuCode/zun/issues/14). It can now, and the call form
+// resolves from module scope, from a nested function, from a closure, through
+// an `any` parameter and through `assert.strict`, so the object literal is
+// gone.
+function assert(value: any, message?: any): void {
+  if (!value) __fail(value, true, message, "==");
+}
 
-  ok(value: any, message?: any): void {
-    if (!value) __fail(value, true, message, "==");
-  },
+assert.AssertionError = AssertionError;
 
-  equal(actual: any, expected: any, message?: any): void {
-    if (actual != expected) __fail(actual, expected, message, "==");
-  },
+assert.ok = function (value: any, message?: any): void {
+  if (!value) __fail(value, true, message, "==");
+};
 
-  notEqual(actual: any, expected: any, message?: any): void {
-    if (actual == expected) __fail(actual, expected, message, "!=");
-  },
+assert.equal = function (actual: any, expected: any, message?: any): void {
+  if (actual != expected) __fail(actual, expected, message, "==");
+};
 
-  strictEqual(actual: any, expected: any, message?: any): void {
-    if (!__sameValue(actual, expected)) {
-      if (
-        typeof actual === "number" &&
-        typeof expected === "number" &&
-        Number.isNaN(actual) &&
-        Number.isNaN(expected)
-      ) {
-        return;
-      }
-      __fail(actual, expected, message, "strictEqual");
-    }
-  },
+assert.notEqual = function (actual: any, expected: any, message?: any): void {
+  if (actual == expected) __fail(actual, expected, message, "!=");
+};
 
-  notStrictEqual(actual: any, expected: any, message?: any): void {
-    if (__sameValue(actual, expected)) {
-      __fail(actual, expected, message, "notStrictEqual");
-    }
-  },
-
-  // `assert.ifError(value)` — anything but `null`/`undefined` is a failure.
-  ifError(value: any): void {
-    if (value === null || value === undefined) return;
-    __fail(value, null, "ifError got unwanted exception: " + __inspect(value), "ifError");
-  },
-
-  deepStrictEqual(actual: any, expected: any, message?: any): void {
-    if (!__isDeepStrictEqual(actual, expected)) {
-      __fail(actual, expected, message, "deepStrictEqual");
-    }
-  },
-
-  notDeepStrictEqual(actual: any, expected: any, message?: any): void {
-    if (__isDeepStrictEqual(actual, expected)) {
-      __fail(actual, expected, message, "notDeepStrictEqual");
-    }
-  },
-
-  throws(fn: any, expected?: any, message?: any): void {
-    let threw = false;
-    let error: any = undefined;
-    try {
-      fn();
-    } catch (caught) {
-      threw = true;
-      error = caught;
-    }
-    if (!threw) {
-      __fail(
-        undefined,
-        expected,
-        message === undefined ? "Missing expected exception." : message,
-        "throws",
-      );
+assert.strictEqual = function (actual: any, expected: any, message?: any): void {
+  if (!__sameValue(actual, expected)) {
+    if (
+      typeof actual === "number" &&
+      typeof expected === "number" &&
+      Number.isNaN(actual) &&
+      Number.isNaN(expected)
+    ) {
       return;
     }
-    if (!__expectationMatches(error, expected)) {
-      const detail =
-        "The error does not match the expectation.\n  actual: " +
-        __inspect(error === null || error === undefined ? error : {
-          name: error.name,
-          message: error.message,
-          code: error.code,
-        }) +
-        "\n  expected: " +
-        __inspect(expected);
-      __fail(error, expected, message === undefined ? detail : message, "throws");
-    }
-  },
+    __fail(actual, expected, message, "strictEqual");
+  }
+};
 
-  // `assert.rejects(promiseOrFn, expected?, message?)` -> a Promise that settles
-  // once the rejection has been checked. The awaited value is produced by
-  // calling `fn()` when a function is passed, exactly as in Node.
-  //
-  // Every callback below is declared `: any` and ends in an explicit
-  // `return undefined`: a `void` closure that calls an `any`-typed callback
-  // leaves the call result on the stack and the bytecode verifier rejects the
-  // method (`BadReturnHeight`).
-  rejects(promiseOrFn: any, expected?: any, message?: any): any {
-    return new Promise(function (resolve: any, reject: any): any {
-      let subject: any = promiseOrFn;
-      if (typeof promiseOrFn === "function") {
-        try {
-          subject = promiseOrFn();
-        } catch (caught) {
-          reject(caught);
-          return undefined;
-        }
-      }
-      const onFulfilled: any = function (): any {
-        try {
-          __fail(
-            undefined,
-            expected,
-            message === undefined ? "Missing expected rejection." : message,
-            "rejects",
-          );
-        } catch (failure) {
-          reject(failure);
-        }
-        return undefined;
-      };
-      const onRejected: any = function (error: any): any {
-        if (__expectationMatches(error, expected)) {
-          resolve(undefined);
-          return undefined;
-        }
-        try {
-          __fail(
-            error,
-            expected,
-            message === undefined ? "The rejection does not match the expectation." : message,
-            "rejects",
-          );
-        } catch (failure) {
-          reject(failure);
-        }
-        return undefined;
-      };
-      if (subject instanceof Promise) {
-        subject.then(onFulfilled, onRejected);
-        return undefined;
-      }
+assert.notStrictEqual = function (actual: any, expected: any, message?: any): void {
+  if (__sameValue(actual, expected)) {
+    __fail(actual, expected, message, "notStrictEqual");
+  }
+};
+
+// `assert.ifError(value)` — anything but `null`/`undefined` is a failure.
+assert.ifError = function (value: any): void {
+  if (value === null || value === undefined) return;
+  __fail(value, null, "ifError got unwanted exception: " + __inspect(value), "ifError");
+};
+
+assert.deepStrictEqual = function (actual: any, expected: any, message?: any): void {
+  if (!__isDeepStrictEqual(actual, expected)) {
+    __fail(actual, expected, message, "deepStrictEqual");
+  }
+};
+
+assert.notDeepStrictEqual = function (actual: any, expected: any, message?: any): void {
+  if (__isDeepStrictEqual(actual, expected)) {
+    __fail(actual, expected, message, "notDeepStrictEqual");
+  }
+};
+
+assert.throws = function (fn: any, expected?: any, message?: any): void {
+  let threw = false;
+  let error: any = undefined;
+  try {
+    fn();
+  } catch (caught) {
+    threw = true;
+    error = caught;
+  }
+  if (!threw) {
+    __fail(
+      undefined,
+      expected,
+      message === undefined ? "Missing expected exception." : message,
+      "throws",
+    );
+    return;
+  }
+  if (!__expectationMatches(error, expected)) {
+    const detail =
+      "The error does not match the expectation.\n  actual: " +
+      __inspect(error === null || error === undefined ? error : {
+        name: error.name,
+        message: error.message,
+        code: error.code,
+      }) +
+      "\n  expected: " +
+      __inspect(expected);
+    __fail(error, expected, message === undefined ? detail : message, "throws");
+  }
+};
+
+// `assert.rejects(promiseOrFn, expected?, message?)` -> a Promise that settles
+// once the rejection has been checked. The awaited value is produced by
+// calling `fn()` when a function is passed, exactly as in Node.
+//
+// Every callback below is declared `: any` and ends in an explicit
+// `return undefined`: a `void` closure that calls an `any`-typed callback
+// leaves the call result on the stack and the bytecode verifier rejects the
+// method (`BadReturnHeight`).
+assert.rejects = function (promiseOrFn: any, expected?: any, message?: any): any {
+  return new Promise(function (resolve: any, reject: any): any {
+    let subject: any = promiseOrFn;
+    if (typeof promiseOrFn === "function") {
       try {
-        __fail(subject, expected, message, "rejects");
+        subject = promiseOrFn();
+      } catch (caught) {
+        reject(caught);
+        return undefined;
+      }
+    }
+    const onFulfilled: any = function (): any {
+      try {
+        __fail(
+          undefined,
+          expected,
+          message === undefined ? "Missing expected rejection." : message,
+          "rejects",
+        );
       } catch (failure) {
         reject(failure);
       }
       return undefined;
-    });
-  },
-
-  doesNotReject(promiseOrFn: any, message?: any): any {
-    return new Promise(function (resolve: any, reject: any): any {
-      let subject: any = promiseOrFn;
-      if (typeof promiseOrFn === "function") {
-        try {
-          subject = promiseOrFn();
-        } catch (caught) {
-          reject(caught);
-          return undefined;
-        }
-      }
-      if (subject instanceof Promise) {
-        const onOk: any = function (): any {
-          resolve(undefined);
-          return undefined;
-        };
-        const onBad: any = function (error: any): any {
-          try {
-            __fail(error, undefined, message, "doesNotReject");
-          } catch (failure) {
-            reject(failure);
-          }
-          return undefined;
-        };
-        subject.then(onOk, onBad);
+    };
+    const onRejected: any = function (error: any): any {
+      if (__expectationMatches(error, expected)) {
+        resolve(undefined);
         return undefined;
       }
-      resolve(undefined);
+      try {
+        __fail(
+          error,
+          expected,
+          message === undefined ? "The rejection does not match the expectation." : message,
+          "rejects",
+        );
+      } catch (failure) {
+        reject(failure);
+      }
       return undefined;
-    });
-  },
-
-  doesNotThrow(fn: any, message?: any): void {
+    };
+    if (subject instanceof Promise) {
+      subject.then(onFulfilled, onRejected);
+      return undefined;
+    }
     try {
-      fn();
-    } catch (caught) {
-      const error: any = caught;
-      __fail(
-        error,
-        undefined,
-        message === undefined
-          ? "Got unwanted exception: " + String(error && error.message)
-          : message,
-        "doesNotThrow",
-      );
+      __fail(subject, expected, message, "rejects");
+    } catch (failure) {
+      reject(failure);
     }
-  },
-
-  match(value: any, regexp: any, message?: any): void {
-    if (!__regexTest(regexp, String(value))) {
-      __fail(
-        value,
-        regexp,
-        message === undefined
-          ? "The input did not match the regular expression " +
-              String(regexp) +
-              ". Input:\n\n" +
-              __inspect(value) +
-              "\n"
-          : message,
-        "match",
-      );
-    }
-  },
-
-  doesNotMatch(value: any, regexp: any, message?: any): void {
-    if (__regexTest(regexp, String(value))) {
-      __fail(value, regexp, message, "doesNotMatch");
-    }
-  },
-
-  fail(message?: any): void {
-    __fail(
-      undefined,
-      undefined,
-      message === undefined ? "Failed" : message,
-      "fail",
-    );
-  },
+    return undefined;
+  });
 };
 
+assert.doesNotReject = function (promiseOrFn: any, message?: any): any {
+  return new Promise(function (resolve: any, reject: any): any {
+    let subject: any = promiseOrFn;
+    if (typeof promiseOrFn === "function") {
+      try {
+        subject = promiseOrFn();
+      } catch (caught) {
+        reject(caught);
+        return undefined;
+      }
+    }
+    if (subject instanceof Promise) {
+      const onOk: any = function (): any {
+        resolve(undefined);
+        return undefined;
+      };
+      const onBad: any = function (error: any): any {
+        try {
+          __fail(error, undefined, message, "doesNotReject");
+        } catch (failure) {
+          reject(failure);
+        }
+        return undefined;
+      };
+      subject.then(onOk, onBad);
+      return undefined;
+    }
+    resolve(undefined);
+    return undefined;
+  });
+};
+
+assert.doesNotThrow = function (fn: any, message?: any): void {
+  try {
+    fn();
+  } catch (caught) {
+    const error: any = caught;
+    __fail(
+      error,
+      undefined,
+      message === undefined
+        ? "Got unwanted exception: " + String(error && error.message)
+        : message,
+      "doesNotThrow",
+    );
+  }
+};
+
+assert.match = function (value: any, regexp: any, message?: any): void {
+  if (!__regexTest(regexp, String(value))) {
+    __fail(
+      value,
+      regexp,
+      message === undefined
+        ? "The input did not match the regular expression " +
+            String(regexp) +
+            ". Input:\n\n" +
+            __inspect(value) +
+            "\n"
+        : message,
+      "match",
+    );
+  }
+};
+
+assert.doesNotMatch = function (value: any, regexp: any, message?: any): void {
+  if (__regexTest(regexp, String(value))) {
+    __fail(value, regexp, message, "doesNotMatch");
+  }
+};
+
+assert.fail = function (message?: any): void {
+  __fail(
+    undefined,
+    undefined,
+    message === undefined ? "Failed" : message,
+    "fail",
+  );
+};
+
+// `assert.strict` is the module itself, as in Node: this surface is the strict
+// one throughout, so the loose aliases point at the strict comparisons.
 assert.strict = assert;
 assert.deepEqual = assert.deepStrictEqual;
 assert.notDeepEqual = assert.notDeepStrictEqual;
-assert.ok = assert.ok;
-assert.equal = assert.equal;
 
 // `node:assert` module object for the bundler's `require` rewriting.
 const __node_assert: any = assert;

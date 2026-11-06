@@ -156,7 +156,7 @@ eight are engine gaps — four of them new, found while writing this module.
 | `test-util-getcallsites.js` | engine: no structured call sites; harness: `child_process` | `callSites[0].scriptName` has to match `/test-util-getcallsites/`, but the program the engine is running is the *bundle*, so the recovered frame names the bundle. The rest of the file spawns itself with `spawnSync` |
 | `test-util-inherits.js` | [zun#1](https://github.com/UrubuCode/zun/issues/1), [zun#25](https://github.com/UrubuCode/zun/issues/25) | ``error: `call` passes 1 argument`` on `A.call(this)` — `Function.prototype.call` threads no receiver. The file is a function-constructor inheritance exercise end to end (`B.prototype.b = …`, `C.super_`, `new B('b')`), which needs the prototype model `util.inherits` cannot be given here |
 | `test-util-inspect.js` | harness: `internal/test/binding`, `vm`, `v8`, `worker_threads`, `url`, `trace_events` | the 3 700-line flagship, which monkey-patches the `util` binding and inspects a `MessageChannel`, a `vm` context, `v8` serialized values and a `URL` |
-| `test-util-inspect-getters-accessing-this.js` | engine: accessors are not reflectable (**new**) | `'X { _y: 123 }' !== 'X { _y: 123, [y]: [Getter: 123] }'`. `Object.getOwnPropertyDescriptor(K.prototype, 'y')` answers `undefined` for a class accessor, and for an object-literal accessor the descriptor comes back **without its `get` slot** (`['set','enumerable','configurable']`), so `getters: true` and `showHidden` have no accessor to find |
+| `test-util-inspect-getters-accessing-this.js` | engine: a reflected getter cannot be invoked against a receiver — [zun#1](https://github.com/UrubuCode/zun/issues/1) | `'X { _y: 123 }' !== 'X { _y: 123, [y]: [Getter: 123] }'`. Half of this one is fixed: accessors **are** reflectable now, and `Object.getOwnPropertyDescriptor(K.prototype, 'y')` comes back with working `get` and `set` slots for a class accessor and an object-literal one alike. The step after it is missing — `desc.get.apply(obj, [])` aborts the interpreter with `expected object, found Void`, and `apply` threads no receiver into a function value anyway, so a getter that reads `this` (which is the whole point of this file) cannot be called. Two smaller gaps sit on the same path: `Object.getOwnPropertyNames(K.prototype)` omits `constructor` and `Object.getOwnPropertyDescriptor(Object.prototype, 'constructor')` is `undefined`, so Node's "stop at a built-in prototype" rule in `addPrototypeProperties` has nothing to test. The prototype-accessor walk is therefore still absent rather than half built |
 | `test-util-inspect-long-running.js` | Tier-0 throughput | a 1 000-node shared graph inspected at `depth: Infinity`. Node's 2²⁷-character budget *is* implemented (`__utilChargeBudget`), and Node itself takes 128 ms; the interpreter does not reach the budget inside the tracker's cap. This is the one failure that is neither a missing module nor a semantic gap — it is a speed limit, and [zun#12](https://github.com/UrubuCode/zun/issues/12) (`charCodeAt`/`slice` are O(n)) is part of why |
 | `test-util-inspect-namespace.js` | harness: `vm` | `new SourceTextModule(…)` and `[Module: null prototype]` |
 | `test-util-inspect-proxy.js` | harness: `internal/test/binding`; engine: no proxy introspection | `showProxy` needs `getProxyDetails`, a host hook. `types.isProxy` answers `false` here, documented in the file header |
@@ -207,6 +207,18 @@ a promise's settled value is not readable (so `inspect` prints
 inspects as `[Function (anonymous)]` while a **class** correctly inspects as
 `[class Foo]` and prefixes its instances `Foo { … }`.
 
+One more, and it is how a function is told from a class here. Node uses
+`Function.prototype.toString()` and looks for `class`; this engine answers
+`[function]` or `[any]` to that ([zun#36](https://github.com/UrubuCode/zun/issues/36)),
+so `__utilFormatFunctionValue` reads the object tag instead — a class is tagged
+`[object Object]`, a function `[object Function]` — cross-checked against
+`.prototype`, which a class exposes and a function value does not. That also
+means every callable is one *kind*: an `async function`, a `function*`, an
+`async function*` and a bound function are all tagged `[object Function]`, so
+`[AsyncFunction: f]`, `[GeneratorFunction: f]` and `[Function: bound f]` all come
+out as `[Function (anonymous)]`. The word is derived from the tag the way Node
+derives it, so each kind appears on its own the day the engine tags it.
+
 ### Engine issues `util.ts` works around
 
 No test is blocked by these; they are marked at each use site in
@@ -218,27 +230,43 @@ runtime *abort*, not a throw, so every scan goes through `__cc()`;
 `Number(x.length)` everywhere;
 [#10](https://github.com/UrubuCode/zun/issues/10) a dynamic method call caps at
 six operands, so helper state travels in a `ctx` object;
-[#11](https://github.com/UrubuCode/zun/issues/11) a rest-parameter function read
-as a property value off an `any` receiver panics, so `util.format` and
-`util.formatWithOptions` are reached through forwarding object-literal methods;
 [#13](https://github.com/UrubuCode/zun/issues/13) `!x` on an `any` empty string,
 so `skipPrototype ? true : false`;
-[#14](https://github.com/UrubuCode/zun/issues/14) a method defined inline in an
-object literal cannot carry properties, which is why `inspect`, `format`,
-`promisify`, `deprecate`, `debuglog`, `styleText` and `highlightRegExp` are
-top-level declarations placed onto the `util` object afterwards —
-`inspect.custom`, `inspect.colors`, `inspect.styles`,
-`inspect.styles.regexp.colors` and `promisify.custom` all depend on it;
 [#17](https://github.com/UrubuCode/zun/issues/17) a function cannot be returned
-out of an object-literal method, so `promisify`/`callbackify`/`deprecate`/
+out of an object-literal method (the caller gets an opaque object that no longer
+compares equal to the original), so `promisify`/`callbackify`/`deprecate`/
 `debuglog` hand back the engine's `functionBox` record, and
-`Object.prototype.toString` is never held in a binding;
+`Object.prototype.toString` is never held in a binding. #17 also changed shape
+under this engine: a `functionBox` now reports `typeof === "function"` rather
+than `"object"` while staying tagged `[object Object]`, so `__utilUnbox` probes
+the `__boxedFn` slot for both kinds — guarding on `"object"` alone left every
+boxed callable unopened, and `inspect` then read it as a class and printed
+`[class (anonymous)]` for every ordinary function;
 [#1](https://github.com/UrubuCode/zun/issues/1) `apply`/`call` thread no
-receiver, so a promisified or callbackified function cannot forward `this` —
-the one behavioural gap in those two;
-[#32](https://github.com/UrubuCode/zun/issues/32) a function-valued property is
-invisible to `Object.keys`, so `inspect({ fn() {} })` prints `{}` where Node
-prints `{ fn: [Function: fn] }`;
+receiver into a plain function value and `apply` *shifts* there
+(`f.apply(r, [a, b])` arrives as `f(r, a)`), so a promisified or callbackified
+function cannot forward `this` — the one behavioural gap in those two;
+[#32](https://github.com/UrubuCode/zun/issues/32) is mostly fixed and needs no
+work-around in `inspect` any more: a function-valued property is visible to
+`Object.keys`, `getOwnPropertyNames`, `Reflect.ownKeys`, `for-in` and
+`getOwnPropertyDescriptor`, in insertion order, so `inspect({ fn() {} })` prints
+`{ fn: [Function (anonymous)] }` where it used to print `{}` (Node prints
+`{ fn: [Function: fn] }` — the difference is #25's missing `name`, nothing else).
+What is left of #32 is symbol-keyed: `Object.getOwnPropertySymbols` reports none,
+and `sym in obj` throws `Cannot convert a Symbol value to a string`;
 [#37](https://github.com/UrubuCode/zun/issues/37) is designed out rather than
 worked around: every coded error here is a `NodeTypeError`/`NodeRangeError`/
 `NodeError` subclass with `code` as a **declared** field.
+
+Two of the entries above came out with this engine update.
+[#11](https://github.com/UrubuCode/zun/issues/11) measures as **fixed** — a rest
+parameter is a real array through an `any` binding, read as a property value off
+an `any` receiver, and called on an `any` receiver — and
+[#14](https://github.com/UrubuCode/zun/issues/14) is **closed**: a method defined
+inline in an object literal *can* carry properties now, and a function can carry
+callable ones that resolve from module scope, a nested function, a closure and
+an `any` parameter. `inspect`/`format`/`promisify`/`deprecate`/`debuglog`/
+`styleText`/`highlightRegExp` stay top-level declarations placed onto the `util`
+object, and `util.format`/`util.formatWithOptions` stay forwarding methods,
+because that is the clearer shape for entry points that own properties — not
+because the engine still demands it.

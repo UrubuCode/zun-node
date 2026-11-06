@@ -102,14 +102,33 @@ the direct `zun run --ext <lib> <test.js>` path.
 > capture group is rejected although ES2025 and Node 25 accept it — that last one
 > is the *only* thing standing between
 > `test-util-inspect-regexp.js` and a pass, since all ~100 of its colour
-> expectations match byte for byte without it. The blocker-by-blocker table is in
+> expectations match byte for byte without it. All four were re-probed against
+> this engine build and all four still hold. One of the eight changed shape:
+> accessors **are** reflectable now (a class or object-literal accessor's
+> descriptor carries working `get`/`set` slots), but
+> `desc.get.apply(obj, [])` aborts the interpreter and `apply` threads no
+> receiver, so `getters: true` still cannot invoke a getter that reads `this` —
+> which is what `test-util-inspect-getters-accessing-this.js` is about. The
+> blocker-by-blocker table is in
 > [`test/util/README.md`](test/util/README.md), the per-test breakdown in
 > [`test/util/RESULTS.md`](test/util/RESULTS.md).
+>
+> One `inspect` bug came out of this engine update and is fixed here: a
+> `functionBox` record reports `typeof === "function"` now rather than
+> `"object"`, so the unwrap guard stopped opening it — and because a box is
+> tagged `[object Object]` exactly like a class, every ordinary function reached
+> through an array, an object property or an `any` lane printed as
+> `[class (anonymous)]`. Functions print `[Function (anonymous)]` again
+> (`[Function: name]` waits on
+> [zun#25](https://github.com/UrubuCode/zun/issues/25)) and classes print
+> `[class Foo]`. A second one came for free: a function-valued property is
+> visible to `Object.keys` now, so `inspect({ fn() {} })` is
+> `{ fn: [Function (anonymous)] }` rather than `{}`.
 
 <!-- node-path:start -->
 ### Node.js v25 `path` compatibility
 
-`███████████████████░░░░░` **82.3%** — 14 / 17 Node `test-path*` tests passing
+`█████████████████████░░░` **88.2%** — 15 / 17 Node `test-path*` tests passing
 <!-- node-path:end -->
 
 > `path` already runs the whole Node corpus, so its number is a real measurement.
@@ -117,6 +136,15 @@ the direct `zun run --ext <lib> <test.js>` path.
 > blocking table is in [`test/path/README.md`](test/path/README.md), the per-test
 > breakdown with a failure note for each in
 > [`test/path/RESULTS.md`](test/path/RESULTS.md).
+> `test-path-parse-format.js` passes now: it needed a value that is callable
+> *and* carries `strictEqual` & co., and a function can carry callable
+> properties ([zun#14](https://github.com/UrubuCode/zun/issues/14) is closed), so
+> `assert.ts` is a real function with the methods attached. The two that remain
+> are `test-path-join.js` — a function taken out of an array has no `apply` on
+> it, and `map(JSON.stringify)` aborts the VM
+> ([zun#17](https://github.com/UrubuCode/zun/issues/17); its `concat` blocker,
+> [#16](https://github.com/UrubuCode/zun/issues/16), is closed) — and
+> `test-path-resolve.js`, which adds a Windows-only `child_process.spawnSync`.
 
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
@@ -127,16 +155,27 @@ the direct `zun run --ext <lib> <test.js>` path.
 > `events` is implemented end to end — the whole `EventEmitter` surface plus every
 > module static — and the number is low because the *tests* reach for engine
 > features that do not exist yet, not because the module is thin. Nine of the
-> thirty-five files open with `new events.EventEmitter()`, which cannot compile:
-> `new` accepts a class identifier or a `Proxy`-typed expression, never a member
-> expression ([zun#18](https://github.com/UrubuCode/zun/issues/18)). Three more
+> thirty-five files open with `new events.EventEmitter()`, which still does not
+> work: it compiles now, but the member read answers `undefined` at run time
+> ([zun#18](https://github.com/UrubuCode/zun/issues/18), with
+> [#20](https://github.com/UrubuCode/zun/issues/20) behind it). Three more
 > need a class static that shares a name with an instance method
-> (`EventEmitter.once`, `EventEmitter.listenerCount` —
-> [zun#20](https://github.com/UrubuCode/zun/issues/20); the value-shaped statics
-> `defaultMaxListeners` and `errorMonitor` *are* reachable now and are real
-> statics in `events.ts`), five need a bound `this` inside a listener
-> ([zun#1](https://github.com/UrubuCode/zun/issues/1) — `apply`/`call` thread no
-> receiver), and three require Node's `internal/event_target`. The full
+> (`EventEmitter.once`, `EventEmitter.listenerCount` — still ``duplicate method
+> `once` ``; the value-shaped statics `defaultMaxListeners` and `errorMonitor`
+> *are* reachable and are real statics in `events.ts`), five need a bound `this`
+> inside a listener ([zun#1](https://github.com/UrubuCode/zun/issues/1) —
+> `apply`/`call` thread no receiver into a function value, and `apply` shifts its
+> arguments there), and three require Node's `internal/event_target`.
+> `test-event-emitter-special-event-names.js` passes, and it is the one that
+> keeps the storage layer honest: `_events` is a real null-prototype object, so
+> an event named `toString`, `__defineGetter__` or `__proto__` is an ordinary
+> key — which needs both of the engine regressions this update introduced to be
+> compensated (a computed read with a variable key resolves `Object.prototype`'s
+> members on a null-prototype object, and `events.__proto__ = value` sets the
+> prototype instead of creating an own property). The one file now standing on a
+> single line is `test-event-emitter-listeners-side-effects.js`:
+> `Object.create(null) instanceof Object` answers `true`
+> ([zun#26](https://github.com/UrubuCode/zun/issues/26)). The full
 > blocker-by-blocker table is in [`test/events/README.md`](test/events/README.md),
 > the per-test breakdown in [`test/events/RESULTS.md`](test/events/RESULTS.md).
 
@@ -155,8 +194,14 @@ the direct `zun run --ext <lib> <test.js>` path.
 > Linux**. The corpus number is low because the seven test files are unusually
 > harness-hungry: two require `internal/test/binding` to monkey-patch the `os`
 > binding, two re-run themselves through `child_process` to see a different
-> environment, and one needs a callable `assert`
-> ([zun#14](https://github.com/UrubuCode/zun/issues/14)).
+> environment, and `test-os.js` asserts `` `${os.hostname}` === os.hostname() ``
+> for ten getters — template interpolation of a function value ignores the
+> function's own `Symbol.toPrimitive`/`toString`/`valueOf` and yields the literal
+> `[function]` ([zun#36](https://github.com/UrubuCode/zun/issues/36)). That file
+> used to be blocked ahead of #36 by needing a callable `assert`
+> ([zun#14](https://github.com/UrubuCode/zun/issues/14), now closed — `assert.ts`
+> is a real function carrying the methods), so its own `is` helper runs now and
+> #36 is all that is left.
 > `test-os-eol.js` passes: `assert.throws(fn, TypeError)` with the constructor as
 > a *value* works now, because `assert.ts` matches the standard error
 > constructors by identity and spells the `instanceof` against the literal class

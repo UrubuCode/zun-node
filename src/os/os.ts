@@ -36,9 +36,20 @@
 // (`errorSyscall`, `errorCode`, `errorErrno`, `errorMessage`) then hold exactly
 // what Node's `SystemError` reports — which is why a failed `os.getPriority()`
 // here raises the same `ERR_SYSTEM_ERROR` it raises in Node, rather than a
-// generic host error. The natives never fail through the ABI's own status,
-// because a thrown extension error escapes `try`/`catch` in this engine
-// (https://github.com/UrubuCode/zun/issues/33).
+// generic host error. The natives never fail through the ABI's own status, and
+// the reason has changed with this engine update rather than gone away.
+// https://github.com/UrubuCode/zun/issues/33's own complaint is fixed — a
+// failing extension call no longer escapes an enclosing `try`/`catch`; it is
+// caught. What reaches the handler is the wrong value: with
+// `import * as fsn from "node:fs"`, a failing `fsn.readFileSync("<missing>")`
+// throws an error whose `message` is the literal `"fsn is not defined"`, not
+// the extension's `(code, message)` — the host appears to raise a
+// `ReferenceError` naming the module namespace instead of surfacing the status.
+// So a status-based failure still cannot become a Node-accurate
+// `ERR_SYSTEM_ERROR`, and the in-band `"-"` convention stays. It has two
+// independent merits anyway: one call captures a whole table as a coherent
+// snapshot, and the C0 separators admit no quoting rule for the two sides to
+// disagree about.
 //
 // ---------------------------------------------------------------------------
 // Engine workarounds in this file, each tied to an open zun issue

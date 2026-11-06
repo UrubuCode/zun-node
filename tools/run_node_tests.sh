@@ -100,12 +100,17 @@ runner() { if command -v timeout >/dev/null 2>&1; then timeout "$TIMEOUT" "$@"; 
 
 # Reduce one stderr blob to a single short, table-safe markdown cell: the scratch
 # directory and the compiler's diagnostic wrapper carry no information, so they
-# are dropped before truncating.
+# are dropped before truncating. The machine's host and user names are redacted,
+# because tests such as test-os.js print them and RESULTS.md is published.
+HOST_NAME="$(hostname 2>/dev/null || true)"
+USER_NAME="${USER:-${USERNAME:-}}"
 note_of() {
   printf '%s\n' "$1" \
     | tr -d '\r' \
     | grep -m1 . \
     | sed -e "s|$WORK_NATIVE/||g" -e "s|$WORK/||g" \
+          ${HOST_NAME:+-e "s|$HOST_NAME|<hostname>|g"} \
+          ${USER_NAME:+-e "s|$USER_NAME|<user>|g"} \
           -e 's/OxcDiagnostic *{ *inner: *OxcDiagnosticInner *{ *message: /parse error: /' \
           -e 's/|/\\|/g' -e 's/`/'"'"'/g' \
     | cut -c1-110

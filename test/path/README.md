@@ -79,9 +79,17 @@ on Windows:
 
 | Test | Blocked by | What happens |
 |---|---|---|
-| `test-path-join.js` | [zun#16](https://github.com/UrubuCode/zun/issues/16), [zun#17](https://github.com/UrubuCode/zun/issues/17) | the Windows table is built as `joinTests[0][1].slice(0).concat([…])` — `concat` on an `any` receiver flattens its array argument one level too deep, so a 3-row table comes back with 4 rows and row 2 is `["//foo/bar"]` instead of `[["//foo/bar"], "…"]` (#16). The failure message then uses `test[0].map(JSON.stringify)`, a built-in read as a value (#17). Three of the four blockers this test used to have are gone: `join.apply(null, test[0])` passes its arguments correctly now and the spread spelling compiles (#1's shifting half, #15), and `join === path.win32.join` holds for a function stored in an array (#17's identity half). |
+| `test-path-join.js` | [zun#17](https://github.com/UrubuCode/zun/issues/17) | two faces of the same issue, both in the driver rather than in `path.ts`. The table is walked as `test[0].forEach((join) => … join.apply(null, test[0]))`, and a function taken out of an array is a `functionBox` record with no `apply` on it — `join.apply` throws `apply is not a function`. The failure message then uses `test[0].map(JSON.stringify)`, a built-in read as a value, which aborts the VM with `call did not resolve to a method`. Two blockers this test used to have are gone: [zun#16](https://github.com/UrubuCode/zun/issues/16) is closed, so `joinTests[0][1].slice(0).concat([…])` builds the 3-row Windows table correctly, and `join === path.win32.join` holds for a function stored in an array (#17's identity half). The spread spelling `join(...test[0])` works, so the file is one `apply` away. |
 | `test-path-resolve.js` | [zun#17](https://github.com/UrubuCode/zun/issues/17); harness: `child_process` | the same driver shape as `join`, minus the `concat`. Its Windows-only tail spawns `process.argv[0]` on `test/fixtures/path-resolve.js` through `child_process.spawnSync`, which the harness only stubs — it needs a real `child_process`, which belongs to that module's own work. On Linux the other branch (`process.cwd = () => ''`) runs instead. |
-| `test-path-parse-format.js` | [zun#14](https://github.com/UrubuCode/zun/issues/14) | Node's `assert` is a function *with* properties, and `checkParseFormat` uses the bare form `assert(output.dir.startsWith(output.root))`. A property stored on a function cannot be called as a method from inside a nested function, so `assert` cannot be both callable and carry `strictEqual` & co. Every other expectation in the file was checked individually and passes. |
+
+`test-path-parse-format.js` **passes now.** It was the one file blocked by
+[zun#14](https://github.com/UrubuCode/zun/issues/14) — `checkParseFormat` uses
+the bare `assert(output.dir.startsWith(output.root))` form, which needs a value
+that is callable *and* carries `strictEqual` & co. A function can carry callable
+properties now, and they resolve from module scope, from a nested function, from
+a closure and through an `any` parameter, so `src/assert/assert.ts` is a real
+function with the methods attached — the shape `lib/assert.js` exports
+(`module.exports = assert = ok`).
 
 Uncaught errors are printed as `Object(Obj(0x…))`
 ([zun#8](https://github.com/UrubuCode/zun/issues/8)), which is why the "Why" column
@@ -96,6 +104,23 @@ the checker (its *arithmetic* was widened, so `len - 1` and the descending
 as a `number` — which is why `slen()`/`alen()`/`indexOfChar()` stay),
 [#7](https://github.com/UrubuCode/zun/issues/7) RegExp through `any`,
 [#13](https://github.com/UrubuCode/zun/issues/13) `!x` on an `any` empty string.
+
+All four were re-probed against this engine build and all four still hold — and
+#2 and #3 only hold **in typed code**, which is exactly where `path.ts` lives.
+Through an `any` lane, `s.charCodeAt(99)` answers `NaN` and `s.length` passes as
+a `number`; in a typed function, `value.charCodeAt(99)` is still an uncatchable
+`charCodeAt: index 99 is out of bounds` abort and `takesNumber(value.length)` is
+still rejected with ``argument type Int(IntKind { bits: 64, signed: false })
+does not match Float(F64)``. Probing either one through `any` reports them fixed
+when they are not, the same trap #13's note describes.
+
+[#9](https://github.com/UrubuCode/zun/issues/9) — a string literal truncated at
+an embedded `U+0000` — is **fixed**, in typed code as well as through `any`:
+`"a\u0000b".length` is 3, `charCodeAt(1)` is 0, and `indexOf`, `slice`, `split`,
+concatenation and `String.fromCharCode(0)` all round-trip. It was never worked
+around here; it was what used to keep
+`test-path-win32-normalize-device-names.js`'s reserved-device inputs from being
+read as written.
 
 A note on probing #13, because it is easy to call fixed and is not:
 `const x: any = ""` is constant-folded to a static string, so `!x` answers
