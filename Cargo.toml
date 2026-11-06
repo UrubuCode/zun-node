@@ -17,3 +17,34 @@ crate-type = ["cdylib", "rlib"]
 # interpreter, or allocator dependency. Path dependency while developed inside
 # the Zun workspace checkout; a release pins a published/git `zun_abi`.
 zun_abi = { path = "../crates/zun_abi" }
+
+# ---------------------------------------------------------------------------
+# Platform syscall bindings, target-gated so neither reaches the other OS.
+#
+# `node:os` is almost entirely syscalls, and the ones it needs are not in
+# `std`: there is no std API for `getifaddrs`, `getpwuid`, `getpriority`, nor
+# for `GetAdaptersAddresses` / `GlobalMemoryStatusEx` / `NtQuerySystemInformation`.
+# The two crates below are the ecosystem's canonical *raw binding* crates — no
+# abstraction, no transitive dependencies of their own beyond the per-arch
+# Windows import libraries — which is exactly the shape an extension that
+# "carries no VM, interpreter, or allocator dependency" (PLAN.md principle 2)
+# can accept. Everything that `std` does cover (`available_parallelism`,
+# `/proc` reads, `env`) is still taken from `std`.
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    # `NtQuerySystemInformation`, the only source of per-processor CPU times.
+    "Wdk_System_SystemInformation",
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
+    "Win32_UI_Shell",
+] }

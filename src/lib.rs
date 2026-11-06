@@ -26,6 +26,36 @@
 //!
 //! These are deliberately simple and host-agnostic; a richer multi-word /
 //! owned-string / managed-buffer carrier is a future ABI version.
+//!
+//! ## Status-prefixed results (the `node:os` convention)
+//!
+//! Returning a non-zero status is only usable when the host lets the program
+//! *catch* the resulting exception, and today it does not: a `RunError::Thrown`
+//! raised by an extension call escapes an enclosing `try`/`catch`, because the
+//! interpreter propagates the hook's error straight out instead of routing it to
+//! the handler the way it does for a managed call
+//! (https://github.com/UrubuCode/zun/issues/33). `node:os` therefore reports
+//! failure **in band** instead, and the TS layer builds Node's `SystemError`
+//! itself. Every fallible `node:os` native returns a `Str`:
+//!
+//! ```text
+//! result  := "+" payload | "-"
+//! payload := record (RS record)*
+//! record  := field (US field)*
+//! RS = U+001E (record separator), US = U+001F (unit separator)
+//! ```
+//!
+//! A leading `-` means the call failed and the four error slots below describe
+//! it; a leading `+` means success, and an empty payload is an empty list
+//! rather than an error. The separators are C0 control characters, so no host
+//! name, CPU model string, path or shell can contain one, and neither is NUL,
+//! so both survive the NUL-terminated `Str` carrier.
+//!
+//! The error slots carry everything Node's `SystemError` exposes, under the
+//! keys `errorSyscall` (the libuv entry point, e.g. `uv_os_getpriority`),
+//! `errorCode` (`EACCES`), `errorErrno` (the libuv negative errno) and
+//! `errorMessage` (`uv_strerror`'s description, which the TS layer composes
+//! into Node's `A system error occurred: …` text the way Node does).
 
 use core::ffi::c_char;
 use std::cell::RefCell;
@@ -34,6 +64,7 @@ use std::ffi::{CStr, CString};
 use zun_abi::{ZunFunction, ZunRegistry, ZunTy, ZunTyRepr, ZunValue, ZUN_ABI_V1};
 
 pub mod fs;
+pub mod os;
 
 thread_local! {
     /// Backing storage for the most recent `Str` result on this thread.
@@ -41,6 +72,10 @@ thread_local! {
     /// The most recent error's Node code (`ENOENT`, …) and message.
     static ERR_CODE: RefCell<CString> = RefCell::new(CString::default());
     static ERR_MSG: RefCell<CString> = RefCell::new(CString::default());
+    /// The libuv entry point that failed (`uv_os_getpriority`, …) and the
+    /// libuv errno, which Node's `SystemError` reports as `syscall`/`errno`.
+    static ERR_SYSCALL: RefCell<CString> = RefCell::new(CString::default());
+    static ERR_ERRNO: RefCell<i64> = const { RefCell::new(0) };
 }
 
 /// Carrier helpers implementing the `Str`/error convention documented above.
@@ -164,7 +199,31 @@ pub(crate) mod abi {
     pub(crate) fn fail(code: &str, message: &str) -> i32 {
         ERR_CODE.with(|slot| *slot.borrow_mut() = CString::new(code).unwrap_or_default());
         ERR_MSG.with(|slot| *slot.borrow_mut() = CString::new(message).unwrap_or_default());
+        ERR_SYSCALL.with(|slot| *slot.borrow_mut() = CString::default());
+        ERR_ERRNO.with(|slot| *slot.borrow_mut() = 0);
         STATUS_ERROR
+    }
+
+    /// Stash the four fields Node's `SystemError` reports for a failed libuv
+    /// call: the libuv entry point, its error code, its errno, and
+    /// `uv_strerror`'s description.
+    ///
+    /// The *message* is deliberately not composed here. Node composes it in
+    /// JavaScript, from exactly these fields
+    /// (`A system error occurred: <syscall> returned <code> (<description>)`),
+    /// and exposes the description on its own as `err.info.message` — so the
+    /// slot holds the description and the TS layer does the composing, which
+    /// keeps both values available instead of only their concatenation.
+    ///
+    /// Unlike [`fail`], this does **not** return an error status: a `node:os`
+    /// native signals failure in band with a `"-"` result (see the module
+    /// documentation), because a thrown extension error is not catchable in the
+    /// host today.
+    pub(crate) fn fail_system(syscall: &str, code: &str, errno: i64, description: &str) {
+        ERR_CODE.with(|slot| *slot.borrow_mut() = CString::new(code).unwrap_or_default());
+        ERR_MSG.with(|slot| *slot.borrow_mut() = CString::new(description).unwrap_or_default());
+        ERR_SYSCALL.with(|slot| *slot.borrow_mut() = CString::new(syscall).unwrap_or_default());
+        ERR_ERRNO.with(|slot| *slot.borrow_mut() = errno);
     }
 }
 
@@ -179,6 +238,20 @@ pub(crate) unsafe extern "C" fn last_error_code(_: *const ZunValue, _: usize, ou
 pub(crate) unsafe extern "C" fn last_error_message(_: *const ZunValue, _: usize, out: *mut ZunValue) -> i32 {
     let message = ERR_MSG.with(|slot| slot.borrow().to_string_lossy().into_owned());
     unsafe { abi::ret_str(out, &message) }
+}
+
+/// `lastErrorSyscall()` — the libuv entry point that failed, which Node's
+/// `SystemError` reports as `syscall` (and names in its message).
+pub(crate) unsafe extern "C" fn last_error_syscall(_: *const ZunValue, _: usize, out: *mut ZunValue) -> i32 {
+    let syscall = ERR_SYSCALL.with(|slot| slot.borrow().to_string_lossy().into_owned());
+    unsafe { abi::ret_str(out, &syscall) }
+}
+
+/// `lastErrorErrno()` — the libuv errno (negative, as libuv reports it), which
+/// Node's `SystemError` exposes as `errno` and `info.errno`.
+pub(crate) unsafe extern "C" fn last_error_errno(_: *const ZunValue, _: usize, out: *mut ZunValue) -> i32 {
+    let errno = ERR_ERRNO.with(|slot| *slot.borrow());
+    unsafe { abi::ret_i64(out, errno) }
 }
 
 /// One function descriptor: a NUL-terminated key, its parameter types, return
@@ -230,6 +303,11 @@ unsafe fn register_module(
 /// than duplicating the surface here.
 const FS_MODULE_KEYS: &[&[u8]] = &[b"node:fs\0"];
 
+/// Module key the `os` surface is published under, on the same single-key rule
+/// as [`FS_MODULE_KEYS`]. The Node-shaped `os` API is *not* here: it is
+/// `src/os/os.ts`, which imports this module and reshapes it. See `src/os/mod.rs`.
+const OS_MODULE_KEYS: &[&[u8]] = &[b"node:os\0"];
+
 /// ABI v1 registration entry point. The host calls this once after loading the
 /// library, passing a validated [`ZunRegistry`]; it publishes every module.
 ///
@@ -245,6 +323,12 @@ pub unsafe extern "C" fn zun_register_v1(registry: *mut ZunRegistry) -> i32 {
     }
     for module in FS_MODULE_KEYS {
         let status = unsafe { register_module(registry, module, fs::DESCRIPTORS) };
+        if status != 0 {
+            return status;
+        }
+    }
+    for module in OS_MODULE_KEYS {
+        let status = unsafe { register_module(registry, module, os::DESCRIPTORS) };
         if status != 0 {
             return status;
         }
