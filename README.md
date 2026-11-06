@@ -1296,3 +1296,64 @@ target/debug/zun run /tmp/bundle.ts
 > Deviations, repros and the blocker table:
 > [`test/module/README.md`](test/module/README.md); per-test breakdown:
 > [`test/module/RESULTS.md`](test/module/RESULTS.md).
+
+<!-- node-worker_threads:start -->
+### Node.js v25 `worker_threads` compatibility
+
+`█░░░░░░░░░░░░░░░░░░░░░░░` **7.0%** — 10 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
+<!-- node-worker_threads:end -->
+
+> `node:worker_threads` is two things wearing one name, and the split decides
+> everything. **The message-port family** — `MessageChannel`, `MessagePort`,
+> `MessageEvent`, `BroadcastChannel`, `receiveMessageOnPort`, the transfer and
+> structured-clone rules, `markAsUntransferable`/`isMarkedAsUntransferable`/
+> `markAsUncloneable`, `environmentData`, `SHARE_ENV`, `threadId`,
+> `isMainThread`, `parentPort`, `workerData`, `resourceLimits`,
+> `postMessageToThread` — is *in-process*: a channel is two queues and a
+> dispatch rule, and Node defines every one of those semantics without
+> reference to a second thread. That half is implemented in
+> `src/worker_threads/worker_threads.ts`, including Node's hybrid
+> `EventTarget`/`EventEmitter` dispatch (a listener added with
+> `addEventListener` gets the `Event`, one added with `on` gets the raw value,
+> and the event is created lazily so `port.on('message', …)` never allocates
+> one), the port reference counting that makes the first `'message'` listener
+> ref and start a port, the transfer-list validation order that leaves an
+> `ArrayBuffer` alone when a later entry in the same list is a detached port,
+> and the `DataCloneError` messages.
+>
+> **`Worker` is the other half, and it needs a second thread this VM does not
+> have.** 113 of the 141 files construct one. The constructor here is
+> nevertheless the real Node constructor down to the last validation — every
+> `ERR_*` a bad `filename`, `execArgv`, `env`, `name`, `resourceLimits` or
+> `workerData` raises is raised, in Node's order, which is what three of the
+> passing files are — and only then does it report the one honest failure left.
+> The design for the real thing is a **child Zun process**: the worker script
+> bundled by the same `tools/bundle_node_test.sh` machinery, the handshake
+> (`isMainThread === false`, `threadId`, `workerData`, `environmentData`) as the
+> first frame on the child's stdin, `parentPort` as a `MessagePort` whose
+> sibling is the pipe, and `src/v8/v8.ts`' V8 value-serialization format as the
+> framing — which is exactly what Node puts on a worker's channel. The missing
+> piece is a non-blocking read of the child's pipe, i.e. a poll-based loop over
+> it; this module deliberately grows no socket loop of its own, so when that
+> lands `Worker` needs the reader and nothing else.
+>
+> Six engine bugs were found here, and three of them compound into one shape: **a
+> prelude class cannot be shadowed** (a top-level `class MessageChannel` is
+> `duplicate class`, where `src/timers/timers.ts` can shadow the timer
+> *intrinsics*), **a symbol-keyed own property on a class instance reads back
+> `undefined`** (so the `util.inspect.custom` hook `lib/internal/worker/io.js`
+> installs cannot be installed), and **a class accessor's setter is not invoked
+> through an `any` receiver** while the getter is — which, with
+> [zun#78](https://github.com/UrubuCode/zun/issues/78), leaves *no* slot on a
+> class instance that plain JavaScript can write a handler function into. So
+> `MessageChannel` is bound to a second name and `port.onmessage = fn` is
+> rewritten to the backing slot, both by the bundler, both semantics-preserving.
+> A fourth aborts the VM outright: a `number` field of a class extending a
+> *prelude* class, initialised from a top-level `const …: number`. The last two
+> are about iteration: a generator method in an object literal returns nothing
+> when called, so `{ *[Symbol.iterator]() {} }` is not iterable, and `for`-of
+> over a **non-object** aborts the process uncatchably. Repros,
+> deviations and the blocker tables:
+> [`test/worker_threads/README.md`](test/worker_threads/README.md); per-test
+> breakdown:
+> [`test/worker_threads/RESULTS.md`](test/worker_threads/RESULTS.md).

@@ -222,7 +222,7 @@ test __node_test test
 v8 __node_v8 Serializer,Deserializer,DefaultSerializer,DefaultDeserializer,GCProfiler
 tty __node_tty ReadStream,WriteStream
 internal/tty __node_internal_tty -
-worker_threads __node_worker_threads -
+worker_threads __node_worker_threads MessagePort,MessageChannel,MessageEvent,BroadcastChannel,Worker,DOMException
 dns __node_dns Resolver
 dns/promises __node_dns_promises -
 net __node_net Socket,Server,Stream,BlockList,SocketAddress
@@ -454,6 +454,7 @@ v8 src/buffer/buffer.ts
 v8 src/string_decoder/string_decoder.ts
 v8 src/stream/stream.ts
 v8 src/v8/v8.ts
+worker_threads src/worker_threads/worker_threads.ts
 dns src/dns/dns.ts
 dns/promises src/dns/dns.ts
 net src/buffer/buffer.ts
@@ -665,6 +666,37 @@ src/perf_hooks/perf_hooks.ts
 ";;
   esac;;
 esac
+
+# The message-port globals.
+#
+# `MessageChannel`, `MessagePort`, `MessageEvent` and `BroadcastChannel` are
+# *globals* in Node, so a test can reach them without ever writing
+# `require('worker_threads')` -- `test-messagechannel.js` and
+# `test-worker-message-event.js` do nothing else. The engine's prelude has a
+# `MessageChannel` of its own (two dynamic objects delivering `{ data }` to
+# `onmessage`, crates/zun_prelude/builtin/async.zun), so such a test compiles
+# and then fails on the first member the real class has and that one does
+# not; the CONDITIONAL_FILES entry above cannot help it, because that gate is
+# the `require` call. One in-shell substring test over the source already
+# read therefore appends the module for any test that mentions one of the
+# four names, with the same append-once rule as the loop.
+#
+# `$WANTS_WORKER_THREADS` is the same decision, kept for the rewrite rules
+# below: the `MessageChannel` rename and the `onmessage` rewrite are emitted
+# for exactly the bundles that contain this module and for no others.
+WANTS_WORKER_THREADS=no
+case "$SRC_TEXT" in *MessageChannel*|*MessagePort*|*MessageEvent*|*BroadcastChannel*) WANTS_WORKER_THREADS=yes;; esac
+if requires_module "worker_threads"; then WANTS_WORKER_THREADS=yes; fi
+if [ "$WANTS_WORKER_THREADS" = yes ]; then
+  case "
+$FILES" in
+    *"
+src/worker_threads/worker_threads.ts
+"*) :;;
+    *) FILES="${FILES}src/worker_threads/worker_threads.ts
+";;
+  esac
+fi
 
 # The global `console`.
 #
@@ -976,6 +1008,59 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
   # bundle.
   if requires_module "dns"; then
     printf '%s\n' "s#\([A-Za-z_\$][A-Za-z0-9_\$]*\)\.promises\.Resolver\b#DnsPromiseResolver#g"
+  fi
+
+  # Engine workaround: `MessageChannel` becomes `__zunMessageChannel`.
+  #
+  # The prelude owns the name (crates/zun_prelude/builtin/async.zun) and a
+  # prelude *class* cannot be shadowed: a top-level `class MessageChannel` in
+  # the program is rejected outright with `[SEM0001] duplicate class`, where
+  # src/timers/timers.ts can shadow the timer *intrinsics* with top-level
+  # functions. So src/worker_threads/worker_threads.ts binds the real class
+  # to a second name the checker has no opinion about -- the same move the
+  # `console`, `performance` and `crypto` rules above make for the three
+  # prelude namespaces -- and the spelling Node programs use is rewritten to
+  # it. The two names denote the same class, so the rewrite only changes the
+  # lane the engine takes.
+  #
+  # `MessageChannel` is also a canonical binding in the module table, so the
+  # name is already dropped from a `require('worker_threads')` destructuring
+  # by the time this runs; the rename is deferred to $LATE for the same
+  # reason the alias renames are, and no file in the corpus writes the word
+  # inside a string literal.
+  #
+  # `MessagePort`, `MessageEvent`, `BroadcastChannel` and `DOMException` are
+  # not in the prelude, so they keep the names Node gives them.
+  if [ "$WANTS_WORKER_THREADS" = yes ]; then
+    printf 's#\\bMessageChannel\\b#__zunMessageChannel#g\n' >> "$LATE"
+  fi
+
+  # Engine workaround: `x.onmessage = fn` becomes
+  # `x.__wtHandlers.message = fn`.
+  #
+  # `onmessage` and `onmessageerror` are accessor pairs on `MessagePort` and
+  # `BroadcastChannel` (Node installs them with `defineEventHandler`), and in
+  # this engine a class accessor's **setter is not invoked** for an
+  # assignment through an `any`-typed receiver -- the getter is, which is
+  # what makes the asymmetry a bug rather than a missing feature:
+  #
+  #     class A { get x() { ... } set x(v) { ...never runs... } }
+  #     const a: any = new A(); a.x = 1;
+  #
+  # The assignment is simply lost, and so is a function written into a
+  # declared field or an expando of a class instance (both read back as
+  # `null` / `undefined`), so there is no slot on the instance that plain
+  # JavaScript can reach. The backing slot
+  # src/worker_threads/worker_threads.ts keeps the handler in is a plain
+  # object held by a declared field, which an assignment *does* reach, and
+  # the accessors read and write that very slot -- so the two spellings agree
+  # and the rewrite is semantics-preserving.
+  #
+  # Emitted only for a bundle that contains the module, so every other
+  # corpus' bundle stays byte-identical.
+  if [ "$WANTS_WORKER_THREADS" = yes ]; then
+    printf '%s\n' "s#\.onmessage\b#.__wtHandlers.message#g"
+    printf '%s\n' "s#\.onmessageerror\b#.__wtHandlers.messageerror#g"
   fi
 
   printf '%s\n' "$MODULE_SPECS" | while read -r name obj canons; do

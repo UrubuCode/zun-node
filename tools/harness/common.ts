@@ -726,23 +726,14 @@ Object.defineProperty(fixtures, "fixturesDir", {
 // (`src/tty/tty.ts`), inlined by the bundler for any test that requires it —
 // so the stub is gone rather than shadowing it.
 
-// `node:worker_threads`. This runtime has one thread and no `Worker`, so
-// `isMainThread` is `true` and `threadId` is `0` — which is the honest answer,
-// and the same one Node gives on its own main thread. Nineteen files in the
-// `process` corpus require this module for `isMainThread` alone, to take a
-// `common.skip` branch inside a worker; with no binding at all they failed to
-// *bundle*, which hid whatever their real blocker was. `Worker` is absent
-// rather than stubbed, so a test that tries to spawn one fails on the missing
-// constructor instead of on a fabricated one that does nothing.
-const __node_worker_threads: any = {
-  isMainThread: true,
-  threadId: 0,
-  Worker: undefined,
-  parentPort: null,
-  workerData: null,
-  resourceLimits: {},
-  SHARE_ENV: undefined,
-};
+// `node:worker_threads` used to be stubbed here -- `isMainThread: true`,
+// `threadId: 0` and no `Worker` -- because nineteen files in the `process`
+// corpus require the module for `isMainThread` alone and failed to *bundle*
+// without a binding. It is a real module now
+// (`../../src/worker_threads/worker_threads.ts`), inlined by the bundler for
+// any test that requires it or that mentions one of the message-port globals,
+// so the stub is gone rather than shadowing it: a second declaration of
+// `__node_worker_threads` in one program is a compile error.
 
 // `node:vm` used to be stubbed here, throwing, because a second realm is a VM
 // facility rather than something a library can synthesize. It is a real module

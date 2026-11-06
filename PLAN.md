@@ -1426,6 +1426,32 @@ gets deleted; nothing else in the tracker changes.
   to the property; the second is why `require.main` is a plain property set by
   one bundler-emitted call. Table in `test/module/README.md`.
 
+- **`node:worker_threads`: the message-port family implemented in
+  `src/worker_threads/worker_threads.ts`; `Worker` designed, not built.** The
+  module is two halves. The in-process half is there — `MessageChannel`,
+  `MessagePort` (queueing, `start`/`close`/`ref`/`unref`/`hasRef`, the
+  `message`/`messageerror`/`close` events, the hybrid
+  `EventTarget`/`EventEmitter` dispatch of `lib/internal/event_target.js`),
+  `MessageEvent`, `BroadcastChannel`, `receiveMessageOnPort`, the transfer-list
+  validation and structured-clone rules with Node's `DataCloneError` messages,
+  `markAsUntransferable`/`isMarkedAsUntransferable`/`markAsUncloneable`,
+  `environmentData`, `SHARE_ENV`, `threadId`, `isMainThread`, `parentPort`,
+  `workerData`, `resourceLimits`, `postMessageToThread` — and so is the whole
+  `Worker` *constructor*, validation for validation in Node's order, down to
+  the `DataCloneError` a `workerData` holding a closure raises. What is not
+  there is a worker: the VM has one thread and one realm. The design is a child
+  Zun process with the handshake and the messages framed as
+  `src/v8/v8.ts` V8-serialized payloads over its stdio, and the one thing it
+  waits on is a non-blocking read of that pipe (the poll-based loop under
+  `src/io/`). `worker_threads` is a pure Zun TypeScript module: a channel is two
+  queues and a dispatch rule, and the one capability it needs beyond
+  computation — a later loop turn to deliver on — is the VM's macrotask tier,
+  which `src/timers/timers.ts` already publishes. The acceptance bar is 100% of
+  Node 25's `test-worker*`/`test-messagechannel*`/`test-messageport*`/
+  `test-broadcastchannel*` suite (141 files), 113 of which construct a
+  `Worker`; the deviation table, the blocker tables and the six engine bugs
+  found here are in `test/worker_threads/README.md`.
+
 ### Module keys and host dispatch
 
 The native surface is registered under `node:fs` and `node:os`, so those import
