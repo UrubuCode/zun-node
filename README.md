@@ -872,3 +872,50 @@ target/debug/zun run /tmp/bundle.ts
 > here and are named as gaps. Blockers per test:
 > [`test/tty/README.md`](test/tty/README.md); per-test breakdown:
 > [`test/tty/RESULTS.md`](test/tty/RESULTS.md).
+
+<!-- node-dns:start -->
+### Node.js v25 `dns` compatibility
+
+`█████░░░░░░░░░░░░░░░░░░░` **22.2%** — 6 / 27 Node `test-dns*` tests passing
+<!-- node-dns:end -->
+
+> `dns` is the sixth module written as Zun TypeScript over Rust natives, and the
+> seam is the one Node itself draws between `lib/dns.js` and `src/cares_wrap.cc`:
+> `src/dns/*.rs` answers the system resolver (`getaddrinfo`/`getnameinfo`
+> through `libc` on POSIX and `GetAddrInfoW` on Windows, with the `AI_*` flags
+> and `NI_NAMEREQD` libuv passes), the machine's configured resolvers
+> (`/etc/resolv.conf`, `GetAdaptersAddresses`) and the DNS wire protocol itself;
+> [`src/dns/dns.ts`](src/dns/dns.ts) holds the module Node exposes — `isIP`, the
+> `setServers` address grammar, the `lookup` argument cascade, both `Resolver`
+> classes, `DNSException` with its fabricated `ENOTFOUND`, the thirteen record
+> shapes and the twenty-four error-code constants, for `node:dns` and
+> `node:dns/promises` alike.
+>
+> The `resolve*` family is a **hand-written stub resolver**
+> ([`src/dns/resolve.rs`](src/dns/resolve.rs)), not a resolver crate, and the
+> reason is the same principle that keeps a VM out of this extension: what the
+> module needs is one question per query, no cache, no DNSSEC and a server list
+> the *caller* owns, while `hickory-resolver` in blocking mode still brings a
+> `tokio` reactor and some ninety transitive crates. RFC 1035 message format
+> with §4.1.4 name decompression over UDP, with the §4.2.2 TCP retry on a
+> truncated answer, is a few hundred lines over `std::net` and no new
+> dependency — and it is verified by 21 Rust tests that drive the encoder and
+> the parser from hand-assembled messages (A/AAAA/MX/TXT/SOA/ANY records, a
+> compression pointer, every RCODE, a truncated record and a compression loop).
+>
+> Six of the twenty-seven tests pass, and the shape of the remainder is worth
+> stating because almost none of it is the module. Nine files need
+> [`node:dgram`](https://nodejs.org/api/dgram.html) to stand up a fake DNS
+> server (that module does not exist here yet); three need the
+> `--dns-result-order` CLI flag; and **six are blocked by the one engine defect
+> the `stream` section above already names** — a callable handed to
+> `Promise.prototype.then` is silently never called, which is exactly what
+> `.then(common.mustCall())` is. This corpus narrows it: the value
+> `common.mustCall()` hands back is degraded by the *return* of a dynamic call
+> (from an object-literal method it even reports `typeof === "object"`), it is
+> still callable directly, and a **class** method's return is not degraded at
+> all — so a harness whose `common` were a class instance would unblock the
+> pattern in every module's corpus. The repro is in
+> [`test/dns/README.md`](test/dns/README.md) with the other findings, alongside
+> the per-test blocker table; the per-test run is in
+> [`test/dns/RESULTS.md`](test/dns/RESULTS.md).

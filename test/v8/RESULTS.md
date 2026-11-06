@@ -18,14 +18,14 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-v8-collect-gc-profile.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-v8-collect-gc-profile.js: |
 | `test-v8-coverage.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-v8-coverage.js: |
 | `test-v8-cpu-profile.js` | ✅ pass | |
-| `test-v8-deserialize-buffer.js` | ❌ runtime | zun: runtime error: unhandled exception: Any(Any { tag: Object, payload: 1634041195120 }) |
+| `test-v8-deserialize-buffer.js` | ❌ runtime | zun: runtime error: unhandled exception: Any(Any { tag: Object, payload: 2884938229216 }) |
 | `test-v8-flag-pool-size-0.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-v8-flag-type-check.js` | ✅ pass | |
 | `test-v8-flags.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-v8-getheapsnapshot-twice.js` | ✅ pass | |
 | `test-v8-global-setter.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-v8-query-objects.js` | ❌ type error | bundles/test-v8-query-objects.ts:25732:10: error: [SEM0001] duplicate function declaration |
-| `test-v8-serdes.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-v8-serdes.js: |
+| `test-v8-serdes.js` | ❌ type error | bundles/test-v8-serdes.ts:28835:7: error: [SEM0001] no field or setter '_getDataCloneError' on this type |
 | `test-v8-serialize-leak.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-v8-serialize-leak.js: |
 | `test-v8-startup-snapshot-api.js` | ✅ pass | |
 | `test-v8-stats.js` | ✅ pass | |

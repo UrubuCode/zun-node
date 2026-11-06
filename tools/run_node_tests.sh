@@ -153,6 +153,13 @@ case "$MODULE" in
   # answers, `isatty(fd)`.
   tty)    KIND="zun-ts";     PATTERNS="test-tty- test-ttywrap";
           PATTERN="test-tty-*|test-ttywrap";;
+  # `dns` is TS over natives: src/dns/*.rs holds the system resolver
+  # (`getaddrinfo`/`getnameinfo`), the machine's resolver configuration and a
+  # small DNS client for the `resolve*` family, while src/dns/dns.ts holds the
+  # module Node exposes -- `isIP`, the two `Resolver` classes, the validation,
+  # `DNSException` and the record shapes. Its corpus is `test-dns*`, which
+  # includes `test-dns.js` itself.
+  dns)    KIND="zun-ts+ext"; PATTERNS="test-dns";                          PATTERN="test-dns";;
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 

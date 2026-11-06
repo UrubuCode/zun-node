@@ -13,8 +13,8 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-tty-backwards-api.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-tty-backwards-api.js: |
+| `test-tty-backwards-api.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-tty-stdin-end.js` | ✅ pass | |
 | `test-tty-stdin-pipe.js` | ✅ pass | |
-| `test-ttywrap-invalid-fd.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-ttywrap-invalid-fd.js: |
-| `test-ttywrap-stack.js` | ❌ runtime | thread '<unknown>' (44720) has overflowed its stack |
+| `test-ttywrap-invalid-fd.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-ttywrap-stack.js` | ❌ runtime | thread '<unknown>' (35748) has overflowed its stack |
