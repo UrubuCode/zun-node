@@ -22,8 +22,8 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-url-is-url-internal.js` | ✅ pass | |
 | `test-url-parse-format.js` | ✅ pass | |
 | `test-url-parse-invalid-input.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-url-parse-query.js` | ❌ runtime | zun: runtime error: call did not resolve to a method at <main> [674504..674517] |
-| `test-url-pathtofileurl.js` | ❌ type error | bundles/test-url-pathtofileurl.ts:17423:38: error: [SEM0001] spread arguments are not lowered yet |
+| `test-url-parse-query.js` | ❌ runtime | zun: runtime error: call did not resolve to a method at <main> [675168..675181] |
+| `test-url-pathtofileurl.js` | ❌ type error | bundles/test-url-pathtofileurl.ts:17436:38: error: [SEM0001] spread arguments are not lowered yet |
 | `test-url-relative.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-url-revokeobjecturl.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-url-urltooptions.js` | ✅ pass | |

@@ -46,12 +46,12 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-diagnostics-channel-symbol-named.js` | ✅ pass | |
 | `test-diagnostics-channel-sync-unsubscribe.js` | ✅ pass | |
 | `test-diagnostics-channel-tracing-channel-args-types.js` | ✅ pass | |
-| `test-diagnostics-channel-tracing-channel-callback-early-exit.js` | ❌ engine panic | thread '<unnamed>' (44692) panicked at crates\zun_interp\src\value.rs:228:22: |
+| `test-diagnostics-channel-tracing-channel-callback-early-exit.js` | ❌ engine panic | thread '<unnamed>' (30788) panicked at crates\zun_interp\src\value.rs:228:22: |
 | `test-diagnostics-channel-tracing-channel-callback-error.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-diagnostics-channel-tracing-channel-callback-run-stores.js` | ✅ pass | |
-| `test-diagnostics-channel-tracing-channel-callback.js` | ❌ type error | bundles/test-diagnostics-channel-tracing-channel-callback.ts:18148:1: error: [SEM0001] type Any has no methods |
+| `test-diagnostics-channel-tracing-channel-callback.js` | ❌ type error | bundles/test-diagnostics-channel-tracing-channel-callback.ts:18161:1: error: [SEM0001] type Any has no methods |
 | `test-diagnostics-channel-tracing-channel-has-subscribers.js` | ✅ pass | |
-| `test-diagnostics-channel-tracing-channel-promise-early-exit.js` | ❌ engine panic | thread '<unnamed>' (36364) panicked at crates\zun_interp\src\value.rs:228:22: |
+| `test-diagnostics-channel-tracing-channel-promise-early-exit.js` | ❌ engine panic | thread '<unnamed>' (25948) panicked at crates\zun_interp\src\value.rs:228:22: |
 | `test-diagnostics-channel-tracing-channel-promise-error.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-diagnostics-channel-tracing-channel-promise-run-stores.js` | ✅ pass | |
 | `test-diagnostics-channel-tracing-channel-promise-unhandled.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |

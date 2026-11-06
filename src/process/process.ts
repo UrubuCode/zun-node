@@ -746,7 +746,20 @@ function __processReportUncaught(error: any): void {
     __evEmit(__processEmitter, "uncaughtException", [error]);
     return;
   }
-  throw error;
+  // Unhandled: Node prints the error and exits with code 1 (after running
+  // 'exit' listeners). Rethrowing is not enough here — an exception that
+  // escapes a macrotask is printed by the engine but the run still exits 0,
+  // which made tests whose assertions live in a timer or observer callback
+  // pass spuriously. So the crash is performed explicitly.
+  let text = "";
+  try {
+    const stack: any = error !== null && error !== undefined ? error.stack : undefined;
+    text = typeof stack === "string" && stack !== "" ? stack : String(error);
+  } catch (ignored) {
+    text = "Uncaught exception";
+  }
+  host.stderrWrite(text + "\n");
+  process.exit(1);
 }
 
 // ---------------------------------------------------------------------------

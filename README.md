@@ -124,7 +124,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-fs:start -->
 ### Node.js v25 `fs` compatibility
 
-`████░░░░░░░░░░░░░░░░░░░░` **19.8%** — 45 / 227 Node `test-fs-*` tests passing
+`████░░░░░░░░░░░░░░░░░░░░` **18.0%** — 41 / 227 Node `test-fs-*` tests passing
 <!-- node-fs:end -->
 
 > `fs` is implemented as **TS over natives**, the `os` kind: `src/fs/*.rs` holds
@@ -145,7 +145,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-util:start -->
 ### Node.js v25 `util` compatibility
 
-`██████░░░░░░░░░░░░░░░░░░` **26.9%** — 7 / 26 Node `test-util*` tests passing
+`█████░░░░░░░░░░░░░░░░░░░` **23.0%** — 6 / 26 Node `test-util*` tests passing
 <!-- node-util:end -->
 
 > `util` is implemented end to end — `inspect` with every option Node documents
@@ -294,7 +294,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-os:start -->
 ### Node.js v25 `os` compatibility
 
-`██████░░░░░░░░░░░░░░░░░░` **28.5%** — 2 / 7 Node `test-os*` tests passing
+`███░░░░░░░░░░░░░░░░░░░░░` **14.2%** — 1 / 7 Node `test-os*` tests passing
 <!-- node-os:end -->
 
 > `os` is complete — every function, `constants` for both platforms, `EOL`,
@@ -477,7 +477,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-timers:start -->
 ### Node.js v25 `timers` compatibility
 
-`█████████████░░░░░░░░░░░` **56.8%** — 33 / 58 Node `test-timers*` tests passing
+`████████████░░░░░░░░░░░░` **51.7%** — 30 / 58 Node `test-timers*` tests passing
 <!-- node-timers:end -->
 
 > `timers` is the first module whose *substance* was already in the engine: the
@@ -584,7 +584,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-stream:start -->
 ### Node.js v25 `stream` compatibility
 
-`█████████░░░░░░░░░░░░░░░` **39.7%** — 81 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
+`█████████░░░░░░░░░░░░░░░` **38.2%** — 78 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
 <!-- node-stream:end -->
 
 > `stream` is the largest module here by a wide margin — 204 Node files against
@@ -731,7 +731,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-perf_hooks:start -->
 ### Node.js v25 `perf_hooks` compatibility
 
-`███░░░░░░░░░░░░░░░░░░░░░` **15.0%** — 3 / 20 Node `test-perf-hooks-*|test-performance*` tests passing
+`██░░░░░░░░░░░░░░░░░░░░░░` **10.0%** — 2 / 20 Node `test-perf-hooks-*|test-performance*` tests passing
 <!-- node-perf_hooks:end -->
 
 > The whole surface is implemented — `performance` (`now`, `timeOrigin`,

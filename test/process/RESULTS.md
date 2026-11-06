@@ -32,7 +32,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-process-dlopen-undefined-exports.js` | ✅ pass | |
 | `test-process-domain-segfault.js` | ✅ pass | |
 | `test-process-emit.js` | ✅ pass | |
-| `test-process-emitwarning.js` | ❌ type error | bundles/test-process-emitwarning.ts:17429:5: error: [SEM0001] 'constructor' expects 1 to 2 argument(s), found  |
+| `test-process-emitwarning.js` | ❌ type error | bundles/test-process-emitwarning.ts:17442:5: error: [SEM0001] 'constructor' expects 1 to 2 argument(s), found  |
 | `test-process-env-allowed-flags-are-documented.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-process-env-allowed-flags-are-documented.js: |
 | `test-process-env-allowed-flags.js` | ❌ assertion | AssertionError [strictEqual]: flag should be in set: --perf_basic_prof |
 | `test-process-env-delete.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
@@ -88,7 +88,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-process-next-tick.js` | ✅ pass | |
 | `test-process-no-deprecation.js` | ✅ pass | |
 | `test-process-ppid.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-process-prototype.js` | ❌ type error | bundles/test-process-prototype.ts:17414:27: error: [SEM0001] right operand of 'instanceof' must be a class nam |
+| `test-process-prototype.js` | ❌ type error | bundles/test-process-prototype.ts:17427:27: error: [SEM0001] right operand of 'instanceof' must be a class nam |
 | `test-process-raw-debug.js` | ❌ runtime | bundles/test-process-raw-debug.ts: error: parse error: "A 'return' statement can only be used within a functio |
 | `test-process-really-exit.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-process-redirect-warnings-env.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -107,5 +107,5 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-process-uncaught-exception-monitor.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-process-uptime.js` | ✅ pass | |
 | `test-process-versions.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-process-versions.js: |
-| `test-process-warning.js` | ❌ type error | bundles/test-process-warning.ts:17600:7: error: [SEM0001] no field or setter 'toString' on this type |
+| `test-process-warning.js` | ❌ type error | bundles/test-process-warning.ts:17613:7: error: [SEM0001] no field or setter 'toString' on this type |
 | `test-process-warnings.mjs` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |

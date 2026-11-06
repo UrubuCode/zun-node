@@ -6,7 +6,7 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-perf-hooks-*|test-performance*
 <!-- node-perf_hooks:start -->
 ### Node.js v25 `perf_hooks` compatibility
 
-`███░░░░░░░░░░░░░░░░░░░░░` **15.0%** — 3 / 20 Node `test-perf-hooks-*|test-performance*` tests passing
+`██░░░░░░░░░░░░░░░░░░░░░░` **10.0%** — 2 / 20 Node `test-perf-hooks-*|test-performance*` tests passing
 <!-- node-perf_hooks:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
@@ -22,14 +22,14 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-performance-function-async.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-performance-function.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-performance-gc.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-performance-global.js` | ❌ type error | bundles/test-performance-global.ts:19232:1: error: [SEM0001] unknown variable 'performance' |
+| `test-performance-global.js` | ❌ type error | bundles/test-performance-global.ts:19245:1: error: [SEM0001] unknown variable 'performance' |
 | `test-performance-many-marks.js` | ❌ timeout |  |
 | `test-performance-measure-detail.js` | ✅ pass | |
-| `test-performance-measure.js` | ✅ pass | |
+| `test-performance-measure.js` | ❌ assertion | AssertionError [==]: false == true |
 | `test-performance-nodetiming-uvmetricsinfo.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-performance-nodetiming.js` | ❌ assertion | AssertionError [==]: expect nodeTiming['v8Start'] > nodeTiming['nodeStart'] |
-| `test-performance-resourcetimingbufferfull.js` | ❌ type error | bundles/test-performance-resourcetimingbufferfull.ts:19265:60: error: [SEM0001] spread arguments are not lower |
-| `test-performance-resourcetimingbuffersize.js` | ❌ type error | bundles/test-performance-resourcetimingbuffersize.ts:19263:41: error: [SEM0001] spread arguments are not lower |
+| `test-performance-resourcetimingbufferfull.js` | ❌ type error | bundles/test-performance-resourcetimingbufferfull.ts:19278:60: error: [SEM0001] spread arguments are not lower |
+| `test-performance-resourcetimingbuffersize.js` | ❌ type error | bundles/test-performance-resourcetimingbuffersize.ts:19276:41: error: [SEM0001] spread arguments are not lower |
 | `test-performance-timeline.mjs` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-performanceobserver-gc.js` | ✅ pass | |
 | `test-performanceobserver.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-performanceobserver.js: |

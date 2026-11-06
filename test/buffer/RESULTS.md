@@ -13,67 +13,67 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-buffer-alloc.js` | ❌ unsupported import/require | bundles/test-buffer-alloc.ts:18598:35: error: [SEM0001] buffer index must be an integer |
-| `test-buffer-arraybuffer.js` | ❌ type error | bundles/test-buffer-arraybuffer.ts:17314:28: error: [SEM0001] ArrayBuffer length must be an integer |
+| `test-buffer-alloc.js` | ❌ unsupported import/require | bundles/test-buffer-alloc.ts:18611:35: error: [SEM0001] buffer index must be an integer |
+| `test-buffer-arraybuffer.js` | ❌ type error | bundles/test-buffer-arraybuffer.ts:17327:28: error: [SEM0001] ArrayBuffer length must be an integer |
 | `test-buffer-ascii.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-buffer-backing-arraybuffer.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-buffer-backing-arraybuffer.js: |
 | `test-buffer-badhex.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-buffer-bigint64.js` | ❌ type error | bundles/test-buffer-bigint64.ts:17316:7: error: [SEM0001] buffer index must be an integer |
-| `test-buffer-bytelength.js` | ❌ type error | bundles/test-buffer-bytelength.ts:17938:29: error: [SEM0001] spread arguments are not lowered yet |
-| `test-buffer-compare-offset.js` | ❌ type error | bundles/test-buffer-compare-offset.ts:17315:20: error: [SEM0001] type BufferView(U8) has no methods |
-| `test-buffer-compare.js` | ❌ type error | bundles/test-buffer-compare.ts:17312:27: error: [SEM0001] Buffer fill byte must be an integer |
-| `test-buffer-concat.js` | ❌ type error | bundles/test-buffer-concat.ts:17340:21: error: [SEM0001] 'Buffer.concat' expects 1 argument (a list) |
+| `test-buffer-bigint64.js` | ❌ type error | bundles/test-buffer-bigint64.ts:17329:7: error: [SEM0001] buffer index must be an integer |
+| `test-buffer-bytelength.js` | ❌ type error | bundles/test-buffer-bytelength.ts:17951:29: error: [SEM0001] spread arguments are not lowered yet |
+| `test-buffer-compare-offset.js` | ❌ type error | bundles/test-buffer-compare-offset.ts:17328:20: error: [SEM0001] type BufferView(U8) has no methods |
+| `test-buffer-compare.js` | ❌ type error | bundles/test-buffer-compare.ts:17325:27: error: [SEM0001] Buffer fill byte must be an integer |
+| `test-buffer-concat.js` | ❌ type error | bundles/test-buffer-concat.ts:17353:21: error: [SEM0001] 'Buffer.concat' expects 1 argument (a list) |
 | `test-buffer-constants.js` | ✅ pass | |
-| `test-buffer-constructor-deprecation-error.js` | ❌ engine panic | thread '<unnamed>' (13184) panicked at crates\zun_interp\src\value.rs:226:25: |
+| `test-buffer-constructor-deprecation-error.js` | ❌ engine panic | thread '<unnamed>' (26844) panicked at crates\zun_interp\src\value.rs:226:25: |
 | `test-buffer-constructor-node-modules-paths.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-buffer-constructor-node-modules.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-buffer-constructor-node-modules.js: |
 | `test-buffer-constructor-outside-node-modules.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-buffer-copy.js` | ❌ type error | bundles/test-buffer-copy.ts:17319:10: error: [SEM0001] Buffer fill byte must be an integer |
-| `test-buffer-equals.js` | ❌ type error | bundles/test-buffer-equals.ts:17324:32: error: [SEM0001] 'equals' expects another Buffer |
-| `test-buffer-failed-alloc-typed-arrays.js` | ❌ type error | bundles/test-buffer-failed-alloc-typed-arrays.ts:17937:19: error: [SEM0001] 'fill' expects 3 argument(s), foun |
-| `test-buffer-fakes.js` | ❌ type error | bundles/test-buffer-fakes.ts:17316:16: error: [SEM0001] unknown class 'FakeBuffer' |
+| `test-buffer-copy.js` | ❌ type error | bundles/test-buffer-copy.ts:17332:10: error: [SEM0001] Buffer fill byte must be an integer |
+| `test-buffer-equals.js` | ❌ type error | bundles/test-buffer-equals.ts:17337:32: error: [SEM0001] 'equals' expects another Buffer |
+| `test-buffer-failed-alloc-typed-arrays.js` | ❌ type error | bundles/test-buffer-failed-alloc-typed-arrays.ts:17950:19: error: [SEM0001] 'fill' expects 3 argument(s), foun |
+| `test-buffer-fakes.js` | ❌ type error | bundles/test-buffer-fakes.ts:17329:16: error: [SEM0001] unknown class 'FakeBuffer' |
 | `test-buffer-fill.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-buffer-fill.js: |
-| `test-buffer-from.js` | ❌ type error | bundles/test-buffer-from.ts:17317:24: error: [SEM0001] unknown base class 'String' |
-| `test-buffer-includes.js` | ❌ type error | bundles/test-buffer-includes.ts:17323:24: error: [SEM0001] Buffer byteOffset must be an integer |
-| `test-buffer-indexof.js` | ❌ type error | bundles/test-buffer-indexof.ts:17942:35: error: [SEM0001] Buffer byteOffset must be an integer |
-| `test-buffer-inheritance.js` | ❌ type error | bundles/test-buffer-inheritance.ts:17329:19: error: [SEM0001] unknown class 'T' |
-| `test-buffer-inspect.js` | ❌ type error | bundles/test-buffer-inspect.ts:17954:8: error: [SEM0001] Buffer fill byte must be an integer |
-| `test-buffer-isascii.js` | ❌ type error | bundles/test-buffer-isascii.ts:17958:3: error: [SEM0001] 'structuredClone' expects 0 to 1 argument(s), found 2 |
-| `test-buffer-isencoding.js` | ❌ type error | bundles/test-buffer-isencoding.ts:17326:29: error: [SEM0001] 'Buffer.isEncoding' is not supported in this runt |
-| `test-buffer-isutf8.js` | ❌ type error | bundles/test-buffer-isutf8.ts:17981:41: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, |
-| `test-buffer-iterator.js` | ❌ type error | bundles/test-buffer-iterator.ts:17339:11: error: [SEM0001] type BufferView(U8) has no methods |
+| `test-buffer-from.js` | ❌ type error | bundles/test-buffer-from.ts:17330:24: error: [SEM0001] unknown base class 'String' |
+| `test-buffer-includes.js` | ❌ type error | bundles/test-buffer-includes.ts:17336:24: error: [SEM0001] Buffer byteOffset must be an integer |
+| `test-buffer-indexof.js` | ❌ type error | bundles/test-buffer-indexof.ts:17955:35: error: [SEM0001] Buffer byteOffset must be an integer |
+| `test-buffer-inheritance.js` | ❌ type error | bundles/test-buffer-inheritance.ts:17342:19: error: [SEM0001] unknown class 'T' |
+| `test-buffer-inspect.js` | ❌ type error | bundles/test-buffer-inspect.ts:17967:8: error: [SEM0001] Buffer fill byte must be an integer |
+| `test-buffer-isascii.js` | ❌ type error | bundles/test-buffer-isascii.ts:17971:3: error: [SEM0001] 'structuredClone' expects 0 to 1 argument(s), found 2 |
+| `test-buffer-isencoding.js` | ❌ type error | bundles/test-buffer-isencoding.ts:17339:29: error: [SEM0001] 'Buffer.isEncoding' is not supported in this runt |
+| `test-buffer-isutf8.js` | ❌ type error | bundles/test-buffer-isutf8.ts:17994:41: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, |
+| `test-buffer-iterator.js` | ❌ type error | bundles/test-buffer-iterator.ts:17352:11: error: [SEM0001] type BufferView(U8) has no methods |
 | `test-buffer-new.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
-| `test-buffer-no-negative-allocation.js` | ❌ type error | bundles/test-buffer-no-negative-allocation.ts:17324:34: error: [SEM0001] Buffer size must be an integer |
+| `test-buffer-no-negative-allocation.js` | ❌ type error | bundles/test-buffer-no-negative-allocation.ts:17337:34: error: [SEM0001] Buffer size must be an integer |
 | `test-buffer-nopendingdep-map.js` | ✅ pass | |
-| `test-buffer-of-no-deprecation.js` | ❌ type error | bundles/test-buffer-of-no-deprecation.ts:17313:8: error: [SEM0001] 'Buffer.of' is not supported in this runtim |
-| `test-buffer-over-max-length.js` | ❌ type error | bundles/test-buffer-over-max-length.ts:17938:34: error: [SEM0001] Buffer size must be an integer |
-| `test-buffer-parent-property.js` | ❌ type error | bundles/test-buffer-parent-property.ts:17326:20: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-buffer-of-no-deprecation.js` | ❌ type error | bundles/test-buffer-of-no-deprecation.ts:17326:8: error: [SEM0001] 'Buffer.of' is not supported in this runtim |
+| `test-buffer-over-max-length.js` | ❌ type error | bundles/test-buffer-over-max-length.ts:17951:34: error: [SEM0001] Buffer size must be an integer |
+| `test-buffer-parent-property.js` | ❌ type error | bundles/test-buffer-parent-property.ts:17339:20: error: [SEM0001] type BufferView(U8) has no fields |
 | `test-buffer-pending-deprecation.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-buffer-pool-untransferable.js` | ❌ type error | bundles/test-buffer-pool-untransferable.ts:17318:20: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-buffer-pool-untransferable.js` | ❌ type error | bundles/test-buffer-pool-untransferable.ts:17331:20: error: [SEM0001] type BufferView(U8) has no fields |
 | `test-buffer-prototype-inspect.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-buffer-read.js` | ❌ type error | bundles/test-buffer-read.ts:17381:43: error: [SEM0001] Buffer offset/index must be an integer |
-| `test-buffer-readdouble.js` | ❌ type error | bundles/test-buffer-readdouble.ts:17411:10: error: [SEM0001] buffer index must be an integer |
-| `test-buffer-readfloat.js` | ❌ type error | bundles/test-buffer-readfloat.ts:17373:10: error: [SEM0001] buffer index must be an integer |
-| `test-buffer-readint.js` | ❌ type error | bundles/test-buffer-readint.ts:17319:12: error: [SEM0001] buffer index must be an integer |
-| `test-buffer-readuint.js` | ❌ type error | bundles/test-buffer-readuint.ts:17319:12: error: [SEM0001] buffer index must be an integer |
-| `test-buffer-resizable.js` | ❌ type error | bundles/test-buffer-resizable.ts:18116:17: error: [SEM0001] type BufferView(U8) has no fields |
+| `test-buffer-read.js` | ❌ type error | bundles/test-buffer-read.ts:17394:43: error: [SEM0001] Buffer offset/index must be an integer |
+| `test-buffer-readdouble.js` | ❌ type error | bundles/test-buffer-readdouble.ts:17424:10: error: [SEM0001] buffer index must be an integer |
+| `test-buffer-readfloat.js` | ❌ type error | bundles/test-buffer-readfloat.ts:17386:10: error: [SEM0001] buffer index must be an integer |
+| `test-buffer-readint.js` | ❌ type error | bundles/test-buffer-readint.ts:17332:12: error: [SEM0001] buffer index must be an integer |
+| `test-buffer-readuint.js` | ❌ type error | bundles/test-buffer-readuint.ts:17332:12: error: [SEM0001] buffer index must be an integer |
+| `test-buffer-resizable.js` | ❌ type error | bundles/test-buffer-resizable.ts:18129:17: error: [SEM0001] type BufferView(U8) has no fields |
 | `test-buffer-safe-unsafe.js` | ✅ pass | |
 | `test-buffer-set-inspect-max-bytes.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (RangeError). |
-| `test-buffer-sharedarraybuffer.js` | ❌ type error | bundles/test-buffer-sharedarraybuffer.ts:17320:29: error: [SEM0001] type BufferView(U16) has no fields |
-| `test-buffer-slice.js` | ❌ type error | bundles/test-buffer-slice.ts:17344:14: error: [SEM0001] Buffer offset/index must be an integer |
-| `test-buffer-slow.js` | ❌ type error | bundles/test-buffer-slow.ts:17933:17: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supported in this runti |
-| `test-buffer-swap.js` | ❌ type error | bundles/test-buffer-swap.ts:17348:35: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, f |
-| `test-buffer-tojson.js` | ❌ type error | bundles/test-buffer-tojson.ts:17324:28: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, |
-| `test-buffer-tostring-4gb.js` | ❌ type error | bundles/test-buffer-tostring-4gb.ts:17319:30: error: [SEM0001] Buffer size must be an integer |
-| `test-buffer-tostring-range.js` | ❌ type error | bundles/test-buffer-tostring-range.ts:17316:50: error: [SEM0001] Buffer offset/index must be an integer |
-| `test-buffer-tostring-rangeerror.js` | ❌ type error | bundles/test-buffer-tostring-rangeerror.ts:17964:25: error: [SEM0001] Buffer size must be an integer |
-| `test-buffer-tostring.js` | ❌ type error | bundles/test-buffer-tostring.ts:17319:43: error: [SEM0001] Buffer encoding must be a string |
+| `test-buffer-sharedarraybuffer.js` | ❌ type error | bundles/test-buffer-sharedarraybuffer.ts:17333:29: error: [SEM0001] type BufferView(U16) has no fields |
+| `test-buffer-slice.js` | ❌ type error | bundles/test-buffer-slice.ts:17357:14: error: [SEM0001] Buffer offset/index must be an integer |
+| `test-buffer-slow.js` | ❌ type error | bundles/test-buffer-slow.ts:17946:17: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supported in this runti |
+| `test-buffer-swap.js` | ❌ type error | bundles/test-buffer-swap.ts:17361:35: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, f |
+| `test-buffer-tojson.js` | ❌ type error | bundles/test-buffer-tojson.ts:17337:28: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, |
+| `test-buffer-tostring-4gb.js` | ❌ type error | bundles/test-buffer-tostring-4gb.ts:17332:30: error: [SEM0001] Buffer size must be an integer |
+| `test-buffer-tostring-range.js` | ❌ type error | bundles/test-buffer-tostring-range.ts:17329:50: error: [SEM0001] Buffer offset/index must be an integer |
+| `test-buffer-tostring-rangeerror.js` | ❌ type error | bundles/test-buffer-tostring-rangeerror.ts:17977:25: error: [SEM0001] Buffer size must be an integer |
+| `test-buffer-tostring.js` | ❌ type error | bundles/test-buffer-tostring.ts:17332:43: error: [SEM0001] Buffer encoding must be a string |
 | `test-buffer-write-fast.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-buffer-write-fast.js: |
-| `test-buffer-write.js` | ❌ type error | bundles/test-buffer-write.ts:17314:40: error: [SEM0001] Buffer offset/index must be an integer |
-| `test-buffer-writedouble.js` | ❌ type error | bundles/test-buffer-writedouble.ts:17400:12: error: [SEM0001] buffer index must be an integer |
-| `test-buffer-writefloat.js` | ❌ type error | bundles/test-buffer-writefloat.ts:17382:12: error: [SEM0001] buffer index must be an integer |
-| `test-buffer-writeint.js` | ❌ type error | bundles/test-buffer-writeint.ts:17334:22: error: [SEM0001] argument type Float(F64) does not match Int(IntKind |
-| `test-buffer-writeuint.js` | ❌ type error | bundles/test-buffer-writeuint.ts:17323:10: error: [SEM0001] buffer index must be an integer |
-| `test-buffer-zero-fill-cli.js` | ❌ type error | bundles/test-buffer-zero-fill-cli.ts:17948:12: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supported in t |
+| `test-buffer-write.js` | ❌ type error | bundles/test-buffer-write.ts:17327:40: error: [SEM0001] Buffer offset/index must be an integer |
+| `test-buffer-writedouble.js` | ❌ type error | bundles/test-buffer-writedouble.ts:17413:12: error: [SEM0001] buffer index must be an integer |
+| `test-buffer-writefloat.js` | ❌ type error | bundles/test-buffer-writefloat.ts:17395:12: error: [SEM0001] buffer index must be an integer |
+| `test-buffer-writeint.js` | ❌ type error | bundles/test-buffer-writeint.ts:17347:22: error: [SEM0001] argument type Float(F64) does not match Int(IntKind |
+| `test-buffer-writeuint.js` | ❌ type error | bundles/test-buffer-writeuint.ts:17336:10: error: [SEM0001] buffer index must be an integer |
+| `test-buffer-zero-fill-cli.js` | ❌ type error | bundles/test-buffer-zero-fill-cli.ts:17961:12: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supported in t |
 | `test-buffer-zero-fill-reset.js` | ✅ pass | |
 | `test-buffer-zero-fill.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |

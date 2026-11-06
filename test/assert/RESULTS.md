@@ -13,17 +13,17 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-assert.js` | ❌ type error | bundles/test-assert.ts:17625:29: error: [SEM0001] 'TypeError' message must be a string |
-| `test-assert-async.js` | ❌ parse | bundles/test-assert-async.ts:17395:27: error: [SEM0001] right operand of 'instanceof' must be a class name |
+| `test-assert.js` | ❌ type error | bundles/test-assert.ts:17638:29: error: [SEM0001] 'TypeError' message must be a string |
+| `test-assert-async.js` | ❌ parse | bundles/test-assert-async.ts:17408:27: error: [SEM0001] right operand of 'instanceof' must be a class name |
 | `test-assert-checktag.js` | ✅ pass | |
-| `test-assert-class.js` | ❌ type error | bundles/test-assert-class.ts:17615:38: error: [SEM0001] right operand of 'instanceof' must be a class name |
+| `test-assert-class.js` | ❌ type error | bundles/test-assert-class.ts:17628:38: error: [SEM0001] right operand of 'instanceof' must be a class name |
 | `test-assert-class-destructuring.js` | ❌ assertion | AssertionError [strictEqual]: Expected "actual" to be reference-equal to "expected": |
-| `test-assert-deep.js` | ❌ unsupported import/require | bundles/test-assert-deep.ts:17537:24: error: [SEM0001] unknown base class 'RegExp' |
+| `test-assert-deep.js` | ❌ unsupported import/require | bundles/test-assert-deep.ts:17550:24: error: [SEM0001] unknown base class 'RegExp' |
 | `test-assert-deep-with-error.js` | ❌ assertion | AssertionError [deepStrictEqual]: Values have same structure but are not reference-equal: |
 | `test-assert-esm-cjs-message-verify.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-assert-esm-cjs-message-verify.js: |
 | `test-assert-fail.js` | ✅ pass | |
 | `test-assert-first-line.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-assert-first-line.js: |
-| `test-assert-if-error.js` | ❌ type error | bundles/test-assert-if-error.ts:17533:13: error: [SEM0001] no field or setter 'stack' on this type |
+| `test-assert-if-error.js` | ❌ type error | bundles/test-assert-if-error.ts:17546:13: error: [SEM0001] no field or setter 'stack' on this type |
 | `test-assert-myers-diff.js` | ✅ pass | |
-| `test-assert-partial-deep-equal.js` | ❌ type error | bundles/test-assert-partial-deep-equal.ts:17829:19: error: [SEM0001] array index must be an integer |
-| `test-assert-typedarray-deepequal.js` | ❌ type error | bundles/test-assert-typedarray-deepequal.ts:17513:6: error: [SEM0001] 'subarray' expects 2 argument(s), found  |
+| `test-assert-partial-deep-equal.js` | ❌ type error | bundles/test-assert-partial-deep-equal.ts:17842:19: error: [SEM0001] array index must be an integer |
+| `test-assert-typedarray-deepequal.js` | ❌ type error | bundles/test-assert-typedarray-deepequal.ts:17526:6: error: [SEM0001] 'subarray' expects 2 argument(s), found  |

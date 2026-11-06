@@ -13,13 +13,13 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-child-process-advanced-serialization-largebuffer.js` | ❌ type error | bundles/test-child-process-advanced-serialization-largebuffer.ts:18352:47: error: [SEM0001] Buffer fill byte m |
-| `test-child-process-advanced-serialization-splitted-length-field.js` | ❌ type error | bundles/test-child-process-advanced-serialization-splitted-length-field.ts:18351:34: error: [SEM0001] Buffer s |
+| `test-child-process-advanced-serialization-largebuffer.js` | ❌ type error | bundles/test-child-process-advanced-serialization-largebuffer.ts:18365:47: error: [SEM0001] Buffer fill byte m |
+| `test-child-process-advanced-serialization-splitted-length-field.js` | ❌ type error | bundles/test-child-process-advanced-serialization-splitted-length-field.ts:18364:34: error: [SEM0001] Buffer s |
 | `test-child-process-advanced-serialization.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-child-process-bad-stdio.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-bad-stdio.js: |
 | `test-child-process-can-write-to-stdout.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-constructor.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-child-process-cwd.js` | ❌ unsupported import/require | bundles/test-child-process-cwd.ts:21104:58: error: [SEM0001] a required parameter cannot follow a default para |
+| `test-child-process-cwd.js` | ❌ unsupported import/require | bundles/test-child-process-cwd.ts:21117:58: error: [SEM0001] a required parameter cannot follow a default para |
 | `test-child-process-default-options.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-destroy.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-detached.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -65,7 +65,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-child-process-fork-ref2.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-fork-stdio-string-variant.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-child-process-fork-stdio.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-fork-stdio.js: |
-| `test-child-process-fork-timeout-kill-signal.js` | ❌ type error | bundles/test-child-process-fork-timeout-kill-signal.ts:18381:10: error: [SEM0001] no field or setter 'aborted' |
+| `test-child-process-fork-timeout-kill-signal.js` | ❌ type error | bundles/test-child-process-fork-timeout-kill-signal.ts:18394:10: error: [SEM0001] no field or setter 'aborted' |
 | `test-child-process-fork-url.mjs` | ❌ unsupported import/require | bundles/test-child-process-fork-url.ts: error: OXC adapter: unsupported expression 'ImportMeta' |
 | `test-child-process-fork.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-fork3.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -76,9 +76,9 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-child-process-kill.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-net-reuseport.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-net-reuseport.js: |
 | `test-child-process-no-deprecation.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-pipe-dataflow.js` | ❌ type error | bundles/test-child-process-pipe-dataflow.ts:21096:28: error: [SEM0001] Buffer size must be an integer |
-| `test-child-process-promisified.js` | ❌ type error | bundles/test-child-process-promisified.ts:18354:35: error: [SEM0001] right operand of 'instanceof' must be a c |
-| `test-child-process-prototype-tampering.mjs` | ❌ engine panic | thread '<unnamed>' (26248) panicked at crates\zun_interp\src\value.rs:197:22: |
+| `test-child-process-pipe-dataflow.js` | ❌ type error | bundles/test-child-process-pipe-dataflow.ts:21109:28: error: [SEM0001] Buffer size must be an integer |
+| `test-child-process-promisified.js` | ❌ type error | bundles/test-child-process-promisified.ts:18367:35: error: [SEM0001] right operand of 'instanceof' must be a c |
+| `test-child-process-prototype-tampering.mjs` | ❌ engine panic | thread '<unnamed>' (27988) panicked at crates\zun_interp\src\value.rs:197:22: |
 | `test-child-process-recv-handle.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-recv-handle.js: |
 | `test-child-process-reject-null-bytes.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-child-process-send-after-close.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
