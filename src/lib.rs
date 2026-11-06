@@ -66,6 +66,7 @@ use zun_abi::{ZunFunction, ZunRegistry, ZunTy, ZunTyRepr, ZunValue, ZUN_ABI_V1};
 pub mod child_process;
 pub mod fs;
 pub mod os;
+pub mod process;
 
 thread_local! {
     /// Backing storage for the most recent `Str` result on this thread.
@@ -363,6 +364,15 @@ const OS_MODULE_KEYS: &[&[u8]] = &[b"node:os\0"];
 /// see `src/child_process/mod.rs`.
 const CHILD_PROCESS_MODULE_KEYS: &[&[u8]] = &[b"node:child_process\0"];
 
+/// Module key the `process` natives are published under, on the same
+/// single-key rule. The Node-shaped object is `src/process/process.ts`,
+/// which never names this module: `src/process/native.ts` imports it and
+/// installs the facts, and the bundler inlines that one file only for a
+/// bundle that will be run with `--ext` -- because every bundle in this
+/// library inlines `process.ts`, including the ones that must compile with
+/// no extension at all. See `src/process/mod.rs`.
+const PROCESS_MODULE_KEYS: &[&[u8]] = &[b"node:process\0"];
+
 /// ABI v1 registration entry point. The host calls this once after loading the
 /// library, passing a validated [`ZunRegistry`]; it publishes every module.
 ///
@@ -390,6 +400,12 @@ pub unsafe extern "C" fn zun_register_v1(registry: *mut ZunRegistry) -> i32 {
     }
     for module in CHILD_PROCESS_MODULE_KEYS {
         let status = unsafe { register_module(registry, module, child_process::DESCRIPTORS) };
+        if status != 0 {
+            return status;
+        }
+    }
+    for module in PROCESS_MODULE_KEYS {
+        let status = unsafe { register_module(registry, module, process::DESCRIPTORS) };
         if status != 0 {
             return status;
         }

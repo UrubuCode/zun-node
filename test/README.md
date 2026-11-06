@@ -36,6 +36,11 @@ reproduces.
   remaining failures.
 - `events/` — the full 35-file `test-event-emitter-*` + `test-events-*` corpus,
   also through the bundler; see `events/README.md`.
+- `process/` — the full 96-file `test-process-*` corpus, through the bundler
+  *and* `--ext`. `process` is the module every other bundle stands on, so its
+  own tests are the only ones that get `src/process/native.ts` inlined (the
+  `ZUN_NODE_EXT` gate); `process/README.md` groups every remaining failure by
+  cause and records the three engine bugs this corpus found.
 - `os/` — the full 7-file `test-os*` corpus, through the bundler *and* `--ext`.
   The module itself is verified by a differential run against Node with zero
   divergences on both platforms, so every remaining failure is a harness or

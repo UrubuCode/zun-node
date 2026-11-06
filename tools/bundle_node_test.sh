@@ -43,7 +43,7 @@
 #     — where the module object is itself callable — and
 #     `const { test } = require('node:test')`.
 #
-# Anything else (`internal/event_target`, `vm`, `v8`, `worker_threads`, ...) is
+# Anything else (`internal/event_target`, `net`, `v8`, `inspector`, ...) is
 # reported as an unresolved module and the bundle fails, so a missing harness
 # module is never mistaken for an engine bug.
 #
@@ -134,6 +134,7 @@ vm __node_vm -
 crypto __node_crypto -
 test __node_test test
 tty __node_tty -
+worker_threads __node_worker_threads -
 "
 
 # The modules inlined into every bundle, in dependency order.
@@ -147,6 +148,25 @@ src/querystring/querystring.ts
 src/punycode/punycode.ts
 src/url/url.ts
 src/timers/timers.ts
+"
+
+# Files inlined only when the bundle will be run WITH the native extension.
+#
+# `src/process/process.ts` is in BUNDLE_FILES above, because every module in
+# this library stands on `process` — and most of those bundles run as
+# `zun run <bundle.ts>` with no `--ext` at all. So `process` cannot import its
+# own natives: the import lives in `src/process/native.ts`, which is nothing but
+# that import and one `__processInstallNative(...)` call, and is appended here
+# only when an extension will actually be loaded. `process.ts` keeps a
+# documented fallback for every native-backed value, so a bundle without this
+# file still compiles and still runs.
+#
+# The gate is the environment variable ZUN_NODE_EXT, which
+# `tools/run_node_tests.sh` sets whenever it passes `--ext` (its `zun-ts+ext`
+# and `extension` kinds). It is a *list*, one file per line, so a later module
+# in the same position needs no second mechanism.
+EXT_FILES="
+src/process/native.ts
 "
 
 # Modules inlined **only when the test actually requires them**.
@@ -218,6 +238,9 @@ requires_module() {
 # The final file list: the always-inlined modules, then the extension-backed
 # ones this test actually requires, then the harness.
 FILES="$BUNDLE_FILES"
+if [ -n "${ZUN_NODE_EXT:-}" ]; then
+  FILES="$FILES$EXT_FILES"
+fi
 while read -r name file; do
   [ -n "${name:-}" ] || continue
   requires_module "$name" || continue

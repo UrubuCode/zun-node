@@ -187,11 +187,13 @@ const __CP_SIGNAL_NUMBERS: number[] = [
   20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 29, 29, 30, 29, 31, 31, 21,
 ];
 
-class ERR_UNKNOWN_SIGNAL extends NodeTypeError {
-  constructor(signal: any) {
-    super("ERR_UNKNOWN_SIGNAL", "Unknown signal: " + inspect(signal));
-  }
-}
+// `ERR_UNKNOWN_SIGNAL` used to be declared here, with an `inspect`ed signal in
+// its message. It is in `src/process/process.ts` now — `process.kill` resolves
+// signal names in every bundle, while this file is in only some of them, and
+// two top-level declarations of one name are a compile error in a single Zun
+// program. The message moved to Node's own `%s` formatting at the same time, so
+// an unknown signal *name* is reported bare (`Unknown signal: SIGNOTREAL`)
+// rather than quoted, which is what Node prints.
 
 function __cpSignalIndexOfName(name: string): number {
   const count: number = Number(__CP_SIGNAL_NAMES.length);

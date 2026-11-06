@@ -192,11 +192,12 @@ class ERR_FS_CP_NON_DIR_TO_DIR extends NodeError {
   }
 }
 
-class ERR_METHOD_NOT_IMPLEMENTED extends NodeError {
-  constructor(name: string) {
-    super("ERR_METHOD_NOT_IMPLEMENTED", "The " + name + " method is not implemented");
-  }
-}
+// `ERR_METHOD_NOT_IMPLEMENTED` used to be declared here. It is in
+// `src/process/process.ts` now, which `process.chdir` and `process.kill` need
+// it for — and that file is inlined into **every** bundle while this one is
+// not, so the canonical declaration belongs there. Two top-level declarations
+// of one name are a compile error in a single Zun program, which is what a
+// bundle of this file plus `process` is.
 
 class ERR_INVALID_FILE_URL_SCHEME extends NodeTypeError {
   constructor() {

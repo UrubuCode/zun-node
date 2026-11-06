@@ -264,13 +264,25 @@ function __evReceived(value: any): string {
 // the construction off the expando path entirely, so there is no workaround to
 // carry: this is simply the correct shape.
 //
-// `name` is not overridden: a subclass of `TypeError` already reports
-// `"TypeError"`, and `toString()` / `${err}` compose it correctly.
+// `name` is not overridden — a subclass of `TypeError` already reports
+// `"TypeError"` — but `toString()` **is**, because Node overrides it: every
+// error `lib/internal/errors.js` makes carries
+//
+//     toString() { return `${this.name} [${code}]: ${this.message}`; }
+//
+// so `String(err)` is `"TypeError [ERR_INVALID_ARG_TYPE]: The …"`. That is not
+// cosmetic: `assert.throws(fn, /ERR_INVALID_ARG_TYPE/)` matches its pattern
+// against `String(actual)`, which is how a large share of Node's corpus spells
+// "this must be that error" — `test-process-setsourcemapsenabled.js` is one
+// file that does nothing else.
 class NodeTypeError extends TypeError {
   code: string = "";
   constructor(code: string, message: string) {
     super(message);
     this.code = code;
+  }
+  toString(): string {
+    return this.name + " [" + this.code + "]: " + this.message;
   }
 }
 
@@ -280,6 +292,9 @@ class NodeRangeError extends RangeError {
     super(message);
     this.code = code;
   }
+  toString(): string {
+    return this.name + " [" + this.code + "]: " + this.message;
+  }
 }
 
 class NodeError extends Error {
@@ -287,6 +302,9 @@ class NodeError extends Error {
   constructor(code: string, message: string) {
     super(message);
     this.code = code;
+  }
+  toString(): string {
+    return this.name + " [" + this.code + "]: " + this.message;
   }
 }
 

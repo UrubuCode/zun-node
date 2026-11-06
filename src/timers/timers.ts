@@ -438,12 +438,13 @@ function __timerInvoke(callback: any, args: any): void {
 // two outcomes are reproduced here: with a listener, the error is emitted and
 // the loop continues; with none, it is re-thrown so the run fails the way an
 // uncaught exception should.
+// A throw out of a timer callback is an uncaught exception, which is
+// `process`'s business: the capture callback, the `uncaughtExceptionMonitor`
+// event and the `uncaughtException` listeners all have to be consulted in
+// Node's order, and `src/process/process.ts` owns that order because a
+// `process.nextTick` callback reaches it the same way.
 function __timerReportUncaught(error: any): void {
-  if (Number(process.listenerCount("uncaughtException")) > 0) {
-    process.emit("uncaughtException", error);
-    return;
-  }
-  throw error;
+  __processReportUncaught(error);
 }
 
 // Node's truthiness test for `_repeat`: an interval re-arms while `_repeat` is
@@ -539,6 +540,28 @@ function __timerLoopWouldLive(self: any): boolean {
 // keep Node's loop alive.
 function __timerPendingRefs(): number {
   return Number(__timerState.refs);
+}
+
+// The provider names `process.getActiveResourcesInfo()` reports for this
+// module's handles, one entry per live timer. A timer is "active" while it is in
+// `live` and not destroyed, which is exactly the window Node keeps its handle
+// in: a `Timeout` is still listed while its own callback runs (`__timerFire`
+// destroys it afterwards) and an `Immediate` is not (`__timerFireImmediate`
+// clears it first), which is the difference
+// `test-process-getactiveresources-track-timer-lifetime.js` measures.
+//
+// Timers are the only handle kind this runtime has, so this is the whole of
+// `getActiveResourcesInfo()`; see `src/process/process.ts`.
+function __timerActiveResources(): string[] {
+  const live: any = __timerState.live;
+  const out: string[] = [];
+  for (const key of Object.keys(live)) {
+    const timer: any = live[key];
+    if (timer === undefined || timer === null) continue;
+    if (timer._destroyed) continue;
+    out.push(timer instanceof Immediate ? "Immediate" : "Timeout");
+  }
+  return out;
 }
 
 // Milliseconds until the earliest ref'd timer is due, floored at 1. `-1` when

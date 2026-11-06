@@ -48,15 +48,22 @@ A Node module lands here in whichever form fits what it actually does:
   `stdio` grammar and the result object. A spawn request cannot cross one scalar
   word at a time either, so it crosses as one delimited string in the same
   grammar, with the child's output base64 for the same reason a file's bytes
-  are.
+  are. **`process` is the fourth, and the only module in three files**:
+  `src/process/*.rs` for the pid, the clocks, `getrusage`, `kill`, `chdir`, the
+  real `umask`, the environment block and the POSIX credentials;
+  [`src/process/process.ts`](src/process/process.ts) for Node's object; and
+  [`src/process/native.ts`](src/process/native.ts) for the import alone. The
+  third file exists because **every** bundle in this library inlines
+  `process.ts` while most of them run with no `--ext` at all, so the import has
+  to be separable — `tools/bundle_node_test.sh` appends `native.ts` only for a
+  bundle that will get an extension, and `process.ts` keeps a documented
+  fallback for every native-backed value (the table is in its header).
 
 Support slices exist to run Node's own tests, and are Zun TypeScript for the
-same reason: `src/assert/assert.ts` (the strict-mode `assert` surface the tests
-assert with) and `src/process/process.ts` (`cwd()`, `env`, `platform`, and —
-because Node's `process` is an EventEmitter —
-`on`/`emit`/`nextTick`/`emitWarning`). `src/util/util.ts` used to be one of them;
-it is now a module in its own right, and `assert` stands on it rather than
-carrying its own copy of `inspect` and `deepStrictEqual`.
+same reason: `src/assert/assert.ts` is the strict-mode `assert` surface the
+tests assert with. `src/util/util.ts` and `src/process/process.ts` used to be
+two more; both are modules in their own right now, and `assert` stands on `util`
+rather than carrying its own copy of `inspect` and `deepStrictEqual`.
 
 ## Compatibility
 
@@ -68,8 +75,8 @@ runs each through the Zun engine
 passes. The percentages below are that measurement — they climb as the library
 grows.
 
-The `util`, `path`, `events` and `os` numbers below were last regenerated on **Windows**
-(the CI workflow runs on `ubuntu-latest`). One test differs between the two:
+The `util`, `path`, `events`, `os` and `process` numbers below were last
+regenerated on **Windows** (the CI workflow runs on `ubuntu-latest`). One test differs between the two:
 `test-os-process-priority.js` passes on Linux and fails on Windows
 ([zun#34](https://github.com/UrubuCode/zun/issues/34)), while
 `test-path-win32-normalize-device-names.js` is only a real signal on Windows,
@@ -82,8 +89,10 @@ Because the engine has no CommonJS `require` or module resolution
 ([zun#4](https://github.com/UrubuCode/zun/issues/4)), a Zun TypeScript module's
 tests are first passed through
 [`tools/bundle_node_test.sh`](tools/bundle_node_test.sh), which inlines the
-util/events/process/assert/path/querystring/punycode/url modules, the modules
-the test actually requires (`os`, `buffer`, `string_decoder`) and the
+util/events/process/assert/path/querystring/punycode/url/timers modules,
+`src/process/native.ts` when the bundle will be run with `--ext`, the modules
+the test actually requires (`os`, `buffer`, `string_decoder`, `fs`,
+`child_process`) and the
 `common` harness (plus `node:test` when the test requires it) ahead of the test body,
 rewrites its `require` lines to the one object each
 inlined module exposes (`__node_events`, `__node_assert`, …), and appends the
@@ -476,6 +485,26 @@ the direct `zun run --ext <lib> <test.js>` path.
 > per millisecond, and it emits `process` 'beforeExit'. Blocker table:
 > [`test/timers/README.md`](test/timers/README.md); per-test breakdown:
 > [`test/timers/RESULTS.md`](test/timers/RESULTS.md).
+
+<!-- node-process:start -->
+### Node.js v25 `process` compatibility
+
+`██████████░░░░░░░░░░░░░░` **43.7%** — 42 / 96 Node `test-process-*` tests passing
+<!-- node-process:end -->
+
+> `process` is the module every other bundle in this library stands on, and the
+> only one in **three** files: `src/process/*.rs` for the pid, the clocks,
+> `getrusage`, `kill`, `chdir`, the real `umask`, the environment block and the
+> POSIX credentials; [`src/process/process.ts`](src/process/process.ts) for
+> Node's object; and [`src/process/native.ts`](src/process/native.ts) for the
+> import alone, inlined only when a bundle will be run with `--ext`. The
+> remaining failures are not a thin surface: `process` itself is complete, and
+> 30 of the 54 are a harness module the bundler does not provide (`net`, `v8`,
+> `inspector`, `internal/test/binding`, `hijackstdio`) or a test that re-runs
+> *itself* as `spawn(process.execPath, [__filename])` — a child that would have
+> to be Node. Blocker table, grouped by cause, with the three engine bugs this
+> corpus found: [`test/process/README.md`](test/process/README.md); per-test
+> breakdown: [`test/process/RESULTS.md`](test/process/RESULTS.md).
 
 <!-- node-child_process:start -->
 ### Node.js v25 `child_process` compatibility
