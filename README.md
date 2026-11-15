@@ -295,7 +295,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-assert:start -->
 ### Node.js v25 `assert` compatibility
 
-`█████░░░░░░░░░░░░░░░░░░░` **21.4%** — 3 / 14 Node `test-assert*` tests passing
+`███░░░░░░░░░░░░░░░░░░░░░` **14.2%** — 2 / 14 Node `test-assert*` tests passing
 <!-- node-assert:end -->
 
 > `assert` is the module every other corpus runs *through* — each
@@ -332,7 +332,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-path:start -->
 ### Node.js v25 `path` compatibility
 
-`█████████████████████░░░` **88.2%** — 15 / 17 Node `test-path*` tests passing
+`███████████████████░░░░░` **82.3%** — 14 / 17 Node `test-path*` tests passing
 <!-- node-path:end -->
 
 > `path` already runs the whole Node corpus, so its number is a real measurement.
@@ -353,7 +353,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
 
-`████████████░░░░░░░░░░░░` **51.4%** — 18 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+`█████████████░░░░░░░░░░░` **54.2%** — 19 / 35 Node `test-event-emitter-*|test-events-*` tests passing
 <!-- node-events:end -->
 
 > `events` is implemented end to end — the whole `EventEmitter` surface, every
@@ -447,7 +447,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-buffer:start -->
 ### Node.js v25 `buffer` compatibility
 
-`██░░░░░░░░░░░░░░░░░░░░░░` **9.3%** — 6 / 64 Node `test-buffer*` tests passing
+`███░░░░░░░░░░░░░░░░░░░░░` **12.5%** — 8 / 64 Node `test-buffer*` tests passing
 <!-- node-buffer:end -->
 
 > `buffer` is the first module whose central object is **the engine's**, not
@@ -629,7 +629,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-timers:start -->
 ### Node.js v25 `timers` compatibility
 
-`████████████░░░░░░░░░░░░` **53.4%** — 31 / 58 Node `test-timers*` tests passing
+`█████████████░░░░░░░░░░░` **56.8%** — 33 / 58 Node `test-timers*` tests passing
 <!-- node-timers:end -->
 
 > `timers` is the first module whose *substance* was already in the engine: the
@@ -877,7 +877,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-console:start -->
 ### Node.js v25 `console` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **36.3%** — 8 / 22 Node `test-console*` tests passing
+`█████████░░░░░░░░░░░░░░░` **40.9%** — 9 / 22 Node `test-console*` tests passing
 <!-- node-console:end -->
 
 <!-- node-perf_hooks:start -->
