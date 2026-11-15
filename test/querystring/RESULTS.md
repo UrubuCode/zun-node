@@ -13,7 +13,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-querystring.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-querystring.js` | ❌ assertion | AssertionError [==]: false == true |
 | `test-querystring-escape.js` | ✅ pass | |
 | `test-querystring-maxKeys-non-finite.js` | ✅ pass | |
 | `test-querystring-multichar-separator.js` | ❌ assertion | AssertionError [==]: false == true |
