@@ -453,6 +453,12 @@ pub unsafe extern "C" fn zun_register_v1(registry: *mut ZunRegistry) -> i32 {
             return status;
         }
     }
+    for module in IO_MODULE_KEYS {
+        let status = unsafe { register_module(registry, module, io::udp::DESCRIPTORS) };
+        if status != 0 {
+            return status;
+        }
+    }
     for module in ZLIB_MODULE_KEYS {
         let status = unsafe { register_module(registry, module, zlib::DESCRIPTORS) };
         if status != 0 {

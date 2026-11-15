@@ -376,3 +376,166 @@ fn the_carrier_markers_are_distinguishable() {
     assert!(ok().starts_with('+'));
     assert_eq!(ok_fields(&["7".to_owned(), "x".to_owned()]), format!("+7{US}x"));
 }
+
+// ---------------------------------------------------------------------------
+// Datagram sockets (`src/io/udp.rs`)
+// ---------------------------------------------------------------------------
+
+/// Open a `udp4` socket bound to an ephemeral loopback port.
+fn udp_loopback(handles: &mut Handles) -> (i64, u16) {
+    let id = udp::open_socket(false).expect("open udp4");
+    handles.0.push(id);
+    let bound = udp::bind_socket(id, "127.0.0.1", 0, 0).expect("bind");
+    let parts = fields(&bound);
+    assert_eq!(parts[0], "127.0.0.1");
+    assert_eq!(parts[2], "IPv4");
+    let port: u16 = parts[1].parse().unwrap();
+    assert_ne!(port, 0, "bind(0) reports the port the kernel chose");
+    (id, port)
+}
+
+/// Wait for a datagram and decode it as `(bytes, address, port)`.
+fn udp_receive(id: i64) -> (Vec<u8>, String, u16) {
+    assert_ne!(wait_for(id, sys::READ) & sys::READ, 0, "a datagram should have arrived");
+    let payload = udp::recv_datagram(id).expect("recv");
+    let parts = fields(&payload);
+    assert_eq!(parts.len(), 4, "bytes, address, port, family");
+    (base64::decode(&parts[0]), parts[1].clone(), parts[2].parse().unwrap())
+}
+
+#[test]
+fn a_datagram_carries_its_bytes_and_its_sender() {
+    let mut handles = Handles(Vec::new());
+    let (receiver, receiver_port) = udp_loopback(&mut handles);
+    let (sender, sender_port) = udp_loopback(&mut handles);
+
+    // Every byte value, so the base64 carrier is proven lossless for UDP too.
+    let bytes: Vec<u8> = (0..=255u8).collect();
+    let sent = udp::send_datagram(sender, "127.0.0.1", receiver_port, &bytes).expect("send");
+    assert_eq!(fields(&sent), vec!["256".to_owned()]);
+
+    let (got, from, from_port) = udp_receive(receiver);
+    assert_eq!(got, bytes);
+    assert_eq!(from, "127.0.0.1");
+    assert_eq!(from_port, sender_port, "recvfrom names the sending socket");
+}
+
+#[test]
+fn recv_reports_again_until_a_datagram_arrives() {
+    let mut handles = Handles(Vec::new());
+    let (id, _) = udp_loopback(&mut handles);
+    assert_eq!(udp::recv_datagram(id).unwrap(), AGAIN);
+}
+
+#[test]
+fn an_empty_datagram_is_a_datagram_and_not_again() {
+    let mut handles = Handles(Vec::new());
+    let (receiver, port) = udp_loopback(&mut handles);
+    let (sender, _) = udp_loopback(&mut handles);
+    udp::send_datagram(sender, "127.0.0.1", port, &[]).expect("send empty");
+    let (got, _, _) = udp_receive(receiver);
+    assert!(got.is_empty());
+}
+
+/// `ioPeerName` below the ABI.
+fn peer_of(id: i64) -> Vec<String> {
+    let raw = handle_of(id, "name", |handle| handle.raw).expect("handle");
+    let addr = sys::peer_addr(raw).expect("peer");
+    address_fields(&addr).to_vec()
+}
+
+#[test]
+fn a_connected_socket_sends_without_an_address_and_can_disconnect() {
+    let mut handles = Handles(Vec::new());
+    let (receiver, port) = udp_loopback(&mut handles);
+    let (sender, _) = udp_loopback(&mut handles);
+
+    udp::connect_socket(sender, "127.0.0.1", port).expect("connect");
+    assert_eq!(peer_of(sender)[1], port.to_string(), "getpeername is the default peer");
+    udp::send_datagram(sender, "", 0, b"hi").expect("send on the default peer");
+    assert_eq!(udp_receive(receiver).0, b"hi");
+
+    let raw = handle_of(sender, "connect", |handle| handle.raw).expect("handle");
+    sys::disconnect(raw).expect("disconnect");
+    assert!(sys::peer_addr(raw).is_err(), "a disconnected socket has no peer");
+    assert!(
+        udp::send_datagram(sender, "", 0, b"x").is_err(),
+        "with no peer an addressless send must fail"
+    );
+}
+
+#[test]
+fn binding_a_second_socket_to_a_taken_port_is_eaddrinuse() {
+    let mut handles = Handles(Vec::new());
+    let (_, port) = udp_loopback(&mut handles);
+    let second = udp::open_socket(false).expect("open");
+    handles.0.push(second);
+    let failed = udp::bind_socket(second, "127.0.0.1", port, 0);
+    assert_eq!(failed, Err(FAILED.to_owned()));
+}
+
+#[test]
+fn reuse_addr_lets_two_sockets_share_a_port() {
+    // `SO_REUSEADDR` on a datagram socket means *sharing* (it is what multicast
+    // listeners rely on), so both binds succeed and report the same port.
+    let mut handles = Handles(Vec::new());
+    let first = udp::open_socket(false).expect("open");
+    handles.0.push(first);
+    let bound = udp::bind_socket(first, "127.0.0.1", 0, 1).expect("first bind");
+    let port: u16 = fields(&bound)[1].parse().unwrap();
+    let second = udp::open_socket(false).expect("open");
+    handles.0.push(second);
+    udp::bind_socket(second, "127.0.0.1", port, 1).expect("second bind shares the port");
+}
+
+#[test]
+fn the_scalar_options_round_trip() {
+    let mut handles = Handles(Vec::new());
+    let (id, _) = udp_loopback(&mut handles);
+    assert!(udp::set_option(id, "broadcast", 1).is_ok());
+    assert_eq!(fields(&udp::set_option(id, "ttl", 7).unwrap()), vec!["7".to_owned()]);
+    assert!(udp::set_option(id, "multicastTtl", 3).is_ok());
+    assert!(udp::set_option(id, "multicastLoop", 0).is_ok());
+    assert!(udp::set_option(id, "recvBuf", 65536).is_ok());
+    let got: i64 = fields(&udp::set_option(id, "getRecvBuf", 0).unwrap())[0].parse().unwrap();
+    assert!(got >= 65536, "the kernel rounds a buffer size up, never down: {got}");
+    assert!(udp::set_option(id, "nonsense", 0).is_err());
+}
+
+#[test]
+fn a_udp6_socket_binds_the_ipv6_loopback_and_refuses_an_ipv4_address() {
+    sys::startup();
+    let mut handles = Handles(Vec::new());
+    let id = match udp::open_socket(true) {
+        Ok(id) => id,
+        Err(_) => return, // no IPv6 on this machine
+    };
+    handles.0.push(id);
+    assert!(udp::bind_socket(id, "127.0.0.1", 0, 0).is_err(), "family mismatch is EINVAL");
+    if let Ok(bound) = udp::bind_socket(id, "::1", 0, 0) {
+        assert_eq!(fields(&bound)[2], "IPv6");
+    }
+}
+
+#[test]
+fn multicast_membership_can_be_joined_and_left_or_fails_cleanly() {
+    let mut handles = Handles(Vec::new());
+    let (id, _) = udp_loopback(&mut handles);
+    // Some CI machines have no multicast route; either answer is well-formed,
+    // but a join that succeeded must be undoable.
+    if udp::change_membership(id, true, "224.0.0.114", "").is_ok() {
+        assert!(udp::change_membership(id, false, "224.0.0.114", "").is_ok());
+    }
+    assert!(udp::change_membership(id, true, "not an address", "").is_err());
+    // A unicast group is not a membership.
+    assert!(udp::change_membership(id, true, "127.0.0.1", "").is_err());
+}
+
+#[test]
+fn a_closed_datagram_handle_is_ebadf() {
+    let id = udp::open_socket(false).expect("open");
+    if let Some(handle) = with_table(|table| table.remove(&id)) {
+        sys::close(handle.raw);
+    }
+    assert!(udp::recv_datagram(id).is_err());
+}

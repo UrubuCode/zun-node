@@ -169,13 +169,32 @@ function __consoleCharCode(text: string, index: number): number {
 // `call did not resolve to a method`. Reading the slot first and calling the
 // value is correct in both states: a replaced `write` reads back as a callable,
 // and so does the original object-literal method; only a `write` that is a
-// *class* method reads back `undefined` (zun#19), and that is the one case the
-// method call handles. No receiver is threaded either way (zun#1), which is why
-// a console stream here need only answer `write(chunk)`.
-function __consoleStreamWrite(stream: any, text: string): any {
+// *class* method now reads back as a function too, but one that carries no
+// receiver, so the value is invoked with `.call(stream, text)`, which binds
+// `this` for a class method and leaves a closure's arguments alone.
+function __consoleStreamWrite(stream: any, text: string, onDone?: any): any {
   const writer: any = stream["write"];
-  if (__consoleIsFn(writer)) return __evCall(writer, [text]);
+  if (onDone !== undefined) {
+    if (__consoleIsFn(writer)) return writer.call(stream, text, onDone);
+    return stream.write(text, onDone);
+  }
+  if (__consoleIsFn(writer)) return writer.call(stream, text);
   return stream.write(text);
+}
+
+// Node's `createWriteErrorHandler`: the write callback that, on an error not
+// yet emitted, installs a no-op `error` listener so a failing console stream
+// (an asynchronous write error arrives after the synchronous bracket below has
+// already removed its own listener) never becomes an uncaught exception.
+function __consoleWriteErrorHandler(stream: any): any {
+  return (err: any): void => {
+    if (err === null || err === undefined) return;
+    const state: any = stream["_writableState"];
+    if (state !== undefined && state !== null && state.errorEmitted === true) return;
+    if (__consoleIsFn(stream["listenerCount"]) && __consoleIsFn(stream["once"])) {
+      if (Number(stream.listenerCount("error")) === 0) stream.once("error", __consoleNoop);
+    }
+  };
 }
 
 function __consoleNoop(): void {}
@@ -613,7 +632,7 @@ class Console {
       if (bracketed && Number(stream.listenerCount("error")) === 0) {
         stream.once("error", __consoleNoop);
       }
-      __consoleStreamWrite(stream, string);
+      __consoleStreamWrite(stream, string, bracketed ? __consoleWriteErrorHandler(stream) : undefined);
     } catch (error) {
       if (__consoleIsStackOverflow(error)) throw error;
     } finally {
