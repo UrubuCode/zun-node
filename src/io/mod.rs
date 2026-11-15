@@ -104,6 +104,7 @@ use crate::fs::base64;
 use crate::Descriptor;
 
 pub(crate) mod sys;
+pub(crate) mod udp;
 
 #[cfg(test)]
 mod tests;
@@ -131,6 +132,8 @@ enum Kind {
     Listener,
     /// A connected or connecting stream.
     Stream,
+    /// A datagram (UDP) socket: readable means a datagram is waiting.
+    Datagram,
 }
 
 /// One row of the handle table.
@@ -144,6 +147,9 @@ struct Handle {
     /// True until a non-blocking `connect` has settled, which is what makes a
     /// writable event mean "connected" rather than "drained".
     connecting: bool,
+    /// True for an IPv6 datagram socket (`udp6`); the option numbers differ by
+    /// family and an unbound Windows socket cannot be asked.
+    ipv6: bool,
 }
 
 /// Every live handle, keyed by the number published to the program.
@@ -282,7 +288,7 @@ fn handle_of<R>(
 fn publish(raw: sys::Raw, kind: Kind, connecting: bool) -> i64 {
     let id = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
     with_table(|table| {
-        table.insert(id, Handle { raw, kind, interest: 0, connecting });
+        table.insert(id, Handle { raw, kind, interest: 0, connecting, ipv6: false });
     });
     id
 }

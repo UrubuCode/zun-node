@@ -227,6 +227,7 @@ dns __node_dns Resolver
 dns/promises __node_dns_promises -
 net __node_net Socket,Server,Stream,BlockList,SocketAddress
 internal/net __node_net -
+dgram __node_dgram -
 internal/test/binding __node_internal_test_binding -
 internal/errors __node_internal_errors -
 [.][.]/common/internet __node_harness_internet -
@@ -465,6 +466,11 @@ internal/net src/buffer/buffer.ts
 internal/net src/string_decoder/string_decoder.ts
 internal/net src/stream/stream.ts
 internal/net src/net/net.ts
+dgram src/buffer/buffer.ts
+dgram src/string_decoder/string_decoder.ts
+dgram src/stream/stream.ts
+dgram src/net/net.ts
+dgram src/dgram/dgram.ts
 internal/test/binding src/dns/dns.ts
 internal/test/binding tools/harness/binding.ts
 internal/errors src/dns/dns.ts

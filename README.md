@@ -1357,3 +1357,26 @@ target/debug/zun run /tmp/bundle.ts
 > [`test/worker_threads/README.md`](test/worker_threads/README.md); per-test
 > breakdown:
 > [`test/worker_threads/RESULTS.md`](test/worker_threads/RESULTS.md).
+
+<!-- node-dgram:start -->
+### Node.js v25 `dgram` compatibility
+
+`█████████░░░░░░░░░░░░░░░` **38.1%** — 29 / 76 Node `test-dgram-*` tests passing
+<!-- node-dgram:end -->
+
+> `dgram` is the second consumer of the shared I/O loop and follows the pattern
+> `net` set: the datagram verbs (`socket(SOCK_DGRAM)`, `sendto`/`recvfrom`,
+> connect/disconnect, broadcast, TTL, multicast membership including
+> source-specific, buffer sizes) are natives in
+> [`src/io/udp.rs`](src/io/udp.rs) beside the stream verbs, sharing the same
+> handle table, readiness query and `ref`/`unref` accounting; the Node API —
+> `createSocket`, `Socket` as an `EventEmitter`, the bind/connect state
+> machines, the queue that holds a `send()` until the socket is bound, the
+> `send()` argument cascades, Node's errors — is
+> [`src/dgram/dgram.ts`](src/dgram/dgram.ts). Of the 47 failures, 14 need
+> `internal/dgram`, `cluster` or `../common/udp`, 11 are rejected at compile
+> time by their own `Buffer.alloc(<number>)` bodies, and most of the rest hit
+> the opaque-byte-view-through-`any` ceiling (a `'message'` handler's
+> `msg.toString()` is `104,101,…`). Deviations and the blocker table:
+> [`test/dgram/README.md`](test/dgram/README.md); per-test breakdown:
+> [`test/dgram/RESULTS.md`](test/dgram/RESULTS.md).
