@@ -215,6 +215,7 @@ internal/readline/utils __node_internal_readline_utils CSI
 internal/readline/callbacks __node_internal_readline_callbacks -
 internal/util/inspect __node_internal_util_inspect -
 [.][.]/common/arraystream __node_harness_arraystream ArrayStream
+[.][.]/common/countdown __node_harness_countdown Countdown
 vm __node_vm Script,compileFunction
 crypto __node_crypto Hash,Hmac,Cipheriv,Decipheriv,KeyObject
 [.][.]/common/crypto __node_harness_crypto -
@@ -227,6 +228,13 @@ dns __node_dns Resolver
 dns/promises __node_dns_promises -
 net __node_net Socket,Server,Stream,BlockList,SocketAddress
 internal/net __node_net -
+http __node_http Agent,ClientRequest,IncomingMessage,OutgoingMessage,ServerResponse
+_http_agent __node_http -
+_http_client __node_http -
+_http_common __node_http -
+_http_incoming __node_http -
+_http_outgoing __node_http -
+_http_server __node_http -
 dgram __node_dgram -
 internal/test/binding __node_internal_test_binding -
 internal/errors __node_internal_errors -
@@ -441,6 +449,7 @@ internal/util/inspect src/readline/readline.ts
 [.][.]/common/arraystream src/string_decoder/string_decoder.ts
 [.][.]/common/arraystream src/stream/stream.ts
 [.][.]/common/arraystream tools/harness/arraystream.ts
+[.][.]/common/countdown tools/harness/countdown.ts
 tty src/buffer/buffer.ts
 tty src/string_decoder/string_decoder.ts
 tty src/stream/stream.ts
@@ -466,6 +475,41 @@ internal/net src/buffer/buffer.ts
 internal/net src/string_decoder/string_decoder.ts
 internal/net src/stream/stream.ts
 internal/net src/net/net.ts
+http src/buffer/buffer.ts
+http src/string_decoder/string_decoder.ts
+http src/stream/stream.ts
+http src/net/net.ts
+http src/http/http.ts
+_http_agent src/buffer/buffer.ts
+_http_agent src/string_decoder/string_decoder.ts
+_http_agent src/stream/stream.ts
+_http_agent src/net/net.ts
+_http_agent src/http/http.ts
+_http_client src/buffer/buffer.ts
+_http_client src/string_decoder/string_decoder.ts
+_http_client src/stream/stream.ts
+_http_client src/net/net.ts
+_http_client src/http/http.ts
+_http_common src/buffer/buffer.ts
+_http_common src/string_decoder/string_decoder.ts
+_http_common src/stream/stream.ts
+_http_common src/net/net.ts
+_http_common src/http/http.ts
+_http_incoming src/buffer/buffer.ts
+_http_incoming src/string_decoder/string_decoder.ts
+_http_incoming src/stream/stream.ts
+_http_incoming src/net/net.ts
+_http_incoming src/http/http.ts
+_http_outgoing src/buffer/buffer.ts
+_http_outgoing src/string_decoder/string_decoder.ts
+_http_outgoing src/stream/stream.ts
+_http_outgoing src/net/net.ts
+_http_outgoing src/http/http.ts
+_http_server src/buffer/buffer.ts
+_http_server src/string_decoder/string_decoder.ts
+_http_server src/stream/stream.ts
+_http_server src/net/net.ts
+_http_server src/http/http.ts
 dgram src/buffer/buffer.ts
 dgram src/string_decoder/string_decoder.ts
 dgram src/stream/stream.ts

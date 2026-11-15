@@ -1336,6 +1336,31 @@ gets deleted; nothing else in the tracker changes.
   `Buffer.alloc(<number>)`, 6 read `this` in a listener, and message *contents*
   are capped by the opaque-view-through-`any` gap. Table in
   `test/dgram/README.md`.
+- **`node:http`: implemented, TS over `net`, in `src/http/http.ts`
+  (77 / 379 of Node 25's `test-http-*`).**
+  No natives of its own: the parser Node gets from llhttp is an incremental
+  HTTP/1.1 state machine here (start line, header block with `obs-fold`, four
+  body framings — none, `Content-Length`, chunked with extensions and trailers,
+  until close — and a rearm on completion, which is keep-alive and pipelining),
+  fed with a *latin1 string* so that byte offsets and string offsets coincide.
+  On top: `Server` over `net.Server` with `allowHalfOpen` (`'request'`,
+  `'checkContinue'`, `'upgrade'`/`'connect'`, `'clientError'`, `timeout`,
+  `keepAliveTimeout`, `closeIdleConnections`), `IncomingMessage` as a `Readable`
+  whose backpressure pauses the *socket*, `OutgoingMessage`/`ServerResponse` as a
+  `Writable` with Node's implicit-header rules (`Content-Length` vs `chunked` vs
+  `Connection: close`, no body for `HEAD`/`204`/`304`/`1xx`), `ClientRequest` with
+  `request`/`get`, `Agent` with the real pool and the `'free'` protocol,
+  `METHODS`, `STATUS_CODES`, `validateHeaderName`/`validateHeaderValue`.
+  `net.Socket` gained `_httpMessage`/`_httpConn`/`_hadError` (Node's own names,
+  declared because an undeclared write is a compile error);
+  `tools/harness/countdown.ts` is `common/countdown` and unblocked 33 files.
+  **Documented deviations**: `http.Server` on the module object is a factory
+  (a class cannot be called, and `new <module>.Ctor()` does not reach a
+  constructor, zun#18); `headersTimeout`/`requestTimeout`/
+  `connectionsCheckingInterval` are stored, not enforced; no Unix sockets; not
+  llhttp, so the smuggling-hardening files only partly pass. Most failures are
+  engine-side: ~92 read `this` in a listener, ~16 hit closure capture across
+  callbacks. Table in `test/http/README.md`.
 - **`node:vm`: complete, in `src/vm/vm.ts`.** It is the one module whose job
   *is* compiling at run time, and the platform has that path: the checker
   lowers `new Function(p1, ..., body)` to the `functionConstruct` intrinsic
