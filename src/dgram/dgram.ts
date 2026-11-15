@@ -237,6 +237,15 @@ function __dgramHealth(self: any): void {
 // `lookup4`/`lookup6` of Node: the user's `lookup` (or `dns.lookup`) asked for
 // this socket's family, with the loopback as the address when none was given.
 function __dgramLookup(self: any, address: any, callback: any): void {
+  const facade: any = self._dgState.facade;
+  if (facade !== undefined && facade !== null) {
+    facade.lookup(address, callback);
+    return;
+  }
+  __dgramDefaultLookup(self, address, callback);
+}
+
+function __dgramDefaultLookup(self: any, address: any, callback: any): void {
   const state: any = self._dgState;
   const family: number = state.ipv6 === true ? 6 : 4;
   let name: string = String(address === undefined || address === null ? "" : address);
@@ -262,6 +271,7 @@ function __dgramLookup(self: any, address: any, callback: any): void {
 class __DgramSocket extends EventEmitter {
   type: any = "";
   _dgState: any = null;
+  _dgView: any = null;
 
   constructor(type?: any, listener?: any) {
     super();
@@ -319,6 +329,7 @@ class __DgramSocket extends EventEmitter {
       recvBufferSize: recvSize,
       sendBufferSize: sendSize,
     };
+    __dgramInstallFacade(this);
     if (options !== null && options.ipv6Only === true && !ipv6) {
       this._dgState.handle = 0;
       ops.close(Number(__ioFields(opened)[0]));
@@ -497,6 +508,85 @@ function __dgramListenSignal(self: any, signal: any): void {
       signal.removeEventListener("abort", onAbort);
     }),
   );
+}
+
+// ---------------------------------------------------------------------------
+// The handle facade (`socket[kStateSymbol].handle`)
+// ---------------------------------------------------------------------------
+//
+// Node keeps the libuv `UDP` handle in `socket[kStateSymbol].handle`, and its
+// own tests reach through it: they replace `handle.lookup`/`handle.send`, call
+// `handle.onmessage` and read `handle.fd`. The real handle here is a number in
+// the Rust table, so the socket carries a small object with the same members
+// and routes its own lookup, send and receive-error paths through it, which is
+// what makes a test's replacement take effect.
+
+// Node's `kStateSymbol` is a `Symbol`; here it is the *name* of an ordinary
+// property, because a class instance that gains a symbol-keyed member (by
+// `defineProperty`, assignment or a computed class member) stops resolving
+// `this.<field>` inside its own methods ("Cannot read private member"). Every
+// consumer only ever indexes with it (`socket[kStateSymbol]`).
+const __dgramStateSymbol: any = "_dgView";
+
+function __dgramInstallFacade(self: any): void {
+  const state: any = self._dgState;
+  const facade: any = {};
+  facade.fd = -1;
+  facade.lookup = function (address: any, callback: any): void {
+    __dgramDefaultLookup(self, address, callback);
+  };
+  facade.send = function (): any {
+    return undefined;
+  };
+  facade.onmessage = function (nread: any, handle: any, buf: any, rinfo: any): void {
+    if (Number(nread) < 0) {
+      const code: number = Number(nread);
+      self.emit(
+        "error",
+        __dgramException({ errno: code, code: util.getSystemErrorName(code) }, "recvmsg"),
+      );
+      return;
+    }
+    self.emit("message", buf, rinfo);
+  };
+  state.facade = facade;
+  state.defaultSend = facade.send;
+  self._dgView = { handle: facade };
+}
+
+// `_createSocketHandle` of `lib/internal/dgram.js`: a `UDP` handle, bound when
+// an address is given; a negative errno otherwise.
+class __DgramUdpHandle {
+  fd: number = -1;
+  id: number = 0;
+}
+
+function __dgramCreateSocketHandle(address: any, port: any, addressType: any, fd?: any): any {
+  const ops: any = __dgramRequireIo();
+  const ipv6: boolean = addressType === "udp6";
+  const opened: any = ops.udpOpen(ipv6 ? 1 : 0);
+  if (__ioFailed(opened)) return Number(__ioLastError().errno);
+  const handle: __DgramUdpHandle = new __DgramUdpHandle();
+  handle.id = Number(__ioFields(opened)[0]);
+  if (address !== null && address !== undefined) {
+    const literal: number = __netIsIP(String(address));
+    if (literal === 0) {
+      ops.close(handle.id);
+      // `uv_udp_bind` of a host name: `EINVAL`.
+      for (const entry of util.getSystemErrorMap()) {
+        if (String(entry[1][0]) === "EINVAL") return Number(entry[0]);
+      }
+      return -22;
+    }
+    const target: number = port === undefined || port === null ? 0 : Number(port);
+    const result: any = ops.udpBind(handle.id, String(address), target, 0);
+    if (__ioFailed(result)) {
+      const errno: number = Number(__ioLastError().errno);
+      ops.close(handle.id);
+      return errno;
+    }
+  }
+  return handle;
 }
 
 // ---------------------------------------------------------------------------
@@ -886,6 +976,21 @@ function __dgramDoSend(
 function __dgramAttempt(self: any, entry: any, fresh: boolean): boolean {
   const state: any = self._dgState;
   const handle: number = Number(state.handle);
+  if (state.facade !== undefined && state.facade.send !== state.defaultSend) {
+    const replaced: any = state.facade.send();
+    if (typeof replaced === "number" && replaced < 0) {
+      if (__netIsFn(entry.callback)) {
+        const failure: any = __dgramException(
+          { errno: replaced, code: util.getSystemErrorName(replaced) },
+          "send",
+          entry.address,
+          entry.port,
+        );
+        __netTick(entry.callback, failure);
+      }
+      return true;
+    }
+  }
   const result: any = __ioOps().udpSend(handle, entry.target, entry.port, entry.encoded);
   if (String(result) === "+A") {
     if (fresh) {
@@ -1087,6 +1192,11 @@ function __dgramBufferSize(self: any, size: any, recv: boolean): any {
 function __dgramCreateSocket(type: any, listener?: any): any {
   return new __DgramSocket(type, listener);
 }
+
+const __node_internal_dgram: any = {
+  kStateSymbol: __dgramStateSymbol,
+  _createSocketHandle: __dgramCreateSocketHandle,
+};
 
 const __node_dgram: any = {
   Socket: __DgramSocket,
