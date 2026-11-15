@@ -1380,3 +1380,29 @@ target/debug/zun run /tmp/bundle.ts
 > `msg.toString()` is `104,101,…`). Deviations and the blocker table:
 > [`test/dgram/README.md`](test/dgram/README.md); per-test breakdown:
 > [`test/dgram/RESULTS.md`](test/dgram/RESULTS.md).
+
+<!-- node-http:start -->
+### Node.js v25 `http` compatibility
+
+`████░░░░░░░░░░░░░░░░░░░░` **20.3%** — 77 / 379 Node `test-http-*` tests passing
+<!-- node-http:end -->
+
+> `http` is **Zun TypeScript over `net`**, with no natives of its own:
+> [`src/http/http.ts`](src/http/http.ts) holds an incremental HTTP/1.1 parser
+> (request/status line, headers, `Content-Length`, chunked with trailers,
+> until-close bodies, keep-alive and pipelining) where Node has llhttp, and on
+> top of it `createServer`/`Server`, `IncomingMessage` (a `Readable` whose
+> backpressure pauses the socket), `OutgoingMessage`/`ServerResponse` (a
+> `Writable` with Node's implicit-header rules), `ClientRequest` with
+> `request`/`get`, an `Agent` with a real socket pool (`keepAlive` reuse,
+> `maxSockets`, `lifo`/`fifo`, `'free'`), `METHODS`, `STATUS_CODES` and the header
+> validators. **Documented deviations**: `http.Server` on the module object is a
+> factory (a class cannot be called, and `new <module>.Ctor()` does not reach a
+> constructor); `headersTimeout`/`requestTimeout` are stored but not enforced; no
+> Unix sockets; the parser is not llhttp. **Most of the 302 failures are not in
+> the module**: ~92 read `this.address()` inside a listener (`this` is
+> `undefined` for a function expression passed as an argument — the same blocker
+> as `net`), ~16 hit closure capture across callbacks, and ~37 are rejected at
+> compile time or need `https`/`tls`/`cluster`. Deviations, repros and the
+> blocker table: [`test/http/README.md`](test/http/README.md); per-test
+> breakdown: [`test/http/RESULTS.md`](test/http/RESULTS.md).

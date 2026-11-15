@@ -211,6 +211,12 @@ case "$MODULE" in
   # dispatch) and `src/net/net.ts` is the module Node exposes: `Socket` as a
   # `stream.Duplex`, `Server`, `isIP*`, `BlockList` and `SocketAddress`.
   net)    KIND="zun-ts+ext"; PATTERNS="test-net-";                         PATTERN="test-net-";;
+  # `http` is Zun TypeScript over `net` (and so over the shared I/O loop): the
+  # HTTP/1.1 parser, `Server`, `ClientRequest`, `Agent` and the message classes
+  # are src/http/http.ts, with no natives of its own. The kind is `zun-ts+ext`
+  # because the sockets underneath are the I/O loop's. The corpus is
+  # `test-http-*`, which does not select `test-http2-*` or `test-https-*`.
+  http)   KIND="zun-ts+ext"; PATTERNS="test-http-";                        PATTERN="test-http-";;
   # `dgram` is the second consumer of the shared I/O loop (`src/io/`), which
   # grew the datagram verbs in `src/io/udp.rs`; `src/dgram/dgram.ts` is the
   # module Node exposes: `Socket` as an `EventEmitter` over a UDP handle.

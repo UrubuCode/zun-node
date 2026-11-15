@@ -725,6 +725,13 @@ class Socket extends Duplex {
   connecting: any = false;
   _connectQueue: any = null;
   _sockState: any = null;
+  // The three properties `node:http` hangs off a socket (Node uses them under
+  // the same names): the request or response it is serving, http's per-socket
+  // record, and whether an error was already reported through it. Declared
+  // here because an undeclared write on a class instance is a compile error.
+  _httpMessage: any = null;
+  _httpConn: any = null;
+  _hadError: any = false;
   // `allowHalfOpen` is read off the instance by `Duplex` itself.
   allowHalfOpen: any = false;
 
