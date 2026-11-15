@@ -6,7 +6,7 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-event-emitter-*|test-events-*.
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
 
-`█████████████░░░░░░░░░░░` **54.2%** — 19 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+`███████████████░░░░░░░░░` **62.8%** — 22 / 35 Node `test-event-emitter-*|test-events-*` tests passing
 <!-- node-events:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
@@ -15,11 +15,11 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 |---|---|---|
 | `test-event-emitter-add-listeners.js` | ❌ assertion | AssertionError [strictEqual]: Expected "actual" to be reference-equal to "expected": |
 | `test-event-emitter-check-listener-leaks.js` | ❌ assertion | AssertionError [==]: false == true |
-| `test-event-emitter-emit-context.js` | ❌ type error | bundles/test-event-emitter-emit-context.ts:20430:24: error: [SEM0001] argument type DynamicObject does not mat |
+| `test-event-emitter-emit-context.js` | ❌ type error | bundles/test-event-emitter-emit-context.ts:20464:24: error: [SEM0001] argument type DynamicObject does not mat |
 | `test-event-emitter-error-monitor.js` | ✅ pass | |
 | `test-event-emitter-errors.js` | ✅ pass | |
 | `test-event-emitter-get-max-listeners.js` | ✅ pass | |
-| `test-event-emitter-invalid-listener.js` | ❌ assertion | AssertionError [throws]: event.on('foo', null) should throw the proper error |
+| `test-event-emitter-invalid-listener.js` | ✅ pass | |
 | `test-event-emitter-listener-count.js` | ✅ pass | |
 | `test-event-emitter-listeners-side-effects.js` | ❌ assertion | AssertionError [==]: false == true |
 | `test-event-emitter-listeners.js` | ✅ pass | |
@@ -33,8 +33,8 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-event-emitter-num-args.js` | ✅ pass | |
 | `test-event-emitter-once.js` | ✅ pass | |
 | `test-event-emitter-prepend.js` | ❌ runtime | zun: failed to load module: duplicate module export: Readable |
-| `test-event-emitter-remove-all-listeners.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-event-emitter-remove-listeners.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-event-emitter-remove-all-listeners.js` | ✅ pass | |
+| `test-event-emitter-remove-listeners.js` | ✅ pass | |
 | `test-event-emitter-set-max-listeners-side-effects.js` | ❌ assertion | AssertionError [==]: false == true |
 | `test-event-emitter-special-event-names.js` | ✅ pass | |
 | `test-event-emitter-subclass.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -45,6 +45,6 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-events-list.js` | ✅ pass | |
 | `test-events-listener-count-with-listener.js` | ✅ pass | |
 | `test-events-on-async-iterator.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-events-on-async-iterator.js: |
-| `test-events-once.js` | ❌ type error | bundles/test-events-once.ts:20575:6: error: [SEM0001] no field or setter 'addEventListener' on this type |
+| `test-events-once.js` | ❌ type error | bundles/test-events-once.ts:20609:6: error: [SEM0001] no field or setter 'addEventListener' on this type |
 | `test-events-static-geteventlisteners.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-events-static-geteventlisteners.js: |
 | `test-events-uncaught-exception-stack.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |

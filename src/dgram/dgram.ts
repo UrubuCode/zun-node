@@ -615,7 +615,7 @@ function __dgramBind(self: any, a: any, b: any, c: any): any {
     held.listening = __evBox(function (): void {
       self.removeListener("close", held.remove);
       self.removeListener("error", held.remove);
-      __evCall(listener, []);
+      __evCallOn(listener, self, []);
     });
     self.on("error", held.remove);
     self.on("close", held.remove);
