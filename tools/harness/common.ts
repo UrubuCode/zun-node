@@ -450,7 +450,7 @@ const common: any = {
   // `common.expectsError(validator)` — a predicate for `assert.throws`, which
   // checks the fields of the thrown error and answers `true`.
   expectsError(validator: any, exact?: any): any {
-    const predicate: any = function (error: any): any {
+    const predicate: any = (error: any): any => {
       if (validator === undefined || validator === null) return true;
       if (typeof validator === "function") {
         return __evCall(validator, [error]) === true;

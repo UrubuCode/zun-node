@@ -2457,6 +2457,11 @@ function deprecate(fn: any, msg: any, code?: any): any {
     }
     return __utilCall(state.fn, passed);
   };
+  // Node preserves the wrapped function's `length` (a rest wrapper has 0).
+  const wrappedLength: any = fn === undefined || fn === null ? undefined : fn.length;
+  if (typeof wrappedLength === "number") {
+    Object.defineProperty(deprecated, "length", { value: wrappedLength, configurable: true });
+  }
   return __utilBox(deprecated);
 }
 

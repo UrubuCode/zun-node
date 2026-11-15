@@ -169,12 +169,12 @@ function __consoleCharCode(text: string, index: number): number {
 // `call did not resolve to a method`. Reading the slot first and calling the
 // value is correct in both states: a replaced `write` reads back as a callable,
 // and so does the original object-literal method; only a `write` that is a
-// *class* method reads back `undefined` (zun#19), and that is the one case the
-// method call handles. No receiver is threaded either way (zun#1), which is why
-// a console stream here need only answer `write(chunk)`.
+// *class* method now reads back as a function too, but one that carries no
+// receiver, so the value is invoked with `.call(stream, text)`, which binds
+// `this` for a class method and leaves a closure's arguments alone.
 function __consoleStreamWrite(stream: any, text: string): any {
   const writer: any = stream["write"];
-  if (__consoleIsFn(writer)) return __evCall(writer, [text]);
+  if (__consoleIsFn(writer)) return writer.call(stream, text);
   return stream.write(text);
 }
 
