@@ -211,6 +211,10 @@ case "$MODULE" in
   # dispatch) and `src/net/net.ts` is the module Node exposes: `Socket` as a
   # `stream.Duplex`, `Server`, `isIP*`, `BlockList` and `SocketAddress`.
   net)    KIND="zun-ts+ext"; PATTERNS="test-net-";                         PATTERN="test-net-";;
+  # `dgram` is the second consumer of the shared I/O loop (`src/io/`), which
+  # grew the datagram verbs in `src/io/udp.rs`; `src/dgram/dgram.ts` is the
+  # module Node exposes: `Socket` as an `EventEmitter` over a UDP handle.
+  dgram)  KIND="zun-ts+ext"; PATTERNS="test-dgram-";                       PATTERN="test-dgram-";;
 
   # `worker_threads`' corpus is four prefixes: `test-worker-` (the bulk, which
   # also selects `test-worker.js` itself), plus `test-messagechannel`,

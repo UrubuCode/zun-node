@@ -79,6 +79,43 @@ __ioInstallNative({
   sockOpt(handle: number, name: string, on: number, value: number): string {
     return __ioNative.ioSockOpt(handle, name, on, value);
   },
+  // ---- datagram sockets (`node:dgram`; see src/io/udp.rs) ----
+  udpOpen(ipv6: number): string {
+    return __ioNative.ioUdpOpen(ipv6);
+  },
+  udpBind(handle: number, address: string, port: number, flags: number): string {
+    return __ioNative.ioUdpBind(handle, address, port, flags);
+  },
+  udpSend(handle: number, address: string, port: number, bytes: string): string {
+    return __ioNative.ioUdpSend(handle, address, port, bytes);
+  },
+  udpRecv(handle: number): string {
+    return __ioNative.ioUdpRecv(handle);
+  },
+  udpConnect(handle: number, address: string, port: number): string {
+    return __ioNative.ioUdpConnect(handle, address, port);
+  },
+  udpDisconnect(handle: number): string {
+    return __ioNative.ioUdpDisconnect(handle);
+  },
+  udpOpt(handle: number, name: string, value: number): string {
+    return __ioNative.ioUdpOpt(handle, name, value);
+  },
+  udpMembership(handle: number, join: number, group: string, iface: string): string {
+    return __ioNative.ioUdpMembership(handle, join, group, iface);
+  },
+  udpSourceMembership(
+    handle: number,
+    join: number,
+    source: string,
+    group: string,
+    iface: string,
+  ): string {
+    return __ioNative.ioUdpSourceMembership(handle, join, source, group, iface);
+  },
+  udpMulticastIf(handle: number, iface: string): string {
+    return __ioNative.ioUdpMulticastIf(handle, iface);
+  },
   handleCount(): number {
     return __ioNative.ioHandleCount();
   },

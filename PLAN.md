@@ -1301,6 +1301,41 @@ gets deleted; nothing else in the tracker changes.
   raced: a name with A and AAAA records has the second candidate as a
   fallback, which is the observable half of `autoSelectFamily`. Table in
   `test/net/README.md`.
+- **`node:dgram`: implemented, TS over the I/O loop, in `src/dgram/dgram.ts`
+  (29 / 76 of Node 25's `test-dgram-*`).**
+  The second consumer of `src/io/`, following the pattern `net` set. The
+  datagram verbs are natives in `src/io/udp.rs`, published under `node:io`
+  beside the stream ones: `ioUdpOpen`, `ioUdpBind` (`SO_REUSEADDR`,
+  `SO_REUSEPORT`, `IPV6_V6ONLY`), `ioUdpSend` (`sendto`, or `send` on a
+  connected socket), `ioUdpRecv` (answering the sender's address),
+  `ioUdpConnect`/`ioUdpDisconnect` (`connect(AF_UNSPEC)`), `ioUdpOpt`
+  (broadcast, TTL, multicast TTL/loopback, buffer sizes),
+  `ioUdpMembership`, `ioUdpSourceMembership` and `ioUdpMulticastIf`. The
+  handle table gained a `Datagram` kind and an `ipv6` flag; readiness, `ioPoll`,
+  `ref`/`unref` and the error slots are unchanged, and `ioSockName`/`ioPeerName`/
+  `ioClose` work on a datagram handle as they are. On Windows the datagram
+  socket switches off `SIO_UDP_CONNRESET` (otherwise a send to a closed port
+  fails the *next receive* with `WSAECONNRESET`, which Node never shows) — the
+  one `WSAIoctl` call, hence the `Win32_System_IO` feature. The TypeScript side
+  is `Socket` as an `EventEmitter` (`bind`, `connect`/`disconnect`/
+  `remoteAddress`, `send` with its argument cascades, `sendto`, `close`,
+  `address`, `ref`/`unref`, `setBroadcast`/`setTTL`/`setMulticast*`,
+  membership, buffer sizes), the queue that holds a `send()` until the socket
+  is bound, and Node's errors. The socket is opened in the constructor but only
+  registered with the loop at `bind()`, because that is when libuv's handle
+  becomes active — an unbound socket does not keep the process alive.
+  **Documented deviations**: name resolution blocks (as in `net`); byte views
+  other than `Buffer` are copied, because a view read through `any` is opaque in
+  this engine; calls that need a bound socket throw `EBADF` (`ENOTSOCK` for the
+  buffer-size calls on Windows) with the platform's errno; `reusePort` is
+  `ENOTSUP` on Windows; `bind({ fd })`/`bind(handle)`, `cluster`,
+  `internal/dgram` and `Symbol.asyncDispose` are absent; the POSIX half of
+  `src/io/sys.rs` was written but not compiled or run (developed on Windows).
+  The failures are mostly in the test bodies — 14 need `internal/dgram`,
+  `cluster` or `../common/udp`, 11 are rejected at compile time by
+  `Buffer.alloc(<number>)`, 6 read `this` in a listener, and message *contents*
+  are capped by the opaque-view-through-`any` gap. Table in
+  `test/dgram/README.md`.
 - **`node:vm`: complete, in `src/vm/vm.ts`.** It is the one module whose job
   *is* compiling at run time, and the platform has that path: the checker
   lowers `new Function(p1, ..., body)` to the `functionConstruct` intrinsic

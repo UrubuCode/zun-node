@@ -406,6 +406,175 @@ mod unix {
         mask
     }
 
+    // -----------------------------------------------------------------------
+    // Datagram sockets (`node:dgram`)
+    // -----------------------------------------------------------------------
+
+    pub(crate) const SOL_SOCKET: i32 = libc::SOL_SOCKET;
+    pub(crate) const SO_BROADCAST: i32 = libc::SO_BROADCAST;
+    pub(crate) const SO_RCVBUF: i32 = libc::SO_RCVBUF;
+    pub(crate) const SO_SNDBUF: i32 = libc::SO_SNDBUF;
+    pub(crate) const IPPROTO_IP: i32 = libc::IPPROTO_IP;
+    pub(crate) const IPPROTO_IPV6: i32 = libc::IPPROTO_IPV6;
+    pub(crate) const IP_TTL: i32 = libc::IP_TTL;
+    pub(crate) const IPV6_UNICAST_HOPS: i32 = libc::IPV6_UNICAST_HOPS;
+    pub(crate) const IP_MULTICAST_TTL: i32 = libc::IP_MULTICAST_TTL;
+    pub(crate) const IPV6_MULTICAST_HOPS: i32 = libc::IPV6_MULTICAST_HOPS;
+    pub(crate) const IP_MULTICAST_LOOP: i32 = libc::IP_MULTICAST_LOOP;
+    pub(crate) const IPV6_MULTICAST_LOOP: i32 = libc::IPV6_MULTICAST_LOOP;
+    pub(crate) const IP_MULTICAST_IF: i32 = libc::IP_MULTICAST_IF;
+    pub(crate) const IPV6_MULTICAST_IF: i32 = libc::IPV6_MULTICAST_IF;
+    pub(crate) const IP_ADD_MEMBERSHIP: i32 = libc::IP_ADD_MEMBERSHIP;
+    pub(crate) const IP_DROP_MEMBERSHIP: i32 = libc::IP_DROP_MEMBERSHIP;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub(crate) const IPV6_ADD_MEMBERSHIP: i32 = libc::IPV6_ADD_MEMBERSHIP;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub(crate) const IPV6_DROP_MEMBERSHIP: i32 = libc::IPV6_DROP_MEMBERSHIP;
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    pub(crate) const IPV6_ADD_MEMBERSHIP: i32 = libc::IPV6_JOIN_GROUP;
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    pub(crate) const IPV6_DROP_MEMBERSHIP: i32 = libc::IPV6_LEAVE_GROUP;
+    /// Source-specific multicast exists on Linux (and Android); elsewhere the
+    /// option number is `0` and the caller reports `ENOTSUP`.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub(crate) const IP_ADD_SOURCE_MEMBERSHIP: i32 = libc::IP_ADD_SOURCE_MEMBERSHIP;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub(crate) const IP_DROP_SOURCE_MEMBERSHIP: i32 = libc::IP_DROP_SOURCE_MEMBERSHIP;
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    pub(crate) const IP_ADD_SOURCE_MEMBERSHIP: i32 = 0;
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    pub(crate) const IP_DROP_SOURCE_MEMBERSHIP: i32 = 0;
+
+    /// `socket(2)` for a non-blocking datagram socket.
+    pub(crate) fn udp_socket(ipv6: bool) -> io::Result<Raw> {
+        let domain = if ipv6 { libc::AF_INET6 } else { libc::AF_INET };
+        // SAFETY: a plain syscall with scalar arguments.
+        let raw = unsafe { libc::socket(domain, libc::SOCK_DGRAM, 0) };
+        if raw < 0 {
+            return Err(last());
+        }
+        set_nonblocking(raw)?;
+        Ok(raw)
+    }
+
+    /// `SO_REUSEPORT`, where the platform has it.
+    pub(crate) fn set_reuse_port(s: Raw, on: bool) -> io::Result<()> {
+        udp_set_opt(s, libc::SOL_SOCKET, libc::SO_REUSEPORT, &i32::from(on).to_ne_bytes())
+    }
+
+    /// `setsockopt(2)` with a raw option value.
+    pub(crate) fn udp_set_opt(s: Raw, level: i32, name: i32, bytes: &[u8]) -> io::Result<()> {
+        // SAFETY: `bytes` is readable for its length.
+        let status = unsafe {
+            libc::setsockopt(s, level, name, bytes.as_ptr().cast(), bytes.len() as libc::socklen_t)
+        };
+        if status < 0 {
+            return Err(last());
+        }
+        Ok(())
+    }
+
+    /// `getsockopt(2)` of an `int` option.
+    pub(crate) fn udp_get_opt(s: Raw, level: i32, name: i32) -> io::Result<i32> {
+        let mut value: i32 = 0;
+        let mut len = mem::size_of::<i32>() as libc::socklen_t;
+        // SAFETY: `value`/`len` are a correctly paired out buffer.
+        let status = unsafe {
+            libc::getsockopt(s, level, name, std::ptr::addr_of_mut!(value).cast(), &mut len)
+        };
+        if status < 0 {
+            return Err(last());
+        }
+        Ok(value)
+    }
+
+    /// `sendto(2)`, or `send(2)` for a connected socket when `to` is `None`.
+    /// `Ok(None)` is "would block".
+    pub(crate) fn send_to(
+        s: Raw,
+        buf: &[u8],
+        to: Option<&SocketAddr>,
+    ) -> io::Result<Option<usize>> {
+        let n = match to {
+            Some(addr) => {
+                let (storage, len) = sockaddr_of(addr);
+                // SAFETY: `buf` and `storage` are readable for their lengths.
+                unsafe {
+                    libc::sendto(s, buf.as_ptr().cast(), buf.len(), 0, storage.as_ptr().cast(), len)
+                }
+            }
+            // SAFETY: `buf` is readable for `buf.len()` bytes.
+            None => unsafe { libc::send(s, buf.as_ptr().cast(), buf.len(), 0) },
+        };
+        if n < 0 {
+            let err = last();
+            if would_block(&err) {
+                return Ok(None);
+            }
+            return Err(err);
+        }
+        Ok(Some(n as usize))
+    }
+
+    /// `recvfrom(2)`. `Ok(None)` is "would block".
+    pub(crate) fn recv_from(s: Raw, buf: &mut [u8]) -> io::Result<Option<(usize, SocketAddr)>> {
+        let mut storage = [0u8; 128];
+        let mut len = storage.len() as libc::socklen_t;
+        // SAFETY: `buf` is writable and `storage`/`len` are a paired out buffer.
+        let n = unsafe {
+            libc::recvfrom(
+                s,
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                0,
+                storage.as_mut_ptr().cast(),
+                &mut len,
+            )
+        };
+        if n < 0 {
+            let err = last();
+            if would_block(&err) {
+                return Ok(None);
+            }
+            return Err(err);
+        }
+        let from = addr_of(&storage).unwrap_or_else(unspecified);
+        Ok(Some((n as usize, from)))
+    }
+
+    /// Dissolve a datagram socket's connection: `connect(2)` with `AF_UNSPEC`,
+    /// which is what libuv's `uv_udp_connect(NULL)` does.
+    pub(crate) fn disconnect(s: Raw) -> io::Result<()> {
+        let storage = [0u8; 128];
+        // SAFETY: an all-zero `sockaddr` is `AF_UNSPEC`.
+        let status = unsafe {
+            libc::connect(
+                s,
+                storage.as_ptr().cast(),
+                mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            )
+        };
+        if status < 0 {
+            let err = last();
+            // macOS answers `EAFNOSUPPORT` for a successful disconnect.
+            if err.raw_os_error() == Some(libc::EAFNOSUPPORT) {
+                return Ok(());
+            }
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// `struct ip_mreq_source`, whose field order is platform-specific: Linux
+    /// is group, interface, source.
+    pub(crate) fn mreq_source(group: [u8; 4], iface: [u8; 4], source: [u8; 4]) -> [u8; 12] {
+        let mut out = [0u8; 12];
+        out[0..4].copy_from_slice(&group);
+        out[4..8].copy_from_slice(&iface);
+        out[8..12].copy_from_slice(&source);
+        out
+    }
+
     /// A `SocketAddr` as the bytes `bind`/`connect` want.
     fn sockaddr_of(addr: &SocketAddr) -> ([u8; 128], libc::socklen_t) {
         let mut storage = [0u8; 128];
@@ -480,12 +649,13 @@ mod windows {
     use super::*;
     use std::mem;
     use std::sync::Once;
+    use windows_sys::Win32::Networking::WinSock as ws;
     use windows_sys::Win32::Networking::WinSock::{
         bind as ws_bind, closesocket, connect as ws_connect, getpeername, getsockname, getsockopt,
         ioctlsocket, listen as ws_listen, recv as ws_recv, select, send as ws_send,
         setsockopt, shutdown as ws_shutdown, socket as ws_socket, WSAGetLastError, WSAStartup,
-        AF_INET, AF_INET6, FIONBIO, INVALID_SOCKET, IPPROTO_IPV6, IPPROTO_TCP, IPV6_V6ONLY,
-        SD_SEND, SOCKET, SOCKET_ERROR, SOCK_STREAM, SOL_SOCKET, SO_ERROR, SO_KEEPALIVE, SO_LINGER,
+        AF_INET, AF_INET6, FIONBIO, INVALID_SOCKET, IPPROTO_TCP, IPV6_V6ONLY,
+        SD_SEND, SOCKET, SOCKET_ERROR, SOCK_STREAM, SO_ERROR, SO_KEEPALIVE, SO_LINGER,
         SO_REUSEADDR, TCP_KEEPIDLE, TCP_NODELAY, TIMEVAL, WSADATA, WSAEADDRINUSE,
         WSAEADDRNOTAVAIL, WSAEAFNOSUPPORT, WSAEALREADY, WSAECONNABORTED, WSAECONNREFUSED,
         WSAECONNRESET, WSAEDESTADDRREQ, WSAEFAULT, WSAEHOSTUNREACH, WSAEINPROGRESS, WSAEINTR,
@@ -848,6 +1018,171 @@ mod windows {
             item.revents = mask;
         }
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Datagram sockets (`node:dgram`)
+    // -----------------------------------------------------------------------
+
+    pub(crate) const SOL_SOCKET: i32 = ws::SOL_SOCKET;
+    pub(crate) const SO_BROADCAST: i32 = ws::SO_BROADCAST;
+    pub(crate) const SO_RCVBUF: i32 = ws::SO_RCVBUF;
+    pub(crate) const SO_SNDBUF: i32 = ws::SO_SNDBUF;
+    pub(crate) const IPPROTO_IP: i32 = ws::IPPROTO_IP as i32;
+    pub(crate) const IPPROTO_IPV6: i32 = ws::IPPROTO_IPV6 as i32;
+    pub(crate) const IP_TTL: i32 = ws::IP_TTL as i32;
+    pub(crate) const IPV6_UNICAST_HOPS: i32 = ws::IPV6_UNICAST_HOPS as i32;
+    pub(crate) const IP_MULTICAST_TTL: i32 = ws::IP_MULTICAST_TTL as i32;
+    pub(crate) const IPV6_MULTICAST_HOPS: i32 = ws::IPV6_MULTICAST_HOPS as i32;
+    pub(crate) const IP_MULTICAST_LOOP: i32 = ws::IP_MULTICAST_LOOP as i32;
+    pub(crate) const IPV6_MULTICAST_LOOP: i32 = ws::IPV6_MULTICAST_LOOP as i32;
+    pub(crate) const IP_MULTICAST_IF: i32 = ws::IP_MULTICAST_IF as i32;
+    pub(crate) const IPV6_MULTICAST_IF: i32 = ws::IPV6_MULTICAST_IF as i32;
+    pub(crate) const IP_ADD_MEMBERSHIP: i32 = ws::IP_ADD_MEMBERSHIP as i32;
+    pub(crate) const IP_DROP_MEMBERSHIP: i32 = ws::IP_DROP_MEMBERSHIP as i32;
+    pub(crate) const IPV6_ADD_MEMBERSHIP: i32 = ws::IPV6_ADD_MEMBERSHIP as i32;
+    pub(crate) const IPV6_DROP_MEMBERSHIP: i32 = ws::IPV6_DROP_MEMBERSHIP as i32;
+    pub(crate) const IP_ADD_SOURCE_MEMBERSHIP: i32 = ws::IP_ADD_SOURCE_MEMBERSHIP as i32;
+    pub(crate) const IP_DROP_SOURCE_MEMBERSHIP: i32 = ws::IP_DROP_SOURCE_MEMBERSHIP as i32;
+
+    /// A non-blocking datagram socket, with Winsock's `WSAECONNRESET`-on-
+    /// `recvfrom` behaviour switched off: by default a datagram socket that once
+    /// sent to a closed port gets its *next receive* failed with `10054`, which
+    /// has no counterpart in Node (libuv disables it with the same ioctl).
+    pub(crate) fn udp_socket(ipv6: bool) -> io::Result<Raw> {
+        startup();
+        let family = if ipv6 { AF_INET6 } else { AF_INET };
+        // SAFETY: scalar arguments.
+        let raw = unsafe { ws_socket(i32::from(family), ws::SOCK_DGRAM, ws::IPPROTO_UDP) };
+        if raw == INVALID_SOCKET {
+            return Err(last());
+        }
+        set_nonblocking(raw)?;
+        let off: u32 = 0;
+        let mut returned: u32 = 0;
+        // SAFETY: `off`/`returned` outlive the call; no overlapped I/O.
+        unsafe {
+            ws::WSAIoctl(
+                raw,
+                ws::SIO_UDP_CONNRESET,
+                std::ptr::addr_of!(off).cast(),
+                4,
+                std::ptr::null_mut(),
+                0,
+                &mut returned,
+                std::ptr::null_mut(),
+                None,
+            )
+        };
+        Ok(raw)
+    }
+
+    /// Windows has no `SO_REUSEPORT`; `SO_REUSEADDR` already carries the
+    /// port-sharing meaning there, which Node documents.
+    pub(crate) fn set_reuse_port(_s: Raw, _on: bool) -> io::Result<()> {
+        Err(io::Error::from_raw_os_error(WSAEOPNOTSUPP))
+    }
+
+    /// `setsockopt` with a raw option value.
+    pub(crate) fn udp_set_opt(s: Raw, level: i32, name: i32, bytes: &[u8]) -> io::Result<()> {
+        // SAFETY: `bytes` is readable for its length.
+        let status = unsafe { setsockopt(s, level, name, bytes.as_ptr(), bytes.len() as i32) };
+        if status == SOCKET_ERROR {
+            return Err(last());
+        }
+        Ok(())
+    }
+
+    /// `getsockopt` of an `int` option.
+    pub(crate) fn udp_get_opt(s: Raw, level: i32, name: i32) -> io::Result<i32> {
+        let mut bytes = [0u8; 4];
+        let mut len: i32 = 4;
+        // SAFETY: `bytes`/`len` are a correctly paired out buffer.
+        let status = unsafe { getsockopt(s, level, name, bytes.as_mut_ptr(), &mut len) };
+        if status == SOCKET_ERROR {
+            return Err(last());
+        }
+        Ok(i32::from_ne_bytes(bytes))
+    }
+
+    /// `sendto`, or `send` for a connected socket when `to` is `None`.
+    /// `Ok(None)` is "would block".
+    pub(crate) fn send_to(
+        s: Raw,
+        buf: &[u8],
+        to: Option<&SocketAddr>,
+    ) -> io::Result<Option<usize>> {
+        let n = match to {
+            Some(addr) => {
+                let (storage, len) = sockaddr_of(addr);
+                // SAFETY: `buf` and `storage` are readable for their lengths.
+                unsafe {
+                    ws::sendto(s, buf.as_ptr(), buf.len() as i32, 0, storage.as_ptr().cast(), len)
+                }
+            }
+            // SAFETY: `buf` is readable for `buf.len()` bytes.
+            None => unsafe { ws_send(s, buf.as_ptr(), buf.len() as i32, 0) },
+        };
+        if n == SOCKET_ERROR {
+            let err = last();
+            if would_block(&err) {
+                return Ok(None);
+            }
+            return Err(err);
+        }
+        Ok(Some(n as usize))
+    }
+
+    /// `recvfrom`. `Ok(None)` is "would block".
+    pub(crate) fn recv_from(s: Raw, buf: &mut [u8]) -> io::Result<Option<(usize, SocketAddr)>> {
+        let mut storage = [0u8; 128];
+        let mut len = storage.len() as i32;
+        // SAFETY: `buf` is writable and `storage`/`len` are a paired out buffer.
+        let n = unsafe {
+            ws::recvfrom(
+                s,
+                buf.as_mut_ptr(),
+                buf.len() as i32,
+                0,
+                storage.as_mut_ptr().cast(),
+                &mut len,
+            )
+        };
+        if n == SOCKET_ERROR {
+            let err = last();
+            if would_block(&err) {
+                return Ok(None);
+            }
+            return Err(err);
+        }
+        let from = addr_of(&storage).unwrap_or_else(unspecified);
+        Ok(Some((n as usize, from)))
+    }
+
+    /// Dissolve a datagram socket's connection: `connect` with `AF_UNSPEC`
+    /// (an all-zero address), as libuv's `uv_udp_connect(NULL)` does.
+    pub(crate) fn disconnect(s: Raw) -> io::Result<()> {
+        let storage = [0u8; 128];
+        // SAFETY: an all-zero `sockaddr` is `AF_UNSPEC`.
+        let status = unsafe { ws_connect(s, storage.as_ptr().cast(), 16) };
+        if status == SOCKET_ERROR {
+            let err = last();
+            // Winsock reports the (successful) dissolution as `WSAEADDRNOTAVAIL`.
+            if err.raw_os_error() == Some(WSAEADDRNOTAVAIL) {
+                return Ok(());
+            }
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// `IP_MREQ_SOURCE`: group, *source*, interface — unlike Linux.
+    pub(crate) fn mreq_source(group: [u8; 4], iface: [u8; 4], source: [u8; 4]) -> [u8; 12] {
+        let mut out = [0u8; 12];
+        out[0..4].copy_from_slice(&group);
+        out[4..8].copy_from_slice(&source);
+        out[8..12].copy_from_slice(&iface);
+        out
     }
 
     fn sockaddr_of(addr: &SocketAddr) -> ([u8; 128], i32) {
