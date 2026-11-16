@@ -6,7 +6,7 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-stream-*|test-stream2-*|test-s
 <!-- node-stream:start -->
 ### Node.js v25 `stream` compatibility
 
-`████████████░░░░░░░░░░░░` **52.9%** — 108 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
+`█████████████░░░░░░░░░░░` **54.4%** — 111 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
 <!-- node-stream:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
@@ -42,7 +42,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-duplex-props.js` | ✅ pass | |
 | `test-stream-duplex-readable-end.js` | ✅ pass | |
 | `test-stream-duplex-readable-writable.js` | ✅ pass | |
-| `test-stream-duplex-writable-finished.js` | ❌ assertion | AssertionError [==]: false == true |
+| `test-stream-duplex-writable-finished.js` | ✅ pass | |
 | `test-stream-duplex.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-stream-duplexpair.js` | ✅ pass | |
 | `test-stream-end-of-streams.js` | ✅ pass | |
@@ -52,8 +52,8 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-event-names.js` | ✅ pass | |
 | `test-stream-events-prepend.js` | ❌ type error | bundles/test-stream-events-prepend.ts:27156:7: error: [SEM0001] duplicate class |
 | `test-stream-filter.js` | ❌ assertion | AssertionError [throws]: Missing expected exception. |
-| `test-stream-finished.js` | ❌ type error | bundles/test-stream-finished.ts:38070:12: error: [SEM0001] no field or setter 'response' on this type |
-| `test-stream-flatMap.js` | ❌ type error | bundles/test-stream-flatMap.ts:31636:21: error: [SEM0001] 'Buffer.concat' expects an array of buffers |
+| `test-stream-finished.js` | ❌ type error | bundles/test-stream-finished.ts:38101:12: error: [SEM0001] no field or setter 'response' on this type |
+| `test-stream-flatMap.js` | ❌ type error | bundles/test-stream-flatMap.ts:31667:21: error: [SEM0001] 'Buffer.concat' expects an array of buffers |
 | `test-stream-forEach.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-stream-inheritance.js` | ❌ assertion | AssertionError [==]: false == true |
 | `test-stream-ispaused.js` | ✅ pass | |
@@ -88,14 +88,14 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-pipeline-queued-end-in-destroy.js` | ✅ pass | |
 | `test-stream-pipeline-uncaught.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-stream-pipeline-with-empty-string.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-stream-pipeline.js` | ❌ type error | bundles/test-stream-pipeline.ts:39297:12: error: [SEM0001] no field or setter 'endCount' on this type |
+| `test-stream-pipeline.js` | ❌ type error | bundles/test-stream-pipeline.ts:39328:12: error: [SEM0001] no field or setter 'endCount' on this type |
 | `test-stream-preprocess.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-stream-promises.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-stream-push-order.js` | ✅ pass | |
 | `test-stream-push-strings.js` | ❌ type error | bundles/test-stream-push-strings.ts:27182:10: error: [SEM0001] no field or setter '_chunks' on this type |
 | `test-stream-readable-aborted.js` | ✅ pass | |
-| `test-stream-readable-add-chunk-during-data.js` | ❌ engine panic | thread '<unnamed>' (28852) panicked at crates\zun_interp\src\value.rs:228:22: |
-| `test-stream-readable-async-iterators.js` | ❌ parse | bundles/test-stream-readable-async-iterators.ts:37596:12: error: [SEM0001] no field or setter 'destroy' on thi |
+| `test-stream-readable-add-chunk-during-data.js` | ❌ engine panic | thread '<unnamed>' (36544) panicked at crates\zun_interp\src\value.rs:228:22: |
+| `test-stream-readable-async-iterators.js` | ❌ parse | bundles/test-stream-readable-async-iterators.ts:37627:12: error: [SEM0001] no field or setter 'destroy' on thi |
 | `test-stream-readable-constructor-set-methods.js` | ✅ pass | |
 | `test-stream-readable-data.js` | ✅ pass | |
 | `test-stream-readable-default-encoding.js` | ❌ type error | bundles/test-stream-readable-default-encoding.ts:27176:3: error: [SEM0001] 'on' expects 2 to 2 argument(s), fo |
@@ -105,7 +105,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-readable-emit-readable-short-stream.js` | ✅ pass | |
 | `test-stream-readable-emittedReadable.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-stream-readable-end-destroyed.js` | ✅ pass | |
-| `test-stream-readable-ended.js` | ❌ assertion | AssertionError [==]: false == true |
+| `test-stream-readable-ended.js` | ✅ pass | |
 | `test-stream-readable-error-end.js` | ✅ pass | |
 | `test-stream-readable-event.js` | ✅ pass | |
 | `test-stream-readable-flow-recursion.js` | ✅ pass | |
@@ -133,7 +133,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-readable-unshift.js` | ❌ type error | bundles/test-stream-readable-unshift.ts:27289:12: error: [SEM0001] no field or setter 'buffer' on this type |
 | `test-stream-readable-with-unimplemented-_read.js` | ✅ pass | |
 | `test-stream-readableListening-state.js` | ✅ pass | |
-| `test-stream-reduce.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-stream-reduce.js` | ❌ runtime | zun: runtime error: call did not resolve to a method at <closure@386697> [386965..386972] |
 | `test-stream-set-default-hwm.js` | ✅ pass | |
 | `test-stream-toArray.js` | ❌ type error | bundles/test-stream-toArray.ts:27167:7: error: [SEM0001] 'fill' expects 1 to 3 argument(s), found 0 |
 | `test-stream-toWeb-allows-server-response.js` | ❌ parse | Error [ERR_METHOD_NOT_IMPLEMENTED]: node:net needs the zun-node native extension (run with --ext) |
@@ -170,7 +170,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-writable-final-throw.js` | ✅ pass | |
 | `test-stream-writable-finish-destroyed.js` | ✅ pass | |
 | `test-stream-writable-finished-state.js` | ✅ pass | |
-| `test-stream-writable-finished.js` | ❌ assertion | AssertionError [==]: false == true |
+| `test-stream-writable-finished.js` | ✅ pass | |
 | `test-stream-writable-invalid-chunk.js` | ✅ pass | |
 | `test-stream-writable-needdrain-state.js` | ✅ pass | |
 | `test-stream-writable-null.js` | ✅ pass | |
