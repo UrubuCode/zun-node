@@ -445,8 +445,25 @@ const __processArgvSplit: any = __processSplitArgv();
 // `process.argv`: the executable, the main script, then the script's own
 // arguments. NO-EXT: `execPath` is the raw `argv[0]` until the native reports
 // the resolved one.
+//
+// `ZUN_NODE_ARGV` is the one exception: the `zun` CLI takes no script arguments
+// (`zun run [--ext <lib>] <file>`, nothing after the file), so the `node`-shaped
+// launcher `src/bin/zun-node-run.rs` — which re-executes a Node test as a child
+// — hands the child's `process.argv` tail over in this variable instead: `"A"`
+// then the entries, `U+001F`-separated (the leading letter keeps the value
+// non-empty, because Windows treats an empty variable as unset).
 function __processBuildArgv(execPath: string): string[] {
   const argv: string[] = [execPath];
+  if (host.envHas("ZUN_NODE_ARGV")) {
+    const packed: string = String(host.envGet("ZUN_NODE_ARGV"));
+    if (packed.charAt(0) === "A") {
+      const body: string = packed.slice(1);
+      if (body !== "") {
+        for (const entry of body.split("\u001f")) argv.push(entry);
+      }
+      return argv;
+    }
+  }
   const script: any = __processArgvSplit.script;
   if (script !== undefined) argv.push(String(script));
   for (const entry of __processArgvSplit.rest) argv.push(String(entry));

@@ -785,38 +785,68 @@ gets deleted; nothing else in the tracker changes.
   interpreter although every implicit coercion works — and between them they
   account for nine of the thirty-two failures. Table in
   `test/timers/README.md`.
-- **`node:child_process`: the synchronous half, TS over natives (the `os`
-  kind).** `src/child_process/*.rs` runs one child to completion with
+- **`node:child_process`: both halves, TS over natives (the `os` kind), the async
+  half over the shared I/O loop (34 / 109 of Node 25's `test-child-process*`).**
+  `src/child_process/spawn.rs` runs one child to completion with
   `std::process::Command` plus the three things `Command` does not do on its own
   (feed stdin from a thread so it cannot deadlock against the child's output,
   enforce a timeout and kill with a *chosen* signal — `libc::kill` on POSIX,
   because `Child::kill` is hard-wired to `SIGKILL` and Node's default is
-  `SIGTERM` — and cap a pipe at `maxBuffer` with `ENOBUFS`), and
-  `src/child_process/child_process.ts` is Node's shape: `spawnSync`, `execSync`,
-  `execFileSync` with `normalizeSpawnArguments`/`normalizeExecArgs`/
-  `normalizeExecFileArgs`, the `cmd.exe /d /s /c "<command>"` and `/bin/sh -c`
-  shells (with `windowsVerbatimArguments`, which is why the Windows shell path
-  needs `raw_arg` rather than `Command::arg`), the `stdio` grammar, `encoding`,
-  the result object with its `output` array, `convertToValidSignal`, the
-  null-byte rejection and `checkExecSyncError`'s two kinds of throw. The request
-  crosses the ABI as one `US`/`RS`-delimited string and the reply as one
-  twelve-field record, the `node:os` convention, with the child's output base64
-  because bytes cannot ride a NUL-terminated carrier — the rule `node:fs` fixed.
-  **The asynchronous half is a stated gap, not an omission**: a `ChildProcess` is
-  an `EventEmitter` whose `stdin`/`stdout`/`stderr` are `node:stream` objects, so
-  `spawn` and `fork` throw `ERR_METHOD_NOT_IMPLEMENTED` rather than pretending.
-  `exec` and `execFile` *are* here, because their callback contract —
-  `(error, stdout, stderr)` on a later tick, `error.code` the exit status,
-  `error.killed`/`signal`/`cmd` — is reproducible without streams: the child runs
-  through the sync native and only the callback is deferred, through
-  `process.nextTick`. What is not reproduced is the concurrency, and the returned
-  handle carries no streams. `process.execPath` is real (`cpExecPath()` is the
-  host's own executable, i.e. the `zun` binary) and that is precisely what caps
-  the corpus: most of Node's `child_process` tests re-run *themselves* with
-  `spawnSync(process.execPath, [__filename, 'child'])`, and the child would be
-  handed a raw CommonJS file the engine cannot run
-  ([#4](https://github.com/UrubuCode/zun/issues/4)) — it would have to be
-  bundled first. Table in `test/child_process/README.md`.
+  `SIGTERM` — and cap a pipe at `maxBuffer` with `ENOBUFS`); that is `spawnSync`,
+  `execSync` and `execFileSync`. `src/child_process/asyncp.rs` is the second
+  consumer of `src/io/` after `net`, and the one that shows what the loop's
+  readiness model costs when the thing to wait for is **not a socket**: an
+  anonymous pipe cannot be put in a Windows `select` set at all (libuv answers
+  with named pipes and IOCP, a second completion model this library's one
+  readiness loop deliberately does not have), and on POSIX the *exit* of a child
+  cannot be polled either. So each pipe is drained by one small thread into a
+  bounded buffer (`HIGH_WATER`: the reader stops, the child blocks on a full
+  pipe — the same real backpressure `socket.pause()` has over TCP), a thread
+  `wait()`s on the child, and every thread ends in a generation counter + condvar
+  that `ioPoll` waits on when there are no sockets (an idle loop with only
+  children costs nothing) and checks between one-millisecond `select` slices when
+  there are. Pipes and processes take their handle numbers from the loop's own
+  counter, so one `__ioRegister(id, …)` in `io.ts` serves sockets, pipes and
+  processes and the TypeScript side needs no second dispatch table; `ioInterest`
+  and `ioClose` route to `asyncp` for a number that is one of its own.
+  `child_process.ts` is Node's `lib/internal/child_process.js` on top of that:
+  `ChildProcess` (an `EventEmitter` with `stdin`/`stdout`/`stderr` as
+  `Writable`/`Readable`, `pid`, `exitCode`, `signalCode`, `killed`, `kill`,
+  `ref`/`unref`, `'spawn'`/`'exit'`/`'close'`/`'error'` in Node's order — a failed
+  spawn is an `'error'` and a `'close'` with the negative errno, never a throw),
+  `ChildProcess.prototype.spawn(options)` with Node's low-level validation,
+  `spawn` with `timeout`/`killSignal`/`signal`, `execFile`/`exec` built on
+  `spawn` exactly as `lib/child_process.js` builds them (`maxBuffer`, `encoding`,
+  the timeout kill, `Command failed:`, `util.promisify` custom), `getValidStdio`
+  and `require('internal/child_process')`. **Documented deviations**: the stdio
+  streams are `Readable`/`Writable`, not `net.Socket`s; `stdio` is `'pipe'`,
+  `'ignore'`, `'inherit'` or a parent fd 0–2; **`fork()` and the IPC channel
+  (`send`, `disconnect`, `'message'`, `advanced` serialization) are not done**
+  (they need a duplex channel to a *Zun* child, and account for 39 of the 109
+  files); `detached`/`uid`/`gid` are POSIX-only; `Symbol.dispose` does not exist
+  in the engine. **The POSIX half of `asyncp.rs` was written but not compiled or
+  run** (developed on Windows, as `net`'s and `dgram`'s were).
+  **`process.execPath` re-execution.** 47 of the 109 files run `process.execPath`
+  as a child — themselves with `[__filename, 'child']`, or `-e`/`-p` text — and
+  `zun run` takes neither a CommonJS file nor script arguments (the CLI accepts
+  exactly `zun run [--ext <lib>] <file>`). Decision: `process.execPath` is a
+  **launcher**, `zun-node-run` (`src/bin/zun-node-run.rs`, built next to the
+  extension), whenever `ZUN_NODE_SHIM` names it (the runner sets it; without it
+  `execPath` stays the `zun` binary, the honest answer outside a test run). The
+  launcher speaks Node's command line — `<script.js>`, `-e`, `-p`, other flags
+  accepted and ignored — puts the script through `tools/bundle_node_test.sh` (the
+  bundle cached by path, content and the newest mtime under `src/` and `tools/`,
+  after a stale cache silently ran old code), and runs `zun run --ext <lib>
+  <bundle>`. Script arguments cannot reach the child through the CLI, so they
+  travel in `ZUN_NODE_ARGV`, which `process.ts` turns into `process.argv`. The
+  launcher is configured by `ZUN_NODE_ZUN`/`_EXT`/`_BUNDLER`/`_BASH`, which
+  `child_process.ts` re-adds to the environment of any spawn whose command line
+  names `process.execPath` (a test that passes `env: { … }` would otherwise strip
+  them), and it carries a recursion guard (`ZUN_NODE_DEPTH`, 8) because a script
+  that decides it is "the parent" in every generation is a fork bomb — this
+  happened once during development. A re-executed child pays for a bundling
+  (about five seconds on an idle machine), so the runner gives this corpus a
+  60 s default timeout. Table in `test/child_process/README.md`.
 - **`node:stream`: implemented in `src/stream/stream.ts`, measured against the
   full Node corpus (204 files in `test/parallel`).** `Stream` (the legacy base,
   with the old `pipe`), `Readable` (flowing and paused modes, `read`, `push`,

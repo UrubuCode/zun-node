@@ -1,0 +1,10 @@
+test/fixtures/empty.js
+test/fixtures/exit.js
+test/fixtures/echo.js
+test/fixtures/GH-1899-output.js
+test/fixtures/print-chars.js
+test/fixtures/child_process_should_emit_error.js
+test/fixtures/child-process-stay-alive-forever.js
+test/fixtures/child-process-echo-options.js
+test/fixtures/child-process-persistent.js
+test/fixtures/parent-process-nonpersistent.js

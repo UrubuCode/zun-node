@@ -30,9 +30,11 @@ const POLL_INTERVAL: Duration = Duration::from_millis(2);
 
 /// What to do with one of the child's three standard streams.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Pipe {
+pub(super) enum Pipe {
     /// `'pipe'` — captured and returned.
     Capture,
+    /// A numeric `stdio` entry: the parent's own descriptor.
+    Fd(i32),
     /// `'inherit'` — the parent's own handle.
     Inherit,
     /// `'ignore'` — the null device.
@@ -41,6 +43,9 @@ enum Pipe {
 
 impl Pipe {
     fn parse(field: &str) -> Self {
+        if let Some(number) = field.strip_prefix("fd").and_then(|n| n.parse::<i32>().ok()) {
+            return Pipe::Fd(number);
+        }
         match field {
             "inherit" => Pipe::Inherit,
             "ignore" => Pipe::Ignore,
@@ -48,9 +53,10 @@ impl Pipe {
         }
     }
 
-    fn stdio(self) -> Stdio {
+    pub(super) fn stdio(self) -> Stdio {
         match self {
             Pipe::Capture => Stdio::piped(),
+            Pipe::Fd(_) => Stdio::inherit(),
             Pipe::Inherit => Stdio::inherit(),
             Pipe::Ignore => Stdio::null(),
         }
@@ -66,17 +72,17 @@ impl Pipe {
 /// [`apply_platform_options`] is the single place that knows which apply where.
 #[derive(Debug)]
 #[cfg_attr(not(unix), allow(dead_code))]
-struct Request {
-    argv: Vec<String>,
+pub(super) struct Request {
+    pub(super) argv: Vec<String>,
     cwd: Option<String>,
     /// Milliseconds; `0` means "no timeout", which is also Node's encoding.
     timeout: u64,
     kill_signal: String,
     /// `u64::MAX` stands for `Infinity`, which Node accepts.
     max_buffer: u64,
-    stdin: Pipe,
-    stdout: Pipe,
-    stderr: Pipe,
+    pub(super) stdin: Pipe,
+    pub(super) stdout: Pipe,
+    pub(super) stderr: Pipe,
     windows_hide: bool,
     detached: bool,
     /// Whether the `env` record replaces the inherited environment. Node always
@@ -156,7 +162,7 @@ impl Reply {
 /// can produce. Kept beside `node:os`'s table rather than shared with it,
 /// because the two modules need different rows and the Windows errno values are
 /// libuv's own reserved range (`include/uv/errno.h`) either way.
-fn uv_error(code: &str) -> (&'static str, &'static str, i64) {
+pub(super) fn uv_error(code: &str) -> (&'static str, &'static str, i64) {
     match code {
         "EACCES" => ("EACCES", "permission denied", uv_errno(13, -4092)),
         "EAGAIN" => ("EAGAIN", "resource temporarily unavailable", uv_errno(11, -4088)),
@@ -189,7 +195,7 @@ const fn uv_errno(posix: i64, windows: i64) -> i64 {
 
 /// The libuv code for a failed spawn. `std` reports `NotFound` for both a
 /// missing executable and a missing `cwd`; both are `ENOENT` in libuv too.
-fn spawn_error_code(err: &std::io::Error) -> &'static str {
+pub(super) fn spawn_error_code(err: &std::io::Error) -> &'static str {
     match err.kind() {
         std::io::ErrorKind::NotFound => "ENOENT",
         std::io::ErrorKind::PermissionDenied => "EACCES",
@@ -215,7 +221,7 @@ fn field<'a>(fields: &[&'a str], index: usize) -> &'a str {
     fields.get(index).copied().unwrap_or("")
 }
 
-fn parse_request(text: &str) -> Option<Request> {
+pub(super) fn parse_request(text: &str) -> Option<Request> {
     let mut records = text.split(RS);
     let header = split_fields(records.next()?);
     let argv_record = records.next().unwrap_or("");
@@ -287,7 +293,7 @@ fn parse_request(text: &str) -> Option<Request> {
 /// has no signals at all — libuv's `uv_kill` terminates the process for any of
 /// them — so this is only reachable on POSIX.
 #[cfg_attr(not(unix), allow(dead_code))]
-fn signal_number(name: &str) -> Option<i32> {
+pub(super) fn signal_number(name: &str) -> Option<i32> {
     let number = match name {
         "SIGHUP" => 1,
         "SIGINT" => 2,
@@ -324,7 +330,7 @@ fn signal_number(name: &str) -> Option<i32> {
 }
 
 /// The signal name for a number, used to report a child that died on a signal.
-fn signal_name(number: i32) -> String {
+pub(super) fn signal_name(number: i32) -> String {
     let name = match number {
         1 => "SIGHUP",
         2 => "SIGINT",
@@ -469,11 +475,11 @@ fn reader_thread<R: Read + Send + 'static>(
 /// Run the request. Returns the reply, never an error: a failed spawn is a
 /// reply with its `error` field set, which is what Node's `spawnSync` hands
 /// back.
-fn run(request: &Request) -> Reply {
-    let mut reply = Reply::default();
-    let file = &request.argv[0];
-
-    let mut command = Command::new(file);
+/// The `Command` for a request: program, arguments, working directory and
+/// environment. Stdio is left to the caller, which differs between the two
+/// halves.
+pub(super) fn build_command(request: &Request) -> Command {
+    let mut command = Command::new(&request.argv[0]);
     push_args(&mut command, request);
     if let Some(cwd) = &request.cwd {
         command.current_dir(cwd);
@@ -484,13 +490,25 @@ fn run(request: &Request) -> Reply {
             command.env(key, value);
         }
     }
+    apply_platform_options(&mut command, request);
+    command
+}
+
+/// The name of the signal a child died on, where the platform reports one.
+pub(super) fn exit_signal(status: &std::process::ExitStatus) -> Option<String> {
+    unix_signal(status).map(signal_name)
+}
+
+fn run(request: &Request) -> Reply {
+    let mut reply = Reply::default();
+
+    let mut command = build_command(request);
     // An `input` to write implies a pipe on stdin whatever the stdio entry says,
     // which is exactly what Node's `spawnSync` does when `options.input` is set.
     let stdin_mode = if request.input.is_empty() { request.stdin } else { Pipe::Capture };
     command.stdin(stdin_mode.stdio());
     command.stdout(request.stdout.stdio());
     command.stderr(request.stderr.stdio());
-    apply_platform_options(&mut command, request);
 
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -621,17 +639,15 @@ pub(crate) unsafe extern "C" fn spawn_sync(
     unsafe { abi::ret_str(out, &reply.encode(&file)) }
 }
 
-/// `cpExecPath()` — the absolute path of the running interpreter, which is what
-/// `process.execPath` reports.
+/// `cpExecPath()` — what `process.execPath` reports.
 ///
-/// Inside an extension this is the *host* process's executable, i.e. the `zun`
-/// binary that loaded this library. That is the honest answer, and it is worth
-/// stating what it does and does not buy: a Node test that re-runs itself with
-/// `spawnSync(process.execPath, [__filename])` will start a `zun` binary and
-/// hand it a raw CommonJS test file, which the engine cannot run — it has no
-/// `require` (<https://github.com/UrubuCode/zun/issues/4>) and the test would
-/// need to be bundled first. `execPath` is right; the re-run pattern is what
-/// does not work, and `child_process.ts` documents it.
+/// Normally the absolute path of the running interpreter: inside an extension
+/// that is the *host* process's executable, i.e. the `zun` binary that loaded
+/// this library. Under the test runner `ZUN_NODE_SHIM` names `zun-node-run`
+/// (`src/bin/zun-node-run.rs`) and that is answered instead: `zun run` cannot run
+/// a raw CommonJS file or take script arguments, and a Node test that re-runs
+/// itself with `spawnSync(process.execPath, [__filename, 'child'])` needs a
+/// `node`-shaped command. See `test/child_process/README.md`.
 ///
 /// # Safety
 /// `out` must point to a writable [`ZunValue`] the host initialized for a `Str`
@@ -641,8 +657,12 @@ pub(crate) unsafe extern "C" fn exec_path(
     _: usize,
     out: *mut ZunValue,
 ) -> i32 {
-    let path = std::env::current_exe()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default();
+    // Under the test harness `ZUN_NODE_SHIM` names `zun-node-run`, the
+    // `node`-shaped launcher (`src/bin/zun-node-run.rs`) that can run a CommonJS
+    // test file or `-e`/`-p` text. Without it `execPath` is the `zun` binary.
+    let shim = std::env::var("ZUN_NODE_SHIM").ok().filter(|p| std::path::Path::new(p).is_file());
+    let path = shim.unwrap_or_else(|| {
+        std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()
+    });
     unsafe { abi::ret_str(out, &path) }
 }

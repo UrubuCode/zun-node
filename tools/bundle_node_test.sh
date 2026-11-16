@@ -192,6 +192,7 @@ fs/promises __node_fs_promises -
 timers __node_timers setTimeout
 timers/promises __node_timers_promises -
 child_process __node_child_process -
+internal/child_process __node_internal_child_process -
 diagnostics_channel __node_diagnostics_channel Channel,TracingChannel
 async_hooks __node_async_hooks AsyncLocalStorage
 console __node_console Console
@@ -421,7 +422,14 @@ fs/promises src/stream/stream.ts
 fs/promises src/fs/fs.ts
 fs/promises src/fs/streams.ts
 fs/promises src/fs/watchers.ts
+child_process src/buffer/buffer.ts
+child_process src/string_decoder/string_decoder.ts
+child_process src/stream/stream.ts
 child_process src/child_process/child_process.ts
+internal/child_process src/buffer/buffer.ts
+internal/child_process src/string_decoder/string_decoder.ts
+internal/child_process src/stream/stream.ts
+internal/child_process src/child_process/child_process.ts
 async_hooks src/async_hooks/async_hooks.ts
 domain src/domain/domain.ts
 diagnostics_channel src/async_hooks/async_hooks.ts
