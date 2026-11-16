@@ -78,7 +78,7 @@
 //     `tools/bundle_node_test.sh` rewrites the spelling Node programs use,
 //     exactly as it does for `console`, `performance` and `crypto`. The two
 //     names denote the same class. `MessagePort`, `MessageEvent`,
-//     `BroadcastChannel` and `DOMException` are *not* in the prelude, so they
+//     `BroadcastChannel` and `__WtDOMException` are *not* in the prelude, so they
 //     keep their own names.
 //   * **No `[util.inspect.custom]` on a port or a channel.** A symbol-keyed own
 //     property written onto a *class instance* reads back `undefined`, through
@@ -135,7 +135,7 @@
 //     prototype, which a side table gives for free.
 
 // ---------------------------------------------------------------------------
-// DOMException
+// __WtDOMException
 // ---------------------------------------------------------------------------
 
 // The legacy error-code table from the DOM spec, reduced to the names this
@@ -185,7 +185,7 @@ function __wtDomCode(name: string): number {
   return index + 1;
 }
 
-class DOMException extends Error {
+class __WtDOMException extends Error {
   code: number = 0;
   constructor(message: string = "", name: string = "Error") {
     super(message);
@@ -195,7 +195,7 @@ class DOMException extends Error {
 }
 
 function __wtDataCloneError(message: string): any {
-  return new DOMException(message, "DataCloneError");
+  return new __WtDOMException(message, "DataCloneError");
 }
 
 // ---------------------------------------------------------------------------
@@ -1479,7 +1479,7 @@ class BroadcastChannel extends EventTarget {
 
   postMessage(message: any = __WT_MISSING): void {
     if (this.__wtOpen !== true) {
-      throw new DOMException("BroadcastChannel is closed.", "InvalidStateError");
+      throw new __WtDOMException("BroadcastChannel is closed.", "InvalidStateError");
     }
     if (message === __WT_MISSING) {
       throw new NodeTypeError("ERR_MISSING_ARGS", 'The "message" argument must be specified');
