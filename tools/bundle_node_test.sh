@@ -236,6 +236,9 @@ _http_incoming __node_http -
 _http_outgoing __node_http -
 _http_server __node_http -
 dgram __node_dgram -
+internal/dgram __node_internal_dgram -
+cluster __node_cluster -
+[.][.]/common/udp __node_harness_udp -
 internal/test/binding __node_internal_test_binding -
 internal/errors __node_internal_errors -
 [.][.]/common/internet __node_harness_internet -
@@ -515,6 +518,18 @@ dgram src/string_decoder/string_decoder.ts
 dgram src/stream/stream.ts
 dgram src/net/net.ts
 dgram src/dgram/dgram.ts
+internal/dgram src/buffer/buffer.ts
+internal/dgram src/string_decoder/string_decoder.ts
+internal/dgram src/stream/stream.ts
+internal/dgram src/net/net.ts
+internal/dgram src/dgram/dgram.ts
+[.][.]/common/udp src/buffer/buffer.ts
+[.][.]/common/udp src/string_decoder/string_decoder.ts
+[.][.]/common/udp src/stream/stream.ts
+[.][.]/common/udp src/net/net.ts
+[.][.]/common/udp src/dgram/dgram.ts
+[.][.]/common/udp tools/harness/udp.ts
+cluster tools/harness/cluster.ts
 internal/test/binding src/dns/dns.ts
 internal/test/binding tools/harness/binding.ts
 internal/errors src/dns/dns.ts

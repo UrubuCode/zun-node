@@ -109,7 +109,8 @@ function __mustCallInner(fn: any, criteria: any, field: string, bare?: any): any
     const passed: any[] = [];
     const count = Number(arguments.length);
     for (let i = 0; i < count; i++) passed.push(arguments[i]);
-    return __evCall(target, passed);
+    // The receiver passes through: `mustCall(function () { this.close(); })`.
+    return __evCallOn(target, this, passed);
   };
   // `bare` asks for the wrapper itself rather than the box -- see the
   // `__commonMustCall` family below for the one caller that needs it.

@@ -198,6 +198,15 @@ function __evCall(listener: any, args: any[]): any {
   return fn(...args);
 }
 
+// Invoke a listener with `receiver` as its `this`, which is what `emit` does in
+// Node (`ReflectApply(handler, this, args)`). `apply` threads the receiver into
+// a plain function value now (zun#1 is fixed), so the listener's `this` is the
+// emitter.
+function __evCallOn(listener: any, receiver: any, args: any[]): any {
+  const fn: any = __evUnbox(listener);
+  return fn.apply(receiver, args);
+}
+
 function __evIsSymbol(value: any): boolean {
   return typeof value === "symbol";
 }
@@ -935,7 +944,7 @@ function __evOnceWrap(target: any, type: any, listener: any): any {
     if (state.fired === true) return undefined;
     state.fired = true;
     __evRemoveListener(target, type, state.wrapFn);
-    return __evCall(listener, passed);
+    return __evCallOn(listener, target, passed);
   };
   // The wrapper is handed out boxed, so that it survives being returned, keeps
   // one identity, and can carry `.listener` the way Node's does.
@@ -1100,7 +1109,7 @@ function __evEmit(target: any, type: any, args: any[]): boolean {
 
   if (__evSlotIsSingle(type, slot)) {
     const single: any = slot;
-    const result: any = __evCall(single, args);
+    const result: any = __evCallOn(single, target, args);
     if (result !== undefined && result !== null) __evAddCatch(target, result, type, args);
     return true;
   }
@@ -1112,7 +1121,7 @@ function __evEmit(target: any, type: any, args: any[]): boolean {
   const count = __evLen(live);
   for (let i = 0; i < count; i++) snapshot.push(live[i]);
   for (let i = 0; i < count; i++) {
-    const result: any = __evCall(snapshot[i], args);
+    const result: any = __evCallOn(snapshot[i], target, args);
     if (result !== undefined && result !== null) __evAddCatch(target, result, type, args);
   }
   return true;

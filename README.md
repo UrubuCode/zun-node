@@ -353,7 +353,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
 
-`█████████████░░░░░░░░░░░` **54.2%** — 19 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+`███████████████░░░░░░░░░` **62.8%** — 22 / 35 Node `test-event-emitter-*|test-events-*` tests passing
 <!-- node-events:end -->
 
 > `events` is implemented end to end — the whole `EventEmitter` surface, every
@@ -1361,7 +1361,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-dgram:start -->
 ### Node.js v25 `dgram` compatibility
 
-`█████████░░░░░░░░░░░░░░░` **38.1%** — 29 / 76 Node `test-dgram-*` tests passing
+`██████████████████░░░░░░` **76.3%** — 58 / 76 Node `test-dgram-*` tests passing
 <!-- node-dgram:end -->
 
 > `dgram` is the second consumer of the shared I/O loop and follows the pattern
