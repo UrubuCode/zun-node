@@ -18,23 +18,47 @@ bash zun-node/tools/run_node_tests.sh \
 `src/child_process/*.rs` holds the spawn, `src/child_process/child_process.ts`
 holds Node's shape, and each test is bundled *and* run with `--ext`.
 
-**Only the synchronous half exists.** `spawnSync`, `execSync` and `execFileSync`
-are complete; `exec` and `execFile` have Node's callback contract over the same
-native (see below); `spawn` and `fork` throw
-`ERR_METHOD_NOT_IMPLEMENTED`, because a `ChildProcess` is an `EventEmitter`
-whose `stdin`/`stdout`/`stderr` are `node:stream` objects and `node:stream` does
-not exist in this library yet. The count is low for that reason first and
-foremost — and for a second one that is worth more than the count.
+**Both halves exist.** `spawnSync`, `execSync` and `execFileSync` run one child to
+completion (`spawn.rs`). `spawn`, `exec`, `execFile` and `ChildProcess` run a
+child *while the program does* (`asyncp.rs`), over the shared I/O loop in
+`src/io/` that `net` and `dgram` already use: `stdin`/`stdout`/`stderr` are
+`Writable`/`Readable` streams, `pid`/`exitCode`/`signalCode`/`killed`/`kill()`/
+`ref()`/`unref()` are Node's, the events fire in Node's order (`'spawn'`,
+`'exit'`, then `'close'` once the process *and* every output stream are done; a
+failed spawn is an `'error'` and a `'close'` with the negative errno, never a
+throw), and `exec`/`execFile` are built on `spawn` the way `lib/child_process.js`
+builds them (`maxBuffer`, `encoding`, the timeout kill, `Command failed:`,
+`util.promisify`'s `{ stdout, stderr }` with `promise.child`). `spawn` takes
+`timeout`, `killSignal` and an `AbortSignal`; `stdio` is `'pipe'`, `'ignore'`,
+`'inherit'`, or the parent's fd 0–2. **`fork()` and the IPC channel are not
+done** and account for most of what is left: 39 of the 109 files call `fork(`,
+and `send`/`disconnect`/`'message'`/`advanced` serialization need a duplex
+channel to a *Zun* child.
 
-## The structural ceiling: `process.execPath` is right, the pattern is not
+## How the async half meets the loop
 
-`process.execPath` is real: `cpExecPath()` is `std::env::current_exe()` inside
-the extension, so it is the absolute path of the `zun` binary that loaded it,
-and `src/child_process/child_process.ts` installs it on `process` the way
-`src/os/os.ts` installs the real `pid`.
+The loop's wait is `select`/`poll(2)` over *sockets*. A child's stdio is an
+anonymous pipe — on Windows it cannot be put in a `select` set at all (libuv
+answers with named pipes and IOCP, a second completion model this library's one
+readiness loop deliberately does not have) — and the *exit* of a child cannot be
+polled on POSIX either. So each pipe is drained by a small thread into a bounded
+buffer, a thread `wait()`s on the child, and every thread ends in a generation
+counter and a condition variable. `ioPoll` waits on that variable when there are
+no sockets (an idle loop with only children costs nothing) and checks it between
+one-millisecond `select` slices when there are. The buffer is bounded
+(`HIGH_WATER`, 256 KiB): a reader that falls behind makes the child block on a
+full pipe, which is what `pause()` means for a pipe here, and is tested
+(`a_large_output_is_delivered_whole_under_backpressure`). Pipes and processes
+take their handle numbers from the loop's own counter, so one `__ioRegister` in
+`io.ts` serves sockets, pipes and processes and `ioInterest`/`ioClose` route to
+`asyncp` for a number that is one of its own. A pipe is ref'd in the loop only
+while someone is reading it — a `stdout` nobody consumes must not keep the
+program alive — and the process handle is ref'd until the child exits.
 
-It does not help, because of what Node's tests *do* with it. The dominant shape
-in this corpus is a test that re-runs **itself** in a child:
+## `process.execPath` re-execution: the decision
+
+47 of the 109 files run `process.execPath` as a child — themselves, as
+`spawnSync(process.execPath, [__filename, 'child'])`, or `-e`/`-p` text:
 
 ```js
 if (process.argv[2] === 'child') {
@@ -45,45 +69,96 @@ if (process.argv[2] === 'child') {
 }
 ```
 
-The child would be a `zun` binary handed a raw CommonJS test file, and the
-engine has no `require` and no module resolution
-([zun#4](https://github.com/UrubuCode/zun/issues/4)) — the file would first have
-to go through `tools/bundle_node_test.sh`, and the bundle would then also need
-to know which `argv` to pass on. That is a harness capability (a "re-run this
-test as a child" entry point), not a `child_process` capability, and it is the
-single largest item standing between this module and a real number. The same
-goes for `spawnSync(process.execPath, ['-e', '…'])`, which eight files use.
+`zun run` can do neither: it takes a Zun TypeScript program, not a CommonJS file
+(the engine has no `require`, [zun#4](https://github.com/UrubuCode/zun/issues/4)),
+has no `-e`/`-p`, and **accepts no script arguments at all** — the CLI matches
+`zun run [--ext <lib>] <file>` and nothing after the file (it answers with its
+usage text). Three options were considered:
 
-Everything the module itself does is therefore verified directly rather than
-through the corpus — see **Direct verification** below.
+1. *Leave `process.execPath` as the `zun` binary* (what this module did): honest,
+   and exactly why the count was low.
+2. *Rewrite the spawn in TypeScript* (`file === process.execPath` → bundle, then
+   spawn `zun run`): does not reach `exec('"' + process.execPath + '" -p …')`,
+   where the command is a shell string, which is what most of the `exec-*` files
+   use.
+3. ***Make `process.execPath` a `node`-shaped launcher* (chosen).** `zun-node-run`
+   (`src/bin/zun-node-run.rs`, built next to the extension) speaks Node's command
+   line — `<script.js>`, `-e <code>`, `-p <expr>`; other flags are accepted and
+   ignored — puts the script through `tools/bundle_node_test.sh`, and runs
+   `zun run --ext <lib> <bundle>`. Whatever string a test builds, the child that
+   starts is the launcher, so shell commands work unchanged.
+
+The launcher is development tooling for the harness, not a product. It is
+selected by `ZUN_NODE_SHIM` (exported by `tools/run_node_tests.sh` when the
+binary exists); without it `process.execPath` is still the `zun` binary. Details
+that cost an afternoon, so they are written down:
+
+- *Arguments travel in the environment.* The child's `process.argv` tail is
+  handed over in `ZUN_NODE_ARGV` (`"A"` + the entries, `U+001F`-separated; the
+  letter keeps the value non-empty because Windows treats an empty variable as
+  unset), and `src/process/process.ts` turns it into `process.argv`.
+  `process.argv[1]` is the original script path, and `process.argv[0]` is
+  `process.execPath`.
+- *The bundle cache must key on the library, not only on the script.* The first
+  version hashed the script's path and content, and a stale bundle silently ran
+  old code after an edit to `src/`. The key now includes the newest mtime under
+  `src/` and `tools/`.
+- *Configuration is `ZUN_NODE_ZUN`, `_EXT`, `_BUNDLER`, `_BASH`*, which
+  `child_process.ts` re-adds to the environment of any spawn whose command line
+  names `process.execPath`: a test that passes `env: { … }` would otherwise strip
+  them. `_BASH` exists because on Windows `PATH` can name WSL's `bash.exe` before
+  Git's.
+- *There is a recursion guard* (`ZUN_NODE_DEPTH`, limit 8). A re-execution whose
+  `process.argv` does not reach the child makes the child take the "I am the
+  parent" branch again, forever: that fork-bombed the machine once during
+  development (457 processes), and is why the guard exists.
+- *A re-executed child pays for a bundling* — about five seconds on an idle
+  machine, thirty on a busy one, once per distinct script (cached afterwards) — so
+  the runner gives this corpus a 60 s default timeout instead of 20 s. A full run
+  took well over an hour on the loaded machine this was developed on; several
+  rows that fail with `timeout` or `Mismatched function call … called 0 times`
+  pass alone (`promisified.js`, for one, in under a minute).
 
 ## Blockers, by cause
 
-| Cause | Share of the 109 | Note |
+| Cause | Files | Note |
 |---|---|---|
-| Needs the **async** half: `spawn`, `fork`, `exec`'s `ChildProcess`, IPC (`send`/`disconnect`/`'message'`), `stdio` as streams, `advanced` serialization | ~70 files | The bulk of the corpus. `node:stream` is the dependency; `fork`'s IPC channel needs a datagram/socket pair on top of it. These fail as a thrown `ERR_METHOD_NOT_IMPLEMENTED` (which is what the `unhandled exception` rows in `RESULTS.md` mostly are) or on a `require` the bundler cannot resolve (`net`, `dgram`, `http`, `stream`, `worker_threads`, `internal/child_process`). |
-| Re-runs itself through `process.execPath` (see above) | ~20 files | Including every `*sync*` file but the validation one: `test-child-process-spawnsync-env`, `-input`, `-maxbuf`, `-timeout`, `test-child-process-execsync-maxbuf`, `test-child-process-execfilesync-maxbuf`, `test-child-process-exec-*`. |
-| A top-level `return` in the test body | `test-child-process-spawnsync-input`, `test-child-process-spawn-argv0` | Legal in CommonJS, because Node wraps a module in a function. The bundler inlines the body into one program, where it is a parse error. |
-| A `Buffer` this module returns is opaque through an `any` lane, so `ret.stdout.toString()` is `toString is not a function` ([zun#38](https://github.com/UrubuCode/zun/issues/38)) | several, overlapping with the rows above | The `encoding: 'utf8'` path is unaffected, which is why the direct verification below exercises both. |
-| `.mjs` (ESM) test files | `test-child-process-fork-url.mjs`, `test-child-process-spawn-args.mjs`, `test-child-process-prototype-tampering.mjs` | No ESM in the engine. |
-| POSIX-only facts (`process.getuid`, `uid`/`gid`, `detached` process groups, `SIGUSR1`) | a handful | Measured on Windows here. |
+| `fork()` and the IPC channel (`send`, `disconnect`, `'message'`, `advanced` serialization, `recv-handle`, handle passing) | 39 call `fork(`; others use `stdio: 'ipc'` or `.send` | Not done: it needs a duplex channel to a Zun child. The launcher would carry it as an inherited pipe pair, but `process.send` on the child side does not exist either. These fail as `ERR_METHOD_NOT_IMPLEMENTED`, the `unhandled exception` rows. |
+| A top-level `return` in the test body | `exec-timeout-expire`, `-kill`, `-not-expired`, `stdio-big-write-end`, `spawnsync-input`, `spawn-argv0`, `bad-stdio` | Legal in CommonJS, because Node wraps a module in a function. The bundler inlines the body into one program, where it is a parse error. Three of them also need `../common/child_process`, which is not in the harness. |
+| `"" + Buffer` and `String(Buffer)` give `[object Object]` | `can-write-to-stdout`, `spawn-shell`, `exec-encoding`, `exec-maxbuf`, `execfile-maxbuf`, `stdout-flush-exit` | The engine's prelude `Buffer` has no string coercion, so `output += data` concatenates `[object Object]` (repro in the report). A `Buffer` read through an `any` lane is also opaque ([zun#38](https://github.com/UrubuCode/zun/issues/38)). |
+| Mocking and monkey-patching: `t.mock.method(internalCp, 'spawnSync')`, `ChildProcess.prototype.spawn`, `Object.defineProperty(process, 'platform', …)` | `spawnsync-shell`, `spawnsync-kill-signal`, `windows-hide`, `bad-stdio` | A class method is not reachable as a value on its prototype ([zun#51](https://github.com/UrubuCode/zun/issues/51)), and `child_process.spawnSync` does not call through a patchable `internal/child_process` property. |
+| `Symbol.dispose`, `AbortSignal` internals | `destroy`, `exec-abortcontroller-promisified`, `execFile-promisified-abortController` | `Symbol.dispose` does not exist in this engine; `AbortSignal.reason`/`DOMException` equality differs. |
+| `.mjs` (ESM) test files | `fork-url`, `spawn-args`, `prototype-tampering` | No ESM in the engine. |
+| POSIX-only facts (`uid`/`gid`, `detached` groups, `SIGUSR1`, `.bat` files) | `uid-gid`, `spawn-windows-batch-file`, `silent` | Measured on Windows here. |
+| Engine failures that are not this module's | `exec-encoding` (interpreter panic at `value.rs:228`), `pipe-dataflow` (`type Boolean has no methods`), `cwd` (`a required parameter cannot follow a default parameter`), `prototype-tampering` (panic at `value.rs:197`) | Reported with the findings. |
 
-Two files pass today — `test-child-process-exec-cwd.js` and
-`test-child-process-stdio-reuse-readable-stdio.js` — plus
-`test-child-process-spawnsync-validation-errors.js`, which is the one that
-matters most of the three: it is 250 lines of pure option validation
-(`cwd`, `detached`, `uid`, `gid`, `shell`, `argv0`, `windowsHide`,
-`windowsVerbatimArguments`, `timeout`, `maxBuffer`, `killSignal`), including
-every signal name in `os.constants.signals` in three spellings and every
-property of `Object.prototype` as an invalid signal. Getting it green needed two
-real fixes: `convertToValidSignal` upper-cases a name before looking it up (so
-`'sigterm'` is valid), and `validateNumber(maxBuffer, 'options.maxBuffer', 0)`
-rejects `NaN` — with a bound given, `NaN` is out of range, and it is neither
-`>= 0` nor `< 0`, so the test has to be written explicitly.
+The 34 files that pass include the whole `spawnSync` validation file
+(`test-child-process-spawnsync-validation-errors.js`, 250 lines of option
+validation), `spawn-event`, `spawn-error`, `spawn-controller` (AbortSignal),
+`kill`, `env`, `stdin`, `stdio`, `constructor`, `validate-stdio`, `exit-code`,
+`stdout-flush`, `exec-std-encoding`, `execfile`, `spawnsync-env`,
+`spawnsync-timeout` — several of them through the launcher — and two `fork-*`
+files (`fork-dgram`, `fork-closed-channel-segfault`) whose bodies never reach
+`fork()` on this platform.
 
 ## Direct verification
 
-The natives are tested in `src/child_process/tests.rs` (15 cases), each through
+The asynchronous natives are tested in `src/child_process/async_tests.rs` (10
+cases), through the real ABI entry points (`cpSpawn`, `cpRead`, `cpWrite`,
+`cpCloseStdin`, `cpKill`, `cpExit`, `cpRelease`): stdout/stderr streamed and kept
+separate, a non-zero status, `ENOENT` in the reply, ignored stdio having no
+handles, stdin bytes reaching the child and closing it ending it, a write to a
+closed stdin failing in band, `kill` ending a running child with the signal
+reported (and `ESRCH` afterwards), a pipe with no read interest not being
+reported ready, a 30 000-line output delivered whole under backpressure, and
+`release` forgetting the handle. The TypeScript layer was checked end to end
+against Node's own behaviour for the same commands: `'spawn'`/`'exit'`/`'close'`
+order, `ENOENT` as `'error'` + `'close'(-4058)`, a `sort`/`findstr` round trip
+through `stdin`, `exec` success and failure, `kill`, `timeout`, `maxBuffer`.
+**The POSIX half of `asyncp.rs` was written but not compiled or run** — this was
+developed on Windows, as `net`'s and `dgram`'s POSIX halves were.
+
+The synchronous natives are tested in `src/child_process/tests.rs` (15 cases), each through
 the real `cpSpawnSync` entry point — a request string in, a reply string out —
 so the wire grammar, the spawn and the reply encoder are checked together:
 stdout/stderr capture and separation, a non-zero status, `ENOENT` for a missing

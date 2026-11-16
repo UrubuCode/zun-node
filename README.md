@@ -93,8 +93,8 @@ A Node module lands here in whichever form fits what it actually does:
   not need — a file's *bytes* cannot ride a NUL-terminated string carrier, so
   they cross base64 and the TypeScript side turns them into the engine's
   prelude `Buffer`. **`child_process` is the third**: `src/child_process/*.rs`
-  spawns a child and waits for it (`std::process::Command`, a thread per pipe, a
-  timeout with a chosen kill signal), while
+  spawns a child and either waits for it or streams it through the I/O loop
+  (`std::process::Command`, a thread per pipe, a timeout with a chosen kill signal), while
   [`src/child_process/child_process.ts`](src/child_process/child_process.ts)
   holds the module Node exposes — the argument normalizers, the shell rules, the
   `stdio` grammar and the result object. A spawn request cannot cross one scalar
@@ -692,46 +692,39 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-child_process:start -->
 ### Node.js v25 `child_process` compatibility
 
-`█░░░░░░░░░░░░░░░░░░░░░░░` **8.2%** — 9 / 109 Node `test-child-process*` tests passing
+`███████░░░░░░░░░░░░░░░░░` **31.1%** — 34 / 109 Node `test-child-process*` tests passing
 <!-- node-child_process:end -->
 
-> `child_process` is **TS over natives** (the `os` kind) and deliberately **half
-> a module**: `src/child_process/*.rs` runs one child to completion with
+> `child_process` is **TS over natives** (the `os` kind), **both halves**, the
+> asynchronous one over the shared I/O loop in `src/io/` that `net` and `dgram`
+> use. `src/child_process/spawn.rs` runs one child to completion with
 > `std::process::Command` plus the three things `Command` does not do on its own
-> (feed stdin from its own thread so it cannot deadlock against the child's
-> output, enforce a timeout and kill with a *chosen* signal — `libc::kill` on
-> POSIX, since `Child::kill` is hard-wired to `SIGKILL` and Node's default is
-> `SIGTERM` — and cap a pipe at `maxBuffer` with `ENOBUFS`), and
-> [`src/child_process/child_process.ts`](src/child_process/child_process.ts) is
-> Node's shape: `spawnSync`, `execSync`, `execFileSync` with Node's three
-> argument normalizers, the `cmd.exe /d /s /c "<command>"` and `/bin/sh -c`
-> shells, the `stdio` grammar, `encoding`, the result object with its `output`
-> array, `convertToValidSignal`, the null-byte rejection and
-> `checkExecSyncError`'s two kinds of throw. The async half is a **stated gap**:
-> a `ChildProcess` is an `EventEmitter` whose `stdin`/`stdout`/`stderr` are
-> `node:stream` objects, so `spawn` and `fork` throw
-> `ERR_METHOD_NOT_IMPLEMENTED` rather than pretending — while `exec` and
-> `execFile` *are* here, because their callback contract is reproducible without
-> streams (the child runs through the sync native and only the callback is
-> deferred, through `process.nextTick`). The number is low for two reasons, and
-> the second one matters more than the first: about seventy of the files need
-> that async half, and about twenty re-run **themselves** with
-> `spawnSync(process.execPath, [__filename, 'child'])`. `process.execPath` is
-> real here (`cpExecPath()` is the host's own executable, i.e. the `zun`
-> binary), but the child would be handed a raw CommonJS test file the engine
-> cannot run ([zun#4](https://github.com/UrubuCode/zun/issues/4)) — it would
-> have to be bundled first, which is a harness capability this library does not
-> have yet. The module is therefore verified directly instead: 15 native tests
-> through the real `cpSpawnSync` entry point (the wire grammar, the spawn and
-> the reply encoder together) plus a differential pass over the TypeScript layer against
-> Node on commands that need no Node child. One real bug came out of that: on
-> Windows `Command::arg` applies MSVCRT quoting, which turned
-> `cmd /d /s /c "echo hi"` into `cmd /d /s /c "\"echo hi\""` and made every
-> shell command an unknown program — the Windows shell path uses `raw_arg` now,
-> which is what libuv's `UV_PROCESS_WINDOWS_VERBATIM_ARGUMENTS` is for. Blocker
-> table: [`test/child_process/README.md`](test/child_process/README.md);
-> per-test breakdown:
-> [`test/child_process/RESULTS.md`](test/child_process/RESULTS.md).
+> (feed stdin from its own thread, enforce a timeout and kill with a *chosen*
+> signal, and cap a pipe at `maxBuffer` with `ENOBUFS`) — `spawnSync`,
+> `execSync`, `execFileSync`. `src/child_process/asyncp.rs` starts a child and
+> returns: each stdio pipe is drained by a small thread into a bounded buffer (a
+> reader that falls behind makes the child block, which is real backpressure), a
+> thread waits on the child, and every thread wakes the loop through one
+> condition variable, because an anonymous pipe cannot be put in a Windows
+> `select` set and a child's exit cannot be polled on POSIX either.
+> [`child_process.ts`](src/child_process/child_process.ts) is Node's shape on top
+> of it: `ChildProcess` (an `EventEmitter` with `stdin`/`stdout`/`stderr` as
+> `Writable`/`Readable`, `pid`, `exitCode`, `signalCode`, `kill`, `ref`/`unref`,
+> `'spawn'`/`'exit'`/`'close'`/`'error'` in Node's order), `spawn` with
+> `timeout`/`killSignal`/`signal`, `exec`/`execFile` built on `spawn` as
+> `lib/child_process.js` builds them, `util.promisify`, `getValidStdio`.
+> **`fork()` and the IPC channel are not done** (39 of the 109 files call
+> `fork(`), `stdio` is `'pipe'`/`'ignore'`/`'inherit'`/fd 0–2, and the stdio
+> streams are not `net.Socket`s. **47 files run `process.execPath` as a child**,
+> and `zun run` takes neither a CommonJS file nor script arguments, so
+> `process.execPath` is a *launcher* under the test runner: `zun-node-run`
+> (`src/bin/zun-node-run.rs`) speaks `node <script.js>`/`-e`/`-p`, bundles the
+> script with `tools/bundle_node_test.sh` (cached) and runs `zun run --ext` on
+> the bundle; the arguments travel in `ZUN_NODE_ARGV`. The decision, and what it
+> cost to get right (a stale bundle cache, a fork bomb), is in
+> [`test/child_process/README.md`](test/child_process/README.md); per-test
+> breakdown: [`test/child_process/RESULTS.md`](test/child_process/RESULTS.md).
+> The POSIX half of `asyncp.rs` was written but not compiled or run.
 
 <!-- node-stream:start -->
 ### Node.js v25 `stream` compatibility
