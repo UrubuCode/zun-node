@@ -447,7 +447,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-buffer:start -->
 ### Node.js v25 `buffer` compatibility
 
-`███░░░░░░░░░░░░░░░░░░░░░` **12.5%** — 8 / 64 Node `test-buffer*` tests passing
+`█████████████░░░░░░░░░░░` **57.8%** — 37 / 64 Node `test-buffer*` tests passing
 <!-- node-buffer:end -->
 
 > `buffer` is the first module whose central object is **the engine's**, not
