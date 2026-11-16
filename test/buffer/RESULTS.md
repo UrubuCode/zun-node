@@ -13,45 +13,45 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-buffer-alloc.js` | ❌ type error | bundles/test-buffer-alloc.ts:30307:25: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer,  |
-| `test-buffer-arraybuffer.js` | ❌ type error | bundles/test-buffer-arraybuffer.ts:20428:25: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBu |
+| `test-buffer-alloc.js` | ❌ unsupported import/require | bundles/test-buffer-alloc.ts:30341:25: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer,  |
+| `test-buffer-arraybuffer.js` | ❌ type error | bundles/test-buffer-arraybuffer.ts:20510:15: error: [SEM0001] 'Buffer.from' expects 1 or 2 arguments |
 | `test-buffer-ascii.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-buffer-backing-arraybuffer.js` | ❌ type error | bundles/test-buffer-backing-arraybuffer.ts:22477:18: error: [SEM0001] Buffer size must be an integer |
+| `test-buffer-backing-arraybuffer.js` | ❌ type error | bundles/test-buffer-backing-arraybuffer.ts:22512:12: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supporte |
 | `test-buffer-badhex.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-buffer-bigint64.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-buffer-bytelength.js` | ❌ type error | bundles/test-buffer-bytelength.ts:22687:29: error: [SEM0001] spread arguments are not lowered yet |
+| `test-buffer-bytelength.js` | ❌ type error | bundles/test-buffer-bytelength.ts:22721:29: error: [SEM0001] spread arguments are not lowered yet |
 | `test-buffer-compare-offset.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-buffer-compare.js` | ❌ type error | bundles/test-buffer-compare.ts:20423:27: error: [SEM0001] Buffer fill byte must be an integer |
-| `test-buffer-concat.js` | ❌ type error | bundles/test-buffer-concat.ts:28929:21: error: [SEM0001] 'Buffer.concat' expects 1 argument (a list) |
+| `test-buffer-compare.js` | ❌ type error | bundles/test-buffer-compare.ts:20469:27: error: [SEM0001] 'Buffer.compare' is not supported in this runtime |
+| `test-buffer-concat.js` | ❌ type error | bundles/test-buffer-concat.ts:28963:21: error: [SEM0001] 'Buffer.concat' expects 1 argument (a list) |
 | `test-buffer-constants.js` | ✅ pass | |
-| `test-buffer-constructor-deprecation-error.js` | ❌ engine panic | thread '<unnamed>' (34528) panicked at crates\zun_interp\src\value.rs:226:25: |
+| `test-buffer-constructor-deprecation-error.js` | ❌ engine panic | thread '<unnamed>' (35420) panicked at crates\zun_interp\src\value.rs:226:25: |
 | `test-buffer-constructor-node-modules-paths.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-buffer-constructor-node-modules.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-buffer-constructor-node-modules.js: |
 | `test-buffer-constructor-outside-node-modules.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-buffer-copy.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-buffer-copy.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-buffer-equals.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-buffer-failed-alloc-typed-arrays.js` | ✅ pass | |
-| `test-buffer-fakes.js` | ❌ type error | bundles/test-buffer-fakes.ts:20430:15: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer,  |
-| `test-buffer-fill.js` | ❌ type error | bundles/test-buffer-fill.ts:22685:32: error: [SEM0001] Buffer size must be an integer |
-| `test-buffer-from.js` | ❌ type error | bundles/test-buffer-from.ts:21808:29: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, f |
+| `test-buffer-fakes.js` | ❌ type error | bundles/test-buffer-fakes.ts:20472:10: error: [SEM0001] 'Buffer.compare' is not supported in this runtime |
+| `test-buffer-fill.js` | ❌ type error | bundles/test-buffer-fill.ts:22746:11: error: [SEM0001] 'ERR_OUT_OF_RANGE' constructor expects 3 to 3 argument( |
+| `test-buffer-from.js` | ❌ type error | bundles/test-buffer-from.ts:21842:29: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, f |
 | `test-buffer-includes.js` | ❌ assertion | AssertionError [==]: false == true |
-| `test-buffer-indexof.js` | ❌ type error | bundles/test-buffer-indexof.ts:21508:41: error: [SEM0001] Buffer encoding must be a string |
+| `test-buffer-indexof.js` | ❌ type error | bundles/test-buffer-indexof.ts:21542:41: error: [SEM0001] Buffer encoding must be a string |
 | `test-buffer-inheritance.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-buffer-inspect.js` | ❌ type error | bundles/test-buffer-inspect.ts:21343:16: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supported in this ru |
+| `test-buffer-inspect.js` | ❌ type error | bundles/test-buffer-inspect.ts:21377:16: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supported in this ru |
 | `test-buffer-isascii.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
-| `test-buffer-isencoding.js` | ❌ type error | bundles/test-buffer-isencoding.ts:20437:29: error: [SEM0001] 'Buffer.isEncoding' is not supported in this runt |
-| `test-buffer-isutf8.js` | ❌ type error | bundles/test-buffer-isutf8.ts:21368:41: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, |
+| `test-buffer-isencoding.js` | ❌ type error | bundles/test-buffer-isencoding.ts:20471:29: error: [SEM0001] 'Buffer.isEncoding' is not supported in this runt |
+| `test-buffer-isutf8.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-buffer-iterator.js` | ✅ pass | |
 | `test-buffer-new.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
-| `test-buffer-no-negative-allocation.js` | ❌ type error | bundles/test-buffer-no-negative-allocation.ts:20435:34: error: [SEM0001] Buffer size must be an integer |
+| `test-buffer-no-negative-allocation.js` | ❌ type error | bundles/test-buffer-no-negative-allocation.ts:20479:28: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not suppo |
 | `test-buffer-nopendingdep-map.js` | ✅ pass | |
-| `test-buffer-of-no-deprecation.js` | ❌ type error | bundles/test-buffer-of-no-deprecation.ts:20424:8: error: [SEM0001] 'Buffer.of' is not supported in this runtim |
-| `test-buffer-over-max-length.js` | ❌ type error | bundles/test-buffer-over-max-length.ts:21325:34: error: [SEM0001] Buffer size must be an integer |
+| `test-buffer-of-no-deprecation.js` | ❌ type error | bundles/test-buffer-of-no-deprecation.ts:20458:8: error: [SEM0001] 'Buffer.of' is not supported in this runtim |
+| `test-buffer-over-max-length.js` | ❌ type error | bundles/test-buffer-over-max-length.ts:21361:28: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supported in |
 | `test-buffer-parent-property.js` | ❌ assertion | AssertionError [==]: false == true |
 | `test-buffer-pending-deprecation.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-buffer-pool-untransferable.js` | ❌ assertion | AssertionError [strictEqual]: Values have same structure but are not reference-equal: |
 | `test-buffer-prototype-inspect.js` | ✅ pass | |
-| `test-buffer-read.js` | ❌ type error | bundles/test-buffer-read.ts:20507:34: error: [SEM0001] Buffer size must be an integer |
+| `test-buffer-read.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-buffer-readdouble.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-buffer-readfloat.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-buffer-readint.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -59,21 +59,21 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-buffer-resizable.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-buffer-safe-unsafe.js` | ✅ pass | |
 | `test-buffer-set-inspect-max-bytes.js` | ✅ pass | |
-| `test-buffer-sharedarraybuffer.js` | ❌ type error | bundles/test-buffer-sharedarraybuffer.ts:20431:29: error: [SEM0001] 'Buffer.from' expects a string, array or A |
-| `test-buffer-slice.js` | ❌ type error | bundles/test-buffer-slice.ts:20492:29: error: [SEM0001] 'Buffer.compare' is not supported in this runtime |
-| `test-buffer-slow.js` | ❌ type error | bundles/test-buffer-slow.ts:21320:17: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supported in this runti |
-| `test-buffer-swap.js` | ❌ type error | bundles/test-buffer-swap.ts:20459:35: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, f |
-| `test-buffer-tojson.js` | ❌ type error | bundles/test-buffer-tojson.ts:20435:28: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, |
-| `test-buffer-tostring-4gb.js` | ❌ type error | bundles/test-buffer-tostring-4gb.ts:20430:30: error: [SEM0001] Buffer size must be an integer |
+| `test-buffer-sharedarraybuffer.js` | ❌ type error | bundles/test-buffer-sharedarraybuffer.ts:20476:38: error: [SEM0001] 'Buffer.byteLength' expects a string |
+| `test-buffer-slice.js` | ❌ type error | bundles/test-buffer-slice.ts:20526:29: error: [SEM0001] 'Buffer.compare' is not supported in this runtime |
+| `test-buffer-slow.js` | ❌ type error | bundles/test-buffer-slow.ts:21354:17: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supported in this runti |
+| `test-buffer-swap.js` | ❌ type error | bundles/test-buffer-swap.ts:20493:35: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBuffer, f |
+| `test-buffer-tojson.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-buffer-tostring-4gb.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-buffer-tostring-range.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-buffer-tostring-rangeerror.js` | ❌ type error | bundles/test-buffer-tostring-rangeerror.ts:21351:25: error: [SEM0001] Buffer size must be an integer |
-| `test-buffer-tostring.js` | ❌ type error | bundles/test-buffer-tostring.ts:20430:43: error: [SEM0001] Buffer encoding must be a string |
-| `test-buffer-write-fast.js` | ❌ type error | bundles/test-buffer-write-fast.ts:22485:17: error: [SEM0001] 'Buffer.from' expects 1 or 2 arguments |
-| `test-buffer-write.js` | ❌ type error | bundles/test-buffer-write.ts:20491:21: error: [SEM0001] 'Buffer.isEncoding' is not supported in this runtime |
+| `test-buffer-tostring-rangeerror.js` | ❌ type error | bundles/test-buffer-tostring-rangeerror.ts:21387:19: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supporte |
+| `test-buffer-tostring.js` | ❌ type error | bundles/test-buffer-tostring.ts:20464:43: error: [SEM0001] Buffer encoding must be a string |
+| `test-buffer-write-fast.js` | ❌ type error | bundles/test-buffer-write-fast.ts:22519:17: error: [SEM0001] 'Buffer.from' expects 1 or 2 arguments |
+| `test-buffer-write.js` | ❌ type error | bundles/test-buffer-write.ts:20525:21: error: [SEM0001] 'Buffer.isEncoding' is not supported in this runtime |
 | `test-buffer-writedouble.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-buffer-writefloat.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-buffer-writeint.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
+| `test-buffer-writeint.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (RangeError). |
 | `test-buffer-writeuint.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-buffer-zero-fill-cli.js` | ❌ type error | bundles/test-buffer-zero-fill-cli.ts:21335:12: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supported in t |
+| `test-buffer-zero-fill-cli.js` | ❌ type error | bundles/test-buffer-zero-fill-cli.ts:21369:12: error: [SEM0001] 'Buffer.allocUnsafeSlow' is not supported in t |
 | `test-buffer-zero-fill-reset.js` | ✅ pass | |
 | `test-buffer-zero-fill.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
