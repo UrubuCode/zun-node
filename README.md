@@ -211,7 +211,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-fs:start -->
 ### Node.js v25 `fs` compatibility
 
-`██████████░░░░░░░░░░░░░░` **42.2%** — 96 / 227 Node `test-fs-*` tests passing
+`███████████░░░░░░░░░░░░░` **46.2%** — 105 / 227 Node `test-fs-*` tests passing
 <!-- node-fs:end -->
 
 > `fs` is implemented as **TS over natives**, the `os` kind: `src/fs/*.rs` holds
@@ -240,7 +240,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-util:start -->
 ### Node.js v25 `util` compatibility
 
-`██████░░░░░░░░░░░░░░░░░░` **26.9%** — 7 / 26 Node `test-util*` tests passing
+`███████░░░░░░░░░░░░░░░░░` **30.7%** — 8 / 26 Node `test-util*` tests passing
 <!-- node-util:end -->
 
 > `util` is implemented end to end — `inspect` with every option Node documents
@@ -295,7 +295,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-assert:start -->
 ### Node.js v25 `assert` compatibility
 
-`███░░░░░░░░░░░░░░░░░░░░░` **14.2%** — 2 / 14 Node `test-assert*` tests passing
+`█████░░░░░░░░░░░░░░░░░░░` **21.4%** — 3 / 14 Node `test-assert*` tests passing
 <!-- node-assert:end -->
 
 > `assert` is the module every other corpus runs *through* — each
@@ -332,7 +332,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-path:start -->
 ### Node.js v25 `path` compatibility
 
-`███████████████████░░░░░` **82.3%** — 14 / 17 Node `test-path*` tests passing
+`██████████████████████░░` **94.1%** — 16 / 17 Node `test-path*` tests passing
 <!-- node-path:end -->
 
 > `path` already runs the whole Node corpus, so its number is a real measurement.
@@ -570,7 +570,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-url:start -->
 ### Node.js v25 `url` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **34.0%** — 15 / 44 Node `test-url*|test-whatwg-url-*` tests passing
+`████████░░░░░░░░░░░░░░░░` **36.3%** — 16 / 44 Node `test-url*|test-whatwg-url-*` tests passing
 <!-- node-url:end -->
 
 > `url` is implemented end to end, on both of its halves. `src/url/url.ts` is
@@ -672,7 +672,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-process:start -->
 ### Node.js v25 `process` compatibility
 
-`███████████░░░░░░░░░░░░░` **45.8%** — 44 / 96 Node `test-process-*` tests passing
+`███████████░░░░░░░░░░░░░` **46.8%** — 45 / 96 Node `test-process-*` tests passing
 <!-- node-process:end -->
 
 > `process` is the module every other bundle in this library stands on, and the
@@ -736,7 +736,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-stream:start -->
 ### Node.js v25 `stream` compatibility
 
-`█████████░░░░░░░░░░░░░░░` **38.2%** — 78 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
+`████████████░░░░░░░░░░░░` **52.9%** — 108 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
 <!-- node-stream:end -->
 
 > `stream` is the largest module here by a wide margin — 204 Node files against
@@ -877,7 +877,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-console:start -->
 ### Node.js v25 `console` compatibility
 
-`█████████░░░░░░░░░░░░░░░` **40.9%** — 9 / 22 Node `test-console*` tests passing
+`████████████░░░░░░░░░░░░` **50.0%** — 11 / 22 Node `test-console*` tests passing
 <!-- node-console:end -->
 
 <!-- node-perf_hooks:start -->
@@ -1145,7 +1145,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-net:start -->
 ### Node.js v25 `net` compatibility
 
-`██████░░░░░░░░░░░░░░░░░░` **27.5%** — 41 / 149 Node `test-net-*` tests passing
+`███████████░░░░░░░░░░░░░` **47.6%** — 71 / 149 Node `test-net-*` tests passing
 <!-- node-net:end -->
 
 > `net` is **TS over natives, and the first module here whose natives are not
@@ -1361,7 +1361,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-dgram:start -->
 ### Node.js v25 `dgram` compatibility
 
-`██████████████████░░░░░░` **76.3%** — 58 / 76 Node `test-dgram-*` tests passing
+`█████████████████░░░░░░░` **73.6%** — 56 / 76 Node `test-dgram-*` tests passing
 <!-- node-dgram:end -->
 
 > `dgram` is the second consumer of the shared I/O loop and follows the pattern
@@ -1384,7 +1384,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-http:start -->
 ### Node.js v25 `http` compatibility
 
-`████░░░░░░░░░░░░░░░░░░░░` **20.3%** — 77 / 379 Node `test-http-*` tests passing
+`████████░░░░░░░░░░░░░░░░` **37.4%** — 142 / 379 Node `test-http-*` tests passing
 <!-- node-http:end -->
 
 > `http` is **Zun TypeScript over `net`**, with no natives of its own:

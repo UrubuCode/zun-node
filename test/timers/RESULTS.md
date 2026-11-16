@@ -14,7 +14,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | Test | Result | Why |
 |---|---|---|
 | `test-timers-api-refs.js` | ✅ pass | |
-| `test-timers-args.js` | ❌ type error | bundles/test-timers-args.ts:20431:28: error: [SEM0001] type Array has no fields |
+| `test-timers-args.js` | ❌ type error | bundles/test-timers-args.ts:20465:28: error: [SEM0001] type Array has no fields |
 | `test-timers-clear-null-does-not-throw-error.js` | ✅ pass | |
 | `test-timers-clear-object-does-not-throw-error.js` | ✅ pass | |
 | `test-timers-clear-timeout-interval-equivalent.js` | ✅ pass | |
@@ -28,7 +28,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-timers-immediate-queue.js` | ❌ timeout |  |
 | `test-timers-immediate-unref-nested-once.js` | ✅ pass | |
 | `test-timers-immediate-unref-simple.js` | ✅ pass | |
-| `test-timers-immediate-unref.js` | ❌ parse | ReferenceError: immA is not defined |
+| `test-timers-immediate-unref.js` | ❌ parse | ReferenceError: immB is not defined |
 | `test-timers-immediate.js` | ✅ pass | |
 | `test-timers-interval-promisified.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-timers-interval-promisified.js: |
 | `test-timers-interval-throw.js` | ✅ pass | |
@@ -54,7 +54,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-timers-reset-process-domain-on-throw.js` | ✅ pass | |
 | `test-timers-same-timeout-wrong-list-deleted.js` | ✅ pass | |
 | `test-timers-setimmediate-infinite-loop.js` | ✅ pass | |
-| `test-timers-socket-timeout-removes-other-socket-unref-timer.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-timers-socket-timeout-removes-other-socket-unref-timer.js: |
+| `test-timers-socket-timeout-removes-other-socket-unref-timer.js` | ❌ parse | Error [ERR_METHOD_NOT_IMPLEMENTED]: node:net needs the zun-node native extension (run with --ext) |
 | `test-timers-this.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-timers-throw-when-cb-not-function.js` | ✅ pass | |
 | `test-timers-timeout-promisified.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-timers-timeout-promisified.js: |
