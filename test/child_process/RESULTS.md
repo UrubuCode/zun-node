@@ -6,31 +6,31 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-child-process*.js`. Generated 
 <!-- node-child_process:start -->
 ### Node.js v25 `child_process` compatibility
 
-`░░░░░░░░░░░░░░░░░░░░░░░░` **3.6%** — 4 / 109 Node `test-child-process*` tests passing
+`█░░░░░░░░░░░░░░░░░░░░░░░` **8.2%** — 9 / 109 Node `test-child-process*` tests passing
 <!-- node-child_process:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-child-process-advanced-serialization-largebuffer.js` | ❌ type error | bundles/test-child-process-advanced-serialization-largebuffer.ts:18365:47: error: [SEM0001] Buffer fill byte m |
-| `test-child-process-advanced-serialization-splitted-length-field.js` | ❌ type error | bundles/test-child-process-advanced-serialization-splitted-length-field.ts:18364:34: error: [SEM0001] Buffer s |
+| `test-child-process-advanced-serialization-largebuffer.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-advanced-serialization-splitted-length-field.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-advanced-serialization.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-child-process-bad-stdio.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-bad-stdio.js: |
 | `test-child-process-can-write-to-stdout.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-constructor.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-child-process-cwd.js` | ❌ unsupported import/require | bundles/test-child-process-cwd.ts:21117:58: error: [SEM0001] a required parameter cannot follow a default para |
+| `test-child-process-cwd.js` | ❌ unsupported import/require | bundles/test-child-process-cwd.ts:25381:58: error: [SEM0001] a required parameter cannot follow a default para |
 | `test-child-process-default-options.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-destroy.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-detached.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-dgram-reuseport.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-dgram-reuseport.js: |
-| `test-child-process-disconnect.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-disconnect.js: |
+| `test-child-process-dgram-reuseport.js` | ✅ pass | |
+| `test-child-process-disconnect.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-double-pipe.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-env.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-exec-abortcontroller-promisified.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-exec-abortcontroller-promisified.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
 | `test-child-process-exec-any-shells-windows.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-exec-cwd.js` | ✅ pass | |
-| `test-child-process-exec-encoding.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-exec-encoding.js` | ❌ parse | Mismatched function call: mustSucceed received an error: Command failed: "C:\Users\<user>\Documents\zun\target |
 | `test-child-process-exec-env.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-exec-error.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-child-process-exec-kill-throws.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-exec-kill-throws.js: |
@@ -43,29 +43,29 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-child-process-execFile-promisified-abortController.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
 | `test-child-process-execfile-maxbuf.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-execfile.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-execfilesync-maxbuf.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-child-process-execsync-maxbuf.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-child-process-execfilesync-maxbuf.js` | ❌ assertion | uAssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
+| `test-child-process-execsync-maxbuf.js` | ❌ assertion | uAssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-child-process-exit-code.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-flush-stdio.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-fork-abort-signal.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-fork-and-spawn.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-fork-args.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-child-process-fork-close.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-fork-closed-channel-segfault.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-fork-closed-channel-segfault.js: |
+| `test-child-process-fork-closed-channel-segfault.js` | ✅ pass | |
 | `test-child-process-fork-detached.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-fork-dgram.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-fork-dgram.js: |
+| `test-child-process-fork-dgram.js` | ✅ pass | |
 | `test-child-process-fork-exec-argv.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-fork-exec-path.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-fork-exec-path.js: |
-| `test-child-process-fork-getconnections.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-fork-getconnections.js: |
-| `test-child-process-fork-net-server.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-fork-net-server.js: |
-| `test-child-process-fork-net-socket.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-fork-net-socket.js: |
-| `test-child-process-fork-net.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-fork-net.js: |
+| `test-child-process-fork-getconnections.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-fork-net-server.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-fork-net-socket.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-fork-net.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-fork-no-shell.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-fork-ref.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-fork-ref2.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-fork-stdio-string-variant.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
-| `test-child-process-fork-stdio.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-fork-stdio.js: |
-| `test-child-process-fork-timeout-kill-signal.js` | ❌ type error | bundles/test-child-process-fork-timeout-kill-signal.ts:18394:10: error: [SEM0001] no field or setter 'aborted' |
+| `test-child-process-fork-stdio.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
+| `test-child-process-fork-timeout-kill-signal.js` | ❌ type error | bundles/test-child-process-fork-timeout-kill-signal.ts:21663:10: error: [SEM0001] no field or setter 'aborted' |
 | `test-child-process-fork-url.mjs` | ❌ unsupported import/require | bundles/test-child-process-fork-url.ts: error: OXC adapter: unsupported expression 'ImportMeta' |
 | `test-child-process-fork.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-fork3.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -76,39 +76,39 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-child-process-kill.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-net-reuseport.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-net-reuseport.js: |
 | `test-child-process-no-deprecation.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-pipe-dataflow.js` | ❌ type error | bundles/test-child-process-pipe-dataflow.ts:21109:28: error: [SEM0001] Buffer size must be an integer |
-| `test-child-process-promisified.js` | ❌ type error | bundles/test-child-process-promisified.ts:18367:35: error: [SEM0001] right operand of 'instanceof' must be a c |
-| `test-child-process-prototype-tampering.mjs` | ❌ engine panic | thread '<unnamed>' (27988) panicked at crates\zun_interp\src\value.rs:197:22: |
+| `test-child-process-pipe-dataflow.js` | ❌ type error | bundles/test-child-process-pipe-dataflow.ts:32940:5: error: [SEM0001] type Boolean has no methods |
+| `test-child-process-promisified.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-prototype-tampering.mjs` | ❌ engine panic | thread '<unnamed>' (34352) panicked at crates\zun_interp\src\value.rs:197:22: |
 | `test-child-process-recv-handle.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-recv-handle.js: |
 | `test-child-process-reject-null-bytes.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-child-process-send-after-close.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-send-cb.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-send-keep-open.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-send-keep-open.js: |
-| `test-child-process-send-returns-boolean.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-send-returns-boolean.js: |
+| `test-child-process-send-keep-open.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-send-returns-boolean.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-send-type-error.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-send-utf8.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-server-close.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-server-close.js: |
+| `test-child-process-server-close.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-set-blocking.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-silent.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-spawn-args.mjs` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-spawn-argv0.js` | ❌ runtime | bundles/test-child-process-spawn-argv0.ts: error: parse error: "A 'return' statement can only be used within a |
+| `test-child-process-spawn-argv0.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-child-process-spawn-controller.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-spawn-error.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-spawn-event.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-spawn-shell.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-spawn-timeout-kill-signal.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-spawn-typeerror.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
-| `test-child-process-spawn-windows-batch-file.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-child-process-spawnsync-args.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-spawnsync-env.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-spawnsync-input.js` | ❌ parse | bundles/test-child-process-spawnsync-input.ts: error: parse error: "A 'return' statement can only be used with |
+| `test-child-process-spawn-windows-batch-file.js` | ❌ runtime | '.' n�o � reconhecido como um comando interno |
+| `test-child-process-spawnsync-args.js` | ✅ pass | |
+| `test-child-process-spawnsync-env.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-child-process-spawnsync-input.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-child-process-spawnsync-kill-signal.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-spawnsync-kill-signal.js: |
 | `test-child-process-spawnsync-maxbuf.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-child-process-spawnsync-shell.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-spawnsync-shell.js: |
 | `test-child-process-spawnsync-timeout.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-spawnsync-validation-errors.js` | ✅ pass | |
-| `test-child-process-spawnsync.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-stdin-ipc.js` | ❌ runtime | bundles/test-child-process-stdin-ipc.ts: error: parse error: "A 'return' statement can only be used within a f |
+| `test-child-process-spawnsync.js` | ✅ pass | |
+| `test-child-process-stdin-ipc.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-stdin.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-stdio-big-write-end.js` | ❌ runtime | bundles/test-child-process-stdio-big-write-end.ts: error: parse error: "A 'return' statement can only be used  |
 | `test-child-process-stdio-inherit.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -118,7 +118,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-child-process-stdio.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-stdout-flush-exit.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-stdout-flush.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-stdout-ipc.js` | ❌ runtime | bundles/test-child-process-stdout-ipc.ts: error: parse error: "A 'return' statement can only be used within a  |
+| `test-child-process-stdout-ipc.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-child-process-uid-gid.js` | ❌ assertion | AssertionError [throws]: The input did not match the regular expression /\bENOTSUP\b/. Input: |
 | `test-child-process-validate-stdio.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-validate-stdio.js: |
 | `test-child-process-windows-hide.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-windows-hide.js: |

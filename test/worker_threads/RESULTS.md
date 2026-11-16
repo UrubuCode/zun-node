@@ -6,7 +6,7 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-worker*|test-messagechannel*|t
 <!-- node-worker_threads:start -->
 ### Node.js v25 `worker_threads` compatibility
 
-`█░░░░░░░░░░░░░░░░░░░░░░░` **7.0%** — 10 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
+`██░░░░░░░░░░░░░░░░░░░░░░` **8.5%** — 12 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
 <!-- node-worker_threads:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
@@ -18,22 +18,22 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-messageport-hasref.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-abort-on-uncaught-exception-terminate.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-abort-on-uncaught-exception.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-arraybuffer-zerofill.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-arraybuffer-zerofill.js: |
+| `test-worker-arraybuffer-zerofill.js` | ❌ runtime | not ok - ...should not affect zero-fill in other threads: The worker_threads.Worker constructor ( |
 | `test-worker-beforeexit-throw-exit.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-broadcastchannel-wpt.js` | ✅ pass | |
 | `test-worker-broadcastchannel.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-cjs-workerdata.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-cleanexit-with-js.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-cleanexit-with-moduleload.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-cleanexit-with-moduleload.js: |
-| `test-worker-cleanup-handles.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-cleanup-handles.js: |
+| `test-worker-cleanup-handles.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-cli-options.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-cli-options.js: |
 | `test-worker-console-listeners.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-cpu-profile.js` | ❌ type error | bundles/test-worker-cpu-profile.ts:19837:33: error: [SEM0001] no method 'startCpuProfile' on this type |
-| `test-worker-cpu-usage.js` | ❌ type error | bundles/test-worker-cpu-usage.ts:19873:18: error: [SEM0001] no method 'cpuUsage' on this type |
+| `test-worker-cpu-profile.js` | ❌ type error | bundles/test-worker-cpu-profile.ts:22680:33: error: [SEM0001] no method 'startCpuProfile' on this type |
+| `test-worker-cpu-usage.js` | ❌ type error | bundles/test-worker-cpu-usage.ts:22716:18: error: [SEM0001] no method 'cpuUsage' on this type |
 | `test-worker-crypto-sign-transfer-result.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-crypto-sign-transfer-result.js: |
 | `test-worker-data-url.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-debug.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-debug.js: |
-| `test-worker-dns-terminate-during-query.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-dns-terminate-during-query.js: |
+| `test-worker-dns-terminate-during-query.js` | ❌ runtime | bundles/test-worker-dns-terminate-during-query.ts: error: parse error: "A 'return' statement can only be used  |
 | `test-worker-dns-terminate.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-environmentdata.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-environmentdata.js: |
 | `test-worker-error-stack-getter-throws.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -46,26 +46,26 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-worker-execargv.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-exit-code.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-exit-code.js: |
 | `test-worker-exit-event-error.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-exit-from-uncaught-exception.js` | ❌ runtime | bundles/test-worker-exit-from-uncaught-exception.ts: error: parse error: "A 'return' statement can only be use |
+| `test-worker-exit-from-uncaught-exception.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-exit-heapsnapshot.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-fs-stat-watcher.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-hasref.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-heap-profile.js` | ❌ type error | bundles/test-worker-heap-profile.ts:19842:33: error: [SEM0001] no method 'startHeapProfile' on this type |
+| `test-worker-heap-profile.js` | ❌ type error | bundles/test-worker-heap-profile.ts:22680:33: error: [SEM0001] no method 'startHeapProfile' on this type |
 | `test-worker-heap-snapshot.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-worker-heap-statistics.js` | ❌ type error | bundles/test-worker-heap-statistics.ts:19883:5: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), fou |
-| `test-worker-heapdump-failure.js` | ❌ type error | bundles/test-worker-heapdump-failure.ts:19851:25: error: [SEM0001] 'getHeapSnapshot' expects 0 to 0 argument(s |
+| `test-worker-heap-statistics.js` | ❌ type error | bundles/test-worker-heap-statistics.ts:22721:5: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), fou |
+| `test-worker-heapdump-failure.js` | ❌ type error | bundles/test-worker-heapdump-failure.ts:22689:25: error: [SEM0001] 'getHeapSnapshot' expects 0 to 0 argument(s |
 | `test-worker-http2-generic-streams-terminate.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-http2-generic-streams-terminate.js: |
 | `test-worker-http2-stream-terminate.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-http2-stream-terminate.js: |
 | `test-worker-init-failure.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-init-failure.js: |
 | `test-worker-invalid-workerdata.js` | ✅ pass | |
 | `test-worker-load-file-with-extension-other-than-js.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-memory.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-memory.js: |
-| `test-worker-message-channel-sharedarraybuffer.js` | ❌ type error | bundles/test-worker-message-channel-sharedarraybuffer.ts:19839:29: error: [SEM0001] 'Buffer.from' expects a st |
-| `test-worker-message-channel.js` | ❌ type error | bundles/test-worker-message-channel.ts:19846:47: error: [SEM0001] type BufferView(U8) has no fields |
-| `test-worker-message-event.js` | ❌ type error | bundles/test-worker-message-event.ts:19881:33: error: [SEM0001] spread arguments are not lowered yet |
-| `test-worker-message-mark-as-uncloneable.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-worker-message-channel-sharedarraybuffer.js` | ❌ type error | bundles/test-worker-message-channel-sharedarraybuffer.ts:22692:3: error: [SEM0001] 'postMessage' expects 0 to  |
+| `test-worker-message-channel.js` | ❌ type error | bundles/test-worker-message-channel.ts:22708:3: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), fou |
+| `test-worker-message-event.js` | ❌ type error | bundles/test-worker-message-event.ts:22719:33: error: [SEM0001] spread arguments are not lowered yet |
+| `test-worker-message-mark-as-uncloneable.js` | ❌ assertion | AssertionError [throws]: Should throw DataCloneError when posting uncloneables |
 | `test-worker-message-not-serializable.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-message-not-serializable.js: |
-| `test-worker-message-port-arraybuffer.js` | ❌ type error | bundles/test-worker-message-port-arraybuffer.ts:19844:22: error: [SEM0001] type Buffer has no fields |
+| `test-worker-message-port-arraybuffer.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-message-port-close-while-receiving.js` | ✅ pass | |
 | `test-worker-message-port-close.js` | ✅ pass | |
 | `test-worker-message-port-constructor.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
@@ -73,33 +73,33 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-worker-message-port-infinite-message-loop.js` | ✅ pass | |
 | `test-worker-message-port-inspect-during-init-hook.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-message-port-jstransferable-nested-untransferable.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-message-port-jstransferable-nested-untransferable.js: |
-| `test-worker-message-port-message-before-close.js` | ❌ type error | bundles/test-worker-message-port-message-before-close.ts:19859:5: error: [SEM0001] 'postMessage' expects 0 to  |
+| `test-worker-message-port-message-before-close.js` | ❌ type error | bundles/test-worker-message-port-message-before-close.ts:22697:5: error: [SEM0001] 'postMessage' expects 0 to  |
 | `test-worker-message-port-message-port-transferring.js` | ✅ pass | |
-| `test-worker-message-port-move.js` | ❌ type error | bundles/test-worker-message-port-move.ts:19850:17: error: [SEM0001] cannot add String and Function(4294967295) |
-| `test-worker-message-port-multiple-sharedarraybuffers.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-worker-message-port-move.js` | ❌ type error | bundles/test-worker-message-port-move.ts:24050:17: error: [SEM0001] cannot add String and Function(4294967295) |
+| `test-worker-message-port-multiple-sharedarraybuffers.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-worker-message-port-receive-message.js` | ✅ pass | |
 | `test-worker-message-port-terminate-transfer-list.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-message-port-transfer-closed.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-worker-message-port-transfer-duplicate.js` | ❌ type error | bundles/test-worker-message-port-transfer-duplicate.ts:19855:29: error: [SEM0001] type BufferView(U8) has no f |
+| `test-worker-message-port-transfer-closed.js` | ❌ assertion | AssertionError [throws]: The error is expected to be an instance of "undefined". Received "__WtDOMException" |
+| `test-worker-message-port-transfer-duplicate.js` | ❌ assertion | AssertionError [throws]: The input did not match the regular expression /^DataCloneError: Transfer list contai |
 | `test-worker-message-port-transfer-fake-js-transferable-internal.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-worker-message-port-transfer-fake-js-transferable.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-message-port-transfer-filehandle.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (DataCloneError). |
 | `test-worker-message-port-transfer-native.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-worker-message-port-transfer-self.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-message-port-transfer-self.js: |
-| `test-worker-message-port-transfer-target.js` | ❌ type error | bundles/test-worker-message-port-transfer-target.ts:19848:20: error: [SEM0001] type Buffer has no fields |
-| `test-worker-message-port-transfer-terminate.js` | ❌ type error | bundles/test-worker-message-port-transfer-terminate.ts:19843:5: error: [SEM0001] 'postMessage' expects 0 to 0  |
-| `test-worker-message-port-wasm-module.js` | ❌ type error | bundles/test-worker-message-port-wasm-module.ts:19847:1: error: [SEM0001] 'postMessage' expects 0 to 0 argumen |
-| `test-worker-message-port-wasm-threads.js` | ❌ type error | bundles/test-worker-message-port-wasm-threads.ts:19852:31: error: [SEM0001] 'Buffer.from' expects a string, ar |
-| `test-worker-message-port.js` | ❌ type error | bundles/test-worker-message-port.ts:19968:24: error: [SEM0001] type Buffer has no fields |
-| `test-worker-message-transfer-port-mark-as-untransferable.js` | ❌ type error | bundles/test-worker-message-transfer-port-mark-as-untransferable.ts:19840:22: error: [SEM0001] type Buffer has |
+| `test-worker-message-port-transfer-target.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-worker-message-port-transfer-terminate.js` | ❌ type error | bundles/test-worker-message-port-transfer-terminate.ts:22681:5: error: [SEM0001] 'postMessage' expects 0 to 0  |
+| `test-worker-message-port-wasm-module.js` | ❌ type error | bundles/test-worker-message-port-wasm-module.ts:22685:1: error: [SEM0001] 'postMessage' expects 0 to 0 argumen |
+| `test-worker-message-port-wasm-threads.js` | ❌ type error | bundles/test-worker-message-port-wasm-threads.ts:22716:12: error: [SEM0001] no field or setter 'buf' on this t |
+| `test-worker-message-port.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
+| `test-worker-message-transfer-port-mark-as-untransferable.js` | ✅ pass | |
 | `test-worker-message-type-unknown.js` | ❌ assertion | AssertionError [==]: Expected error not found in: usage: zun <command> <file.ts> |
 | `test-worker-messageport-hasref.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-messaging-errors-handler.js` | ❌ type error | bundles/test-worker-messaging-errors-handler.ts:19851:3: error: [SEM0001] 'postMessage' expects 0 to 0 argumen |
-| `test-worker-messaging-errors-invalid.js` | ❌ type error | bundles/test-worker-messaging-errors-invalid.ts:19869:3: error: [SEM0001] 'postMessage' expects 0 to 0 argumen |
-| `test-worker-messaging-errors-timeout.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-messaging.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-messaging.js: |
+| `test-worker-messaging-errors-handler.js` | ❌ type error | bundles/test-worker-messaging-errors-handler.ts:22689:3: error: [SEM0001] 'postMessage' expects 0 to 0 argumen |
+| `test-worker-messaging-errors-invalid.js` | ❌ type error | bundles/test-worker-messaging-errors-invalid.ts:22707:3: error: [SEM0001] 'postMessage' expects 0 to 0 argumen |
+| `test-worker-messaging-errors-timeout.js` | ✅ pass | |
+| `test-worker-messaging.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-worker-mjs-workerdata.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-name.js` | ❌ type error | bundles/test-worker-name.ts:19856:5: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found 1 |
+| `test-worker-name.js` | ❌ type error | bundles/test-worker-name.ts:22694:5: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found 1 |
 | `test-worker-nearheaplimit-deadlock.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-nested-on-process-exit.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-nested-uncaught.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -107,29 +107,29 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-worker-no-sab.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-no-stdin-stdout-interaction.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-node-options.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-node-options.js: |
-| `test-worker-non-fatal-uncaught-exception.js` | ❌ runtime | bundles/test-worker-non-fatal-uncaught-exception.ts: error: parse error: "A 'return' statement can only be use |
+| `test-worker-non-fatal-uncaught-exception.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-on-process-exit.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-worker-onmessage-not-a-function.js` | ❌ type error | bundles/test-worker-onmessage-not-a-function.ts:19843:3: error: [SEM0001] 'postMessage' expects 0 to 0 argumen |
-| `test-worker-onmessage.js` | ❌ type error | bundles/test-worker-onmessage.ts:19848:3: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found 1 |
-| `test-worker-parent-port-ref.js` | ❌ type error | bundles/test-worker-parent-port-ref.ts:19842:5: error: [SEM0001] 'on' expects 2 to 2 argument(s), found 3 |
+| `test-worker-onmessage-not-a-function.js` | ❌ type error | bundles/test-worker-onmessage-not-a-function.ts:22681:3: error: [SEM0001] 'postMessage' expects 0 to 0 argumen |
+| `test-worker-onmessage.js` | ❌ type error | bundles/test-worker-onmessage.ts:22686:3: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found 1 |
+| `test-worker-parent-port-ref.js` | ❌ type error | bundles/test-worker-parent-port-ref.ts:22680:5: error: [SEM0001] 'on' expects 2 to 2 argument(s), found 3 |
 | `test-worker-process-argv.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-process-cwd.js` | ❌ type error | bundles/test-worker-process-cwd.ts:19853:5: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found 1 |
+| `test-worker-process-cwd.js` | ❌ type error | bundles/test-worker-process-cwd.ts:22694:5: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found 1 |
 | `test-worker-process-env-shared.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-process-env.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-process-exit-async-module.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-ref-onexit.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-ref.js` | ❌ type error | bundles/test-worker-ref.ts:19844:3: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found 1 |
+| `test-worker-ref.js` | ❌ type error | bundles/test-worker-ref.ts:22685:3: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found 1 |
 | `test-worker-relative-path-double-dot.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-relative-path.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-resource-limits.js` | ❌ runtime | bundles/test-worker-resource-limits.ts: error: parse error: "A 'return' statement can only be used within a fu |
-| `test-worker-safe-getters.js` | ❌ type error | bundles/test-worker-safe-getters.ts:19848:5: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found  |
+| `test-worker-resource-limits.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-worker-safe-getters.js` | ❌ type error | bundles/test-worker-safe-getters.ts:22689:5: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found  |
 | `test-worker-sharedarraybuffer-from-worker-thread.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-stack-overflow-stack-size.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-worker-stack-overflow.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-stdio-flush-inflight.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-stdio-flush.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-stdio-from-preload-module.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-stdio.js` | ❌ type error | bundles/test-worker-stdio.ts:29142:10: error: [SEM0001] no field or setter 'chunks' on this type |
+| `test-worker-stdio.js` | ❌ type error | bundles/test-worker-stdio.ts:33830:10: error: [SEM0001] no field or setter 'chunks' on this type |
 | `test-worker-syntax-error-file.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-syntax-error.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-terminate-http2-respond-with-file.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-terminate-http2-respond-with-file.js: |
@@ -137,10 +137,10 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-worker-terminate-nested.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-terminate-null-handler.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-terminate-ref-public-port.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-terminate-source-map.js` | ❌ runtime | bundles/test-worker-terminate-source-map.ts: error: parse error: "A 'return' statement can only be used within |
+| `test-worker-terminate-source-map.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-terminate-timers.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-terminate-unrefed.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-worker-thread-name.js` | ❌ type error | bundles/test-worker-thread-name.ts:19847:24: error: [SEM0001] no field or getter 'threadName' on this type |
+| `test-worker-thread-name.js` | ❌ type error | bundles/test-worker-thread-name.ts:22681:24: error: [SEM0001] no field or getter 'threadName' on this type |
 | `test-worker-track-unmanaged-fds.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-track-unmanaged-fds.js: |
 | `test-worker-type-check.js` | ✅ pass | |
 | `test-worker-uncaught-exception-async.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -151,6 +151,6 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-worker-vm-context-terminate.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-voluntarily-exit-followed-by-addition.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-worker-voluntarily-exit-followed-by-throw.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-worker-workerdata-messageport.js` | ❌ type error | bundles/test-worker-workerdata-messageport.ts:19871:20: error: [SEM0001] type BufferView(U8) has no fields |
-| `test-worker-workerdata-sharedarraybuffer.js` | ❌ type error | bundles/test-worker-workerdata-sharedarraybuffer.ts:19843:29: error: [SEM0001] 'Buffer.from' expects a string, |
+| `test-worker-workerdata-messageport.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-worker-workerdata-sharedarraybuffer.js` | ❌ type error | bundles/test-worker-workerdata-sharedarraybuffer.ts:22696:3: error: [SEM0001] 'postMessage' expects 0 to 0 arg |
 | `test-worker.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |

@@ -211,7 +211,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-fs:start -->
 ### Node.js v25 `fs` compatibility
 
-`███████████░░░░░░░░░░░░░` **46.2%** — 105 / 227 Node `test-fs-*` tests passing
+`███████████░░░░░░░░░░░░░` **49.7%** — 113 / 227 Node `test-fs-*` tests passing
 <!-- node-fs:end -->
 
 > `fs` is implemented as **TS over natives**, the `os` kind: `src/fs/*.rs` holds
@@ -672,7 +672,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-process:start -->
 ### Node.js v25 `process` compatibility
 
-`███████████░░░░░░░░░░░░░` **46.8%** — 45 / 96 Node `test-process-*` tests passing
+`████████████░░░░░░░░░░░░` **53.1%** — 51 / 96 Node `test-process-*` tests passing
 <!-- node-process:end -->
 
 > `process` is the module every other bundle in this library stands on, and the
@@ -692,7 +692,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-child_process:start -->
 ### Node.js v25 `child_process` compatibility
 
-`░░░░░░░░░░░░░░░░░░░░░░░░` **3.6%** — 4 / 109 Node `test-child-process*` tests passing
+`█░░░░░░░░░░░░░░░░░░░░░░░` **8.2%** — 9 / 109 Node `test-child-process*` tests passing
 <!-- node-child_process:end -->
 
 > `child_process` is **TS over natives** (the `os` kind) and deliberately **half
@@ -736,7 +736,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-stream:start -->
 ### Node.js v25 `stream` compatibility
 
-`████████████░░░░░░░░░░░░` **52.9%** — 108 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
+`█████████████░░░░░░░░░░░` **54.4%** — 111 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
 <!-- node-stream:end -->
 
 > `stream` is the largest module here by a wide margin — 204 Node files against
@@ -1145,7 +1145,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-net:start -->
 ### Node.js v25 `net` compatibility
 
-`███████████░░░░░░░░░░░░░` **47.6%** — 71 / 149 Node `test-net-*` tests passing
+`███████████░░░░░░░░░░░░░` **46.9%** — 70 / 149 Node `test-net-*` tests passing
 <!-- node-net:end -->
 
 > `net` is **TS over natives, and the first module here whose natives are not
@@ -1300,7 +1300,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-worker_threads:start -->
 ### Node.js v25 `worker_threads` compatibility
 
-`█░░░░░░░░░░░░░░░░░░░░░░░` **7.0%** — 10 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
+`██░░░░░░░░░░░░░░░░░░░░░░` **8.5%** — 12 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
 <!-- node-worker_threads:end -->
 
 > `node:worker_threads` is two things wearing one name, and the split decides
@@ -1361,7 +1361,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-dgram:start -->
 ### Node.js v25 `dgram` compatibility
 
-`█████████████████░░░░░░░` **73.6%** — 56 / 76 Node `test-dgram-*` tests passing
+`██████████████████░░░░░░` **76.3%** — 58 / 76 Node `test-dgram-*` tests passing
 <!-- node-dgram:end -->
 
 > `dgram` is the second consumer of the shared I/O loop and follows the pattern
@@ -1384,7 +1384,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-http:start -->
 ### Node.js v25 `http` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **37.4%** — 142 / 379 Node `test-http-*` tests passing
+`█████████░░░░░░░░░░░░░░░` **37.7%** — 143 / 379 Node `test-http-*` tests passing
 <!-- node-http:end -->
 
 > `http` is **Zun TypeScript over `net`**, with no natives of its own:
