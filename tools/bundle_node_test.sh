@@ -590,6 +590,11 @@ SRC_TEXT="$(<"$SRC")"
 module_required() {
   case "$SRC_TEXT" in
     *"require('$1')"*|*"require('node:$1')"*|*"require('$1.js')"*) return 0;;
+    # Already-rewritten source names the module object itself. That is what
+    # a worker's `eval: true` text looks like: it sat inside a template string
+    # of the parent test, so the parent's bundling rewrote its `require` lines
+    # too, and the worker's bundle then has to carry what they now name.
+    *"__node_$1."*|*"__node_$1;"*|*"__node_$1)"*) return 0;;
   esac
   return 1
 }
@@ -792,13 +797,15 @@ esac
 # not; the CONDITIONAL_FILES entry above cannot help it, because that gate is
 # the `require` call. One in-shell substring test over the source already
 # read therefore appends the module for any test that mentions one of the
-# four names, with the same append-once rule as the loop.
+# four names (or constructs a `Worker`, which is how a worker's `eval: true`
+# text spells it once the parent's bundling has rewritten its `require`), with
+# the same append-once rule as the loop.
 #
 # `$WANTS_WORKER_THREADS` is the same decision, kept for the rewrite rules
 # below: the `MessageChannel` rename and the `onmessage` rewrite are emitted
 # for exactly the bundles that contain this module and for no others.
 WANTS_WORKER_THREADS=no
-case "$SRC_TEXT" in *MessageChannel*|*MessagePort*|*MessageEvent*|*BroadcastChannel*) WANTS_WORKER_THREADS=yes;; esac
+case "$SRC_TEXT" in *MessageChannel*|*MessagePort*|*MessageEvent*|*BroadcastChannel*|*"new Worker("*) WANTS_WORKER_THREADS=yes;; esac
 if requires_module "worker_threads"; then WANTS_WORKER_THREADS=yes; fi
 if [ "$WANTS_WORKER_THREADS" = yes ]; then
   case "

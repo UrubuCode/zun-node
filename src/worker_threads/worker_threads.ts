@@ -831,6 +831,12 @@ class MessagePort extends EventTarget {
   // The cross-process link this port speaks over, or null for an in-process
   // port. Only a worker's `parentPort` has one (see "The Worker process").
   __wtLink: any = null;
+  // A port that crossed the link: `__wtProxyId` names it in the link's port
+  // table. On the receiving side the port *is* the remote end (`__wtLink` is
+  // set); on the sending side the moved port's local stand-in forwards
+  // whatever its sibling posts (`__wtForward` is the link).
+  __wtProxyId: any = 0;
+  __wtForward: any = null;
   __wtStarted: boolean = false;
   // `__wtDetached` is set the instant `close()` or a transfer happens, because
   // Node's detachment is synchronous and instant even though the handle lives
@@ -863,6 +869,8 @@ class MessagePort extends EventTarget {
     this.__wtQueue = [];
     this.__wtSibling = null;
     this.__wtLink = null;
+    this.__wtProxyId = 0;
+    this.__wtForward = null;
     this.__wtStarted = false;
     this.__wtDetached = false;
     this.__wtActive = true;
@@ -1272,7 +1280,18 @@ function __wtPortPostMessage(port: any, value: any, options: any): void {
   // `Worker` object in the parent process, reached over the link.
   if (port.__wtLink !== null && port.__wtLink !== undefined) {
     if (port.__wtDetached === true) return;
-    __wtLinkSend(port.__wtLink, { t: "m", v: __wtEncode(data) });
+    const link: any = port.__wtLink;
+    if (Number(port.__wtProxyId) !== 0) {
+      __wtLinkSend(link, { t: "pm", id: Number(port.__wtProxyId), v: __wtEncode(data, link) });
+    } else {
+      __wtLinkSend(link, { t: "m", v: __wtEncode(data, link) });
+    }
+    return;
+  }
+  if (target !== null && target !== undefined && target.__wtForward !== null && target.__wtForward !== undefined) {
+    if (port.__wtDetached === true) return;
+    const link: any = target.__wtForward;
+    __wtLinkSend(link, { t: "pm", id: Number(target.__wtProxyId), v: __wtEncode(data, link) });
     return;
   }
 
@@ -1803,7 +1822,9 @@ class ERR_WORKER_INVALID_EXEC_ARGV extends NodeError {
 
 function __wtIsUrl(value: any): boolean {
   if (!__wtIsObjectLike(value)) return false;
-  return value instanceof URL;
+  // `new URL(...)` in a bundle is src/url/whatwg.ts' `NodeURL` (the bundler
+  // rewrites the global); the prelude's own `URL` is still accepted.
+  return value instanceof NodeURL || value instanceof URL;
 }
 
 function __wtValidateArray(value: any, name: string): void {
@@ -1837,6 +1858,7 @@ class Worker extends EventEmitter {
   stderr: any = null;
   resourceLimits: any = {};
   performance: any = null;
+  threadName: string = "WorkerThread";
   // The parent's end of the link to the worker process (see "The Worker
   // process" below).
   __wtLinkRef: any = null;
@@ -1911,7 +1933,7 @@ class Worker extends EventEmitter {
     // The `workerData` clone is the last validation, and it is a real one: a
     // value a worker could not receive is a `DataCloneError` at construction.
     const transferList: any[] = opts.transferList === undefined || opts.transferList === null ? [] : opts.transferList;
-    const data: any = __wtClone(opts.workerData, transferList, transferList);
+    const data: any = __wtCloneTransfer(opts.workerData, transferList);
 
     const host: any = __wtHost.impl;
     if (host === null || host === undefined || !__ioAvailable()) {
@@ -1931,6 +1953,7 @@ class Worker extends EventEmitter {
       code = __wtDataUrlSource(script);
     }
 
+    if (typeof opts.name === "string" && opts.name !== "") this.threadName = opts.name;
     this.threadId = Number(__wtLinkState.nextThreadId);
     __wtLinkState.nextThreadId = Number(__wtLinkState.nextThreadId) + 1;
     const link: any = __wtLinkNew(this);
@@ -1958,7 +1981,7 @@ class Worker extends EventEmitter {
     const value: any = rest[0];
     const options: any = rest[1];
     const list: any[] = __wtResolveTransferList(options);
-    const data: any = __wtClone(value, list, list);
+    const data: any = __wtCloneTransfer(value, list);
     const link: any = this.__wtLinkRef;
     if (link === null || link === undefined || link.exited === true) return;
     __wtLinkSend(link, { t: "m", v: __wtEncode(data) });
@@ -2001,6 +2024,13 @@ class Worker extends EventEmitter {
   unref(): void {
     const link: any = this.__wtLinkRef;
     if (link !== null && link !== undefined && link.child !== null) link.child.unref();
+  }
+
+  // JavaScript ignores an extra argument, and test code passes one
+  // (`worker.on('exit', fn, 1)`); the inherited two-parameter `on` would make
+  // that a compile error at a statically typed call site.
+  on(type: any, listener: any, extra?: any): any {
+    return super.on(type, listener);
   }
 
   getHeapSnapshot(): any {
@@ -2103,6 +2133,9 @@ function __wtLinkNew(owner: any): any {
     exited: false,
     exitCode: undefined,
     terminated: false,
+    forwardStderr: true,
+    ports: {},
+    nextPortId: 1,
     isWorkerSide: false,
   };
 }
@@ -2141,12 +2174,31 @@ function __wtBytesOf(view: any): number[] {
   return out;
 }
 
-function __wtEncode(value: any): any {
+function __wtEncode(value: any, link: any = null): any {
   const seen: any[] = [];
-  return __wtEncodeValue(value, seen);
+  return __wtEncodeValue(value, seen, link);
 }
 
-function __wtEncodeValue(value: any, seen: any[]): any {
+// A port that is about to cross the link becomes a forwarding stand-in: it
+// stays entangled with its local sibling, and whatever the sibling posts goes
+// over the link under the id registered here (see `__wtPortPostMessage`).
+function __wtExportPort(port: any, link: any): number {
+  if (Number(port.__wtProxyId) !== 0 && port.__wtForward === link) return Number(port.__wtProxyId);
+  const id = Number(link.nextPortId);
+  link.nextPortId = id + 2;
+  link.ports[String(id)] = port;
+  port.__wtForward = link;
+  port.__wtProxyId = id;
+  // Messages the sibling posted before the transfer are already queued here.
+  const queued: any[] = port.__wtQueue;
+  port.__wtQueue = [];
+  for (const entry of queued) {
+    __wtLinkSend(link, { t: "pm", id: id, v: __wtEncode(entry.data, link) });
+  }
+  return id;
+}
+
+function __wtEncodeValue(value: any, seen: any[], link: any): any {
   if (value === undefined) return { $: "u" };
   if (value === null) return null;
   const kind = typeof value;
@@ -2167,14 +2219,19 @@ function __wtEncodeValue(value: any, seen: any[]): any {
   const id = Number(seen.length);
   seen.push(value);
 
-  if (value instanceof MessagePort) return { $: "p", i: id };
+  if (value instanceof MessagePort) {
+    if (link !== null && link !== undefined && value.__wtActive === true) {
+      return { $: "p", i: id, k: __wtExportPort(value, link) };
+    }
+    return { $: "p", i: id, k: 0 };
+  }
   if (value instanceof Date) return { $: "d", i: id, v: Number(value.getTime()) };
   if (value instanceof RegExp) return { $: "x", i: id, s: String(value.source), f: String(value.flags) };
   if (value instanceof Error) {
     const props: any = {};
     for (const key of Object.keys(value)) {
       if (key === "name" || key === "message" || key === "stack") continue;
-      props[key] = __wtEncodeValue(value[key], seen);
+      props[key] = __wtEncodeValue(value[key], seen, link);
     }
     return {
       $: "e",
@@ -2197,29 +2254,29 @@ function __wtEncodeValue(value: any, seen: any[]): any {
   if (Array.isArray(value)) {
     const items: any[] = [];
     const total = Number(value.length);
-    for (let i = 0; i < total; i++) items.push(__wtEncodeValue(value[i], seen));
+    for (let i = 0; i < total; i++) items.push(__wtEncodeValue(value[i], seen, link));
     return { $: "a", i: id, v: items };
   }
   if (value instanceof Map) {
     const entries: any[] = [];
     for (const entry of value) {
-      entries.push([__wtEncodeValue(entry[0], seen), __wtEncodeValue(entry[1], seen)]);
+      entries.push([__wtEncodeValue(entry[0], seen, link), __wtEncodeValue(entry[1], seen, link)]);
     }
     return { $: "m", i: id, v: entries };
   }
   if (value instanceof Set) {
     const items: any[] = [];
-    for (const item of value) items.push(__wtEncodeValue(item, seen));
+    for (const item of value) items.push(__wtEncodeValue(item, seen, link));
     return { $: "s", i: id, v: items };
   }
   const props: any = {};
-  for (const key of Object.keys(value)) props[key] = __wtEncodeValue(value[key], seen);
+  for (const key of Object.keys(value)) props[key] = __wtEncodeValue(value[key], seen, link);
   return { $: "o", i: id, v: props };
 }
 
-function __wtDecode(tree: any): any {
+function __wtDecode(tree: any, link: any = null): any {
   const refs: any[] = [];
-  return __wtDecodeValue(tree, refs);
+  return __wtDecodeValue(tree, refs, link);
 }
 
 function __wtMakeError(name: string, message: string): any {
@@ -2250,7 +2307,7 @@ function __wtTypedNew(name: string, length: number): any {
   return new Uint8Array(length);
 }
 
-function __wtDecodeValue(tree: any, refs: any[]): any {
+function __wtDecodeValue(tree: any, refs: any[], link: any): any {
   if (tree === null) return null;
   const kind = typeof tree;
   if (kind !== "object") return tree;
@@ -2267,11 +2324,20 @@ function __wtDecodeValue(tree: any, refs: any[]): any {
   if (tag === "r") return refs[Number(tree.i)];
   const id = Number(tree.i);
   if (tag === "p") {
-    // A port cannot cross a process boundary: it arrives closed.
     const port: any = __wtNewPort();
-    port.__wtDetached = true;
-    port.__wtActive = false;
     refs[id] = port;
+    const proxy = Number(tree.k === undefined ? 0 : tree.k);
+    if (proxy === 0 || link === null || link === undefined) {
+      // A port that was not transferred (or had nowhere to go) arrives closed.
+      port.__wtDetached = true;
+      port.__wtActive = false;
+      return port;
+    }
+    // The remote end of a transferred port: what it posts goes back over the
+    // link to the sibling the port was entangled with.
+    port.__wtLink = link;
+    port.__wtProxyId = proxy;
+    link.ports[String(proxy)] = port;
     return port;
   }
   if (tag === "d") {
@@ -2290,7 +2356,7 @@ function __wtDecodeValue(tree: any, refs: any[]): any {
     if (tree.stack !== null && tree.stack !== undefined) error.stack = tree.stack;
     const props: any = tree.p;
     if (props !== null && props !== undefined) {
-      for (const key of Object.keys(props)) error[key] = __wtDecodeValue(props[key], refs);
+      for (const key of Object.keys(props)) error[key] = __wtDecodeValue(props[key], refs, link);
     }
     return error;
   }
@@ -2318,28 +2384,48 @@ function __wtDecodeValue(tree: any, refs: any[]): any {
   if (tag === "a") {
     const out: any[] = [];
     refs[id] = out;
-    for (const item of tree.v) out.push(__wtDecodeValue(item, refs));
+    for (const item of tree.v) out.push(__wtDecodeValue(item, refs, link));
     return out;
   }
   if (tag === "m") {
     const out: any = new Map();
     refs[id] = out;
     for (const entry of tree.v) {
-      out.set(__wtDecodeValue(entry[0], refs), __wtDecodeValue(entry[1], refs));
+      out.set(__wtDecodeValue(entry[0], refs, link), __wtDecodeValue(entry[1], refs, link));
     }
     return out;
   }
   if (tag === "s") {
     const out: any = new Set();
     refs[id] = out;
-    for (const item of tree.v) out.add(__wtDecodeValue(item, refs));
+    for (const item of tree.v) out.add(__wtDecodeValue(item, refs, link));
     return out;
   }
   const out: any = {};
   refs[id] = out;
   const props: any = tree.v;
-  for (const key of Object.keys(props)) out[key] = __wtDecodeValue(props[key], refs);
+  for (const key of Object.keys(props)) out[key] = __wtDecodeValue(props[key], refs, link);
   return out;
+}
+
+// The structured clone with a transfer list, for a message that leaves through
+// the link: ports are moved exactly as `__wtPortPostMessage` moves them (the
+// clone then holds their local stand-ins, which the encoder exports), and
+// buffers are marked detached.
+function __wtCloneTransfer(value: any, list: any[]): any {
+  const prepared: any[] = __wtPrepareTransfer(null, list);
+  const moved: any[] = [];
+  const replacements: any[] = [];
+  for (const item of prepared[0]) {
+    moved.push(item);
+    replacements.push(__wtTransferPort(item));
+  }
+  for (const item of prepared[1]) {
+    __wtDetachedBuffers.set(item, true);
+    moved.push(item);
+    replacements.push(item);
+  }
+  return __wtClone(value, moved, replacements);
 }
 
 // ---- the link: framing over a loopback socket -------------------------------
@@ -2455,8 +2541,14 @@ function __wtLinkHandler(link: any): any {
 function __wtLinkSyncRef(link: any): void {
   if (link.isWorkerSide !== true || Number(link.id) === 0) return;
   const port: any = link.owner;
-  const want: boolean =
+  let want: boolean =
     link.connected !== true || Number(link.out.length) > 0 || (port !== null && port.hasRef() === true);
+  if (!want) {
+    for (const key of Object.keys(link.ports)) {
+      const proxy: any = link.ports[key];
+      if (proxy.__wtLink === link && proxy.hasRef() === true) want = true;
+    }
+  }
   if (want) {
     __ioRef(Number(link.id));
   } else {
@@ -2466,11 +2558,23 @@ function __wtLinkSyncRef(link: any): void {
 
 function __wtLinkFrame(link: any, frame: any): void {
   const type: string = String(frame.t);
+  if (type === "pm") {
+    const entry: any = link.ports[String(frame.id)];
+    if (entry === undefined || entry === null) return;
+    const data: any = __wtDecode(frame.v, link);
+    // A forwarding stand-in delivers to the sibling it is entangled with; a
+    // remote end delivers to itself.
+    const target: any = entry.__wtForward !== null && entry.__wtForward !== undefined ? entry.__wtSibling : entry;
+    if (target === null || target === undefined || target.__wtActive !== true) return;
+    target.__wtQueue.push({ data: data, ports: [] });
+    __wtArmDrain(target);
+    return;
+  }
   if (link.isWorkerSide === true) {
     if (type === "m") {
       const port: any = link.owner;
       if (port.__wtActive !== true) return;
-      port.__wtQueue.push({ data: __wtDecode(frame.v), ports: [] });
+      port.__wtQueue.push({ data: __wtDecode(frame.v, link), ports: [] });
       __wtArmDrain(port);
     }
     return;
@@ -2482,7 +2586,7 @@ function __wtLinkFrame(link: any, frame: any): void {
   }
   if (type === "m") {
     __wtLinkOnline(link);
-    worker.emit("message", __wtDecode(frame.v));
+    worker.emit("message", __wtDecode(frame.v, link));
     return;
   }
   if (type === "e") {
@@ -2514,6 +2618,13 @@ function __wtAccept(link: any): void {
   __ioUnref(id);
   __ioWant(id, __IO_READ);
   __wtLinkFlush(link);
+}
+
+function __wtStrings(list: any): string[] {
+  const out: string[] = [];
+  if (list === undefined || list === null) return out;
+  for (const item of list) out.push(String(item));
+  return out;
 }
 
 function __wtEnvCopy(source: any): any {
@@ -2548,9 +2659,10 @@ function __wtSpawnWorker(link: any, host: any, opts: any, code: any, script: str
     port: port,
     threadId: Number(link.owner.threadId),
     name: opts.name === undefined || opts.name === null ? "" : String(opts.name),
-    workerData: __wtEncode(data),
+    workerData: __wtEncode(data, link),
     environmentData: __wtEncode(envData),
     resourceLimits: link.owner.resourceLimits,
+    execArgv: __wtStrings(opts.execArgv === undefined || opts.execArgv === null ? process.execArgv : opts.execArgv),
   };
   let env: any = null;
   if (opts.env !== undefined && opts.env !== null && opts.env !== __wtShareEnv && typeof opts.env === "object") {
@@ -2602,11 +2714,23 @@ function __wtSpawnWorker(link: any, host: any, opts: any, code: any, script: str
     }
     env["ZUN_NODE_DEPTH"] = String(depth + 1);
   }
-  const stdio: any[] = ["ignore", opts.stdout === true ? "pipe" : "inherit", "pipe"];
+  // Both output streams are pipes, as a worker's are in Node: `worker.stdout`
+  // and `worker.stderr` are readable in the parent, and unless the worker was
+  // created with `stdout: true` / `stderr: true` what arrives on them is also
+  // written to the parent's own stream.
+  const stdio: any[] = ["ignore", "pipe", "pipe"];
   const child: any = host.spawn(file, argv, { env: env, stdio: stdio, windowsHide: true });
   __ioPatience.holders = Number(__ioPatience.holders) + 1;
   link.child = child;
-  if (opts.stdout === true) link.stdout = child.stdout;
+  link.stdout = child.stdout;
+  link.stderr = child.stderr;
+  link.forwardStderr = opts.stderr !== true;
+  const stdout: any = child.stdout;
+  if (stdout !== null && stdout !== undefined && opts.stdout !== true) {
+    stdout.on("data", (chunk: any): void => {
+      process.stdout.write(chunk);
+    });
+  }
   const stderr: any = child.stderr;
   if (stderr !== null && stderr !== undefined) {
     stderr.on("data", (chunk: any): void => {
@@ -2670,7 +2794,7 @@ function __wtOnStderr(link: any, text: string, final: boolean): void {
         break;
       }
     }
-    if (!fatal) process.stderr.write(line + "\n");
+    if (!fatal && link.forwardStderr === true) process.stderr.write(line + "\n");
   }
 }
 
@@ -2727,6 +2851,9 @@ function __wtBootWorker(module: any): void {
   const port: any = __wtNewPort();
   const link: any = __wtLinkNew(port);
   link.isWorkerSide = true;
+  // Port ids are odd when the parent allocates them and even here, so the two
+  // ends never hand out the same one.
+  link.nextPortId = 2;
   port.__wtLink = link;
   __wtLinkState.worker = link;
   __wtLinkState.nextThreadId = Number(boot.threadId) * 1000 + 1;
@@ -2735,7 +2862,7 @@ function __wtBootWorker(module: any): void {
   module.threadId = Number(boot.threadId);
   module.threadName = String(boot.name);
   module.parentPort = port;
-  module.workerData = __wtDecode(boot.workerData);
+  module.workerData = __wtDecode(boot.workerData, link);
   const limits: any = boot.resourceLimits === undefined || boot.resourceLimits === null ? {} : boot.resourceLimits;
   const filled: any = {
     maxYoungGenerationSizeMb: 48,
@@ -2745,6 +2872,7 @@ function __wtBootWorker(module: any): void {
   };
   for (const key of Object.keys(limits)) filled[key] = limits[key];
   module.resourceLimits = filled;
+  if (Array.isArray(boot.execArgv)) process.execArgv = boot.execArgv;
   const envData: any[] = __wtDecode(boot.environmentData);
   for (const entry of envData) __wtEnvironmentData.set(entry[0], entry[1]);
 
@@ -2767,6 +2895,19 @@ function __wtBootWorker(module: any): void {
   __processWorkerHook.target = {
     uncaught(error: any): void {
       __wtLinkSend(link, { t: "e", e: __wtEncode(error) });
+      // The worker exits right after this. A frame still queued (the link may
+      // not have finished connecting yet) would be lost, so the report also
+      // goes out the way the engine reports a top-level throw, which the
+      // parent recognizes on the worker's stderr.
+      if (link.connected !== true || Number(link.out.length) > 0) {
+        let text: string = "";
+        try {
+          text = error instanceof Error ? String(error.name) + ": " + String(error.message) : String(error);
+        } catch (ignored) {
+          text = "Error";
+        }
+        host.stderrWrite("zun: runtime error: unhandled exception: " + text + "\n");
+      }
     },
   };
   __ioTurnHooks.push({
