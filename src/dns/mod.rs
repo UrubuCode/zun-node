@@ -99,10 +99,44 @@ pub(super) fn ok_records<R: AsRef<[String]>>(records: &[R]) -> String {
             if field_index > 0 {
                 out.push(US);
             }
-            out.push_str(field);
+            push_escaped(&mut out, field);
         }
     }
     out
+}
+
+/// The escape character of the carrier.
+pub(super) const ESC: char = '\u{1c}';
+
+/// Append one field, escaping what the carrier cannot hold verbatim.
+///
+/// A TXT chunk is arbitrary bytes, so it *can* contain NUL (which the C-string
+/// return slot would cut the whole payload at) or one of the separators.
+/// Those three and the escape itself cross as `ESC` + one letter:
+/// NUL = `0`, RS = `r`, US = `u`, ESC = `e`. `__dnsUnescape` in `dns.ts` is the
+/// inverse.
+fn push_escaped(out: &mut String, field: &str) {
+    for ch in field.chars() {
+        match ch {
+            '\0' => {
+                out.push(ESC);
+                out.push('0');
+            }
+            RS => {
+                out.push(ESC);
+                out.push('r');
+            }
+            US => {
+                out.push(ESC);
+                out.push('u');
+            }
+            ESC => {
+                out.push(ESC);
+                out.push('e');
+            }
+            other => out.push(other),
+        }
+    }
 }
 
 /// Encode a successful single-record payload.
@@ -254,6 +288,19 @@ pub(crate) const DESCRIPTORS: &[Descriptor] = &[
         params: &[Str, Str, Str, I64, I64],
         ret: Str,
         invoke: resolve::query,
+    },
+    // The wire format alone, for the asynchronous transport in dns.ts.
+    Descriptor {
+        key: b"dnsEncodeQuery\0",
+        params: &[Str, Str],
+        ret: Str,
+        invoke: resolve::encode_request,
+    },
+    Descriptor {
+        key: b"dnsDecodeResponse\0",
+        params: &[Str, Str, I64],
+        ret: Str,
+        invoke: resolve::decode_reply,
     },
     // Error retrieval, on the ABI v1 error-slot convention (see lib.rs). These
     // carry the *description* of a transport failure, which Node does not
