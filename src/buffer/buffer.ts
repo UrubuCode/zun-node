@@ -684,8 +684,8 @@ function __bufBlobBytes(sources: any): string {
   for (const part of sources) {
     if (typeof part === "string") {
       out = out + __bufLatin1Of(Buffer.from(part, "utf8"));
-    } else if (part instanceof Blob) {
-      const blob: Blob = part;
+    } else if (part instanceof NodeBlob) {
+      const blob: NodeBlob = part;
       out = out + blob.__latin1;
     } else if (Buffer.isBuffer(part)) {
       out = out + __bufLatin1Of(part);
@@ -707,7 +707,10 @@ function __bufBytesOfLatin1(text: string): Buffer {
   return Buffer.from(text, "latin1");
 }
 
-class Blob {
+// Named `NodeBlob`/`NodeFile` because the engine prelude now declares global
+// `Blob`/`File` classes and a second top-level class of the same name is a
+// duplicate-declaration error; the module still exports them as `Blob`/`File`.
+class NodeBlob {
   // The whole blob, materialized. Node keeps a list of handles and reads them
   // lazily; there is no file-backed blob here, so one byte sequence is the same
   // thing.
@@ -749,7 +752,7 @@ class Blob {
     if (to < 0) to = n + to < 0 ? 0 : n + to;
     if (to > n) to = n;
     if (to < from) to = from;
-    const out = new Blob([], undefined);
+    const out = new NodeBlob([], undefined);
     out.__latin1 = this.__latin1.slice(from, to);
     out.__type = __bufNormalizeBlobType(contentType);
     return out;
@@ -772,7 +775,7 @@ class Blob {
 // `File` is a `Blob` with a name and a modification time. `extends Blob` is a
 // local class extending a local class, which the engine supports (zun#21 is
 // about `extends ns.Base`, a member expression, which this is not).
-class File extends Blob {
+class NodeFile extends NodeBlob {
   __name: string = "";
   __lastModified: number = 0;
 
@@ -888,6 +891,6 @@ const __node_buffer: any = {
     return __bufResolveObjectURL(id);
   },
 
-  Blob: Blob,
-  File: File,
+  Blob: NodeBlob,
+  File: NodeFile,
 };
