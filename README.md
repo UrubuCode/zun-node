@@ -1400,3 +1400,27 @@ target/debug/zun run /tmp/bundle.ts
 > Error`, zun#140; built-in methods through `any`, zun#17). Deviations, repros and the
 > blocker table: [`test/http/README.md`](test/http/README.md); per-test
 > breakdown: [`test/http/RESULTS.md`](test/http/RESULTS.md).
+
+<!-- node-tls:start -->
+### Node.js v25 `tls` compatibility
+
+`███████░░░░░░░░░░░░░░░░░` **30.6%** — 64 / 209 Node `test-tls-*` tests passing
+<!-- node-tls:end -->
+
+> `tls` is **Zun TypeScript over `net` and a rustls engine**: the session is a
+> rustls connection in the extension's handle table, driven as a memory BIO
+> ([`src/tls/mod.rs`](src/tls/mod.rs), pure-Rust `rustls-rustcrypto`
+> provider), and `TLSSocket`/`connect`/`createServer`/`createSecureContext`/
+> `checkServerIdentity` are [`src/tls/tls.ts`](src/tls/tls.ts). TLS 1.2/1.3
+> AEAD suites only; no session resumption, PFX or bundled CA roots. Details:
+> [`test/tls/README.md`](test/tls/README.md).
+
+<!-- node-https:start -->
+### Node.js v25 `https` compatibility
+
+`██████████░░░░░░░░░░░░░░` **38.7%** — 24 / 62 Node `test-https-*` tests passing
+<!-- node-https:end -->
+
+> `https` is `http` over `tls` ([`src/https/https.ts`](src/https/https.ts)),
+> with no natives of its own. Details: [`test/https/README.md`](test/https/README.md).
+
