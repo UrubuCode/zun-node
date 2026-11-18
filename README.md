@@ -1403,7 +1403,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-test_runner:start -->
 ### Node.js v25 `test_runner` compatibility
 
-`█████░░░░░░░░░░░░░░░░░░░` **21.4%** — 9 / 42 Node `test-runner-*` tests passing
+`████████████░░░░░░░░░░░░` **50.0%** — 21 / 42 Node `test-runner-*` tests passing
 <!-- node-test_runner:end -->
 
 > `node:test` is library code in [`src/test/`](src/test/) (it used to be a
