@@ -910,6 +910,11 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
   printf "s|\\.catch(common\\.mustCall|.catch(__commonMustCall|g\n"
   printf "s|\\.catch(common\\.mustNotCall|.catch(__commonMustNotCall|g\n"
   printf "s|\\.finally(common\\.mustCall|.finally(__commonMustCall|g\n"
+  # The rejection handler is a reaction too: `.then(common.mustNotCall(),
+  # common.mustCall((err) => ...))` -- the shape of every "this promise must
+  # reject" check -- has its second argument rewritten once the first one has
+  # been (a first argument list with no nested parentheses).
+  printf "s|\\(\\.then(__common[A-Za-z]*([^()]*), *\\)common\\.must|\\\\1__commonMust|g\n"
 
   # `path/posix` and `path/win32` are bound inside path.ts under those names.
   printf "s|require('\\(node:\\)\\{0,1\\}path/posix')|posix|g\n"
