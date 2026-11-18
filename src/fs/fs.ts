@@ -1503,10 +1503,36 @@ function __fsMkdtempSync(prefix: any, options?: any): any {
   return __fsName(created, settings.encoding);
 }
 
-function __fsRealpathSync(path: any, options?: any): any {
+function __fsRealpathNativeSync(path: any, options?: any): any {
   const resolved: string = __fsGetValidatedPath(path);
   const settings: any = __fsGetOptions(options, { encoding: "utf8" });
   return __fsName(__fsOne(__fsNative.fsRealpath(resolved)), settings.encoding);
+}
+
+// `fs.realpathSync` (not `.native`). Node's is a JavaScript walk that `lstat`s
+// each component, so a missing component fails with `syscall: 'lstat'` and the
+// path of the first prefix that does not exist. The answer itself is the
+// native one; only its failure is reshaped, by repeating that walk.
+function __fsRealpathSync(path: any, options?: any): any {
+  try {
+    return __fsRealpathNativeSync(path, options);
+  } catch (failure) {
+    if (!__fsIsOperationError(failure)) throw failure;
+    const full: string = __fsGetValidatedPath(path);
+    const sep: string = process.platform === "win32" ? "\\" : "/";
+    const parts: string[] = full.split(sep === "\\" ? /[\\/]/ : /\//);
+    // The first element is the root (`""` for `/x`, `C:` for `C:\x`): walking
+    // starts at it rather than lstat-ing it.
+    let prefix: string = parts[0] + sep;
+    const count: number = Number(parts.length);
+    for (let i = 1; i < count; i++) {
+      const part: string = parts[i];
+      if (part === "") continue;
+      prefix = prefix.endsWith(sep) ? prefix + part : prefix + sep + part;
+      __fsLstatSync(prefix);
+    }
+    throw failure;
+  }
 }
 
 function __fsReadlinkSync(path: any, options?: any): any {
@@ -2406,17 +2432,36 @@ const fs: any = {
 // Node (the libuv one, with no JavaScript symlink walk). This implementation
 // *is* the libuv one, so both names are the same call.
 fs.realpathSync.native = function (path: any, options?: any): any {
-  return __fsRealpathSync(path, options);
+  return __fsRealpathNativeSync(path, options);
 };
 fs.realpath.native = function (path: any, options?: any, callback?: any): void {
   const tail: any[] = __fsTail(options, callback);
   __fsRunAsync(tail[1], function (): any {
-    return __fsRealpathSync(path, tail[0]);
+    return __fsRealpathNativeSync(path, tail[0]);
   });
 };
 
 // The classes Node exports off the module, which tests use for `instanceof`.
-fs.Stats = Stats;
+// Node's `fs.Stats` is a function-constructor behind `deprecate()` (DEP0180):
+// callable with or without `new`, warning once. A class value cannot be
+// called without `new`, so the export is a function that constructs the class
+// and shares its prototype, which keeps `instanceof fs.Stats` true for every
+// `Stats` this module makes.
+let __fsStatsWarned: boolean = false;
+const __fsStatsExport: any = function (
+  dev?: any, mode?: any, nlink?: any, uid?: any, gid?: any, rdev?: any,
+  blksize?: any, ino?: any, size?: any, blocks?: any, atimeMs?: any,
+  mtimeMs?: any, ctimeMs?: any, birthtimeMs?: any,
+): any {
+  if (!__fsStatsWarned) {
+    __fsStatsWarned = true;
+    process.emitWarning("fs.Stats constructor is deprecated.", "DeprecationWarning", "DEP0180");
+  }
+  return new Stats(dev, mode, nlink, uid, gid, rdev, blksize, ino, size, blocks,
+    atimeMs, mtimeMs, ctimeMs, birthtimeMs);
+};
+__fsStatsExport.prototype = Stats.prototype;
+fs.Stats = __fsStatsExport;
 fs.Dirent = Dirent;
 fs.Dir = Dir;
 fs.StatsFs = StatsFs;
@@ -2707,7 +2752,7 @@ const __fsPromises: any = {
   },
   realpath(path: any, options?: any): any {
     return __fsPromise(function (): any {
-      return __fsRealpathSync(path, options);
+      return __fsRealpathNativeSync(path, options);
     });
   },
   rename(from: any, to: any): any {

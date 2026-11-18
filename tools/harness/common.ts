@@ -577,6 +577,19 @@ const common: any = {
 
   allowGlobals(): void {},
 
+  // `common.skipIf32Bits()`. Every target the engine builds for is 64-bit, so
+  // this never skips.
+  skipIf32Bits(): void {},
+
+  // `common.runWithInvalidFD(func)`. Node probes downward from `1 << 30` with
+  // `fs.fstatSync` for a descriptor that is not open; this harness cannot name
+  // `fs` (it is inlined into bundles that have no `--ext`), and the
+  // extension's descriptor table never reaches that range, so the first probe
+  // Node would make is the answer.
+  runWithInvalidFD(func: any): any {
+    return __evCall(func, [(1 << 30) - 1]);
+  },
+
   // `common.canCreateSymLink()`. On POSIX anyone may create a symlink; on
   // Windows it needs the SeCreateSymbolicLinkPrivilege (an elevated shell or
   // Developer Mode), which Node detects by shelling out to `whoami`. There is

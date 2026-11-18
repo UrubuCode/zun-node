@@ -831,12 +831,27 @@ class __FsSystemError extends NodeError {
 // Installing into `fs` and `fs.promises`
 // ---------------------------------------------------------------------------
 
-fs.ReadStream = __FsReadStream;
-fs.WriteStream = __FsWriteStream;
+// Node's two constructors are function-constructors, so `fs.ReadStream(path)`
+// without `new` works (`test-fs-read-stream-inherit.js`, `test-fs-write-stream.js`
+// and others call them that way). A class value cannot be called, so the
+// export is a function that constructs the class and shares its prototype:
+// `instanceof fs.ReadStream` and a patched `fs.ReadStream.prototype.open` both
+// still reach the class.
+const __fsReadStreamExport: any = function (path?: any, options?: any): any {
+  return new __FsReadStream(path, options);
+};
+__fsReadStreamExport.prototype = __FsReadStream.prototype;
+const __fsWriteStreamExport: any = function (path?: any, options?: any): any {
+  return new __FsWriteStream(path, options);
+};
+__fsWriteStreamExport.prototype = __FsWriteStream.prototype;
+
+fs.ReadStream = __fsReadStreamExport;
+fs.WriteStream = __fsWriteStreamExport;
 // `fs.FileReadStream`/`fs.FileWriteStream` are Node's node-0.x aliases, still
-// exported and still the same two classes.
-fs.FileReadStream = __FsReadStream;
-fs.FileWriteStream = __FsWriteStream;
+// exported and still the same two constructors.
+fs.FileReadStream = __fsReadStreamExport;
+fs.FileWriteStream = __fsWriteStreamExport;
 
 __fsStreamHooks.createReadStream = function (path: any, options?: any): any {
   return new __FsReadStream(path, options);
