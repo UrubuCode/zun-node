@@ -917,11 +917,12 @@ function __httpHeadersObject(raw: any, join: boolean, distinct: boolean): any {
     const value: string = String(raw[i + 1]);
     i = i + 2;
     if (distinct) {
-      if (out[name] === undefined) out[name] = [];
+      if (!Object.hasOwn(out, name)) out[name] = [];
       out[name].push(value);
       continue;
     }
-    const prior: any = out[name];
+    // Own keys only: `constructor`, `toString`, ... are ordinary header names.
+    const prior: any = Object.hasOwn(out, name) ? out[name] : undefined;
     if (prior === undefined) {
       out[name] = name === "set-cookie" ? [value] : value;
       continue;
@@ -972,6 +973,12 @@ function __httpDropsDuplicates(name: string): boolean {
 // keyed by the lowercased name, each entry `[originalName, value]`; the header
 // block is *serialised once*, by `__httpStoreHeader`, when the first byte has to
 // go out — which is when `headersSent` flips.
+
+// A header-table entry by lowercased name, own keys only: `constructor`,
+// `toString`, ... are ordinary header names, not `Object.prototype` members.
+function __httpHdr(table: any, key: string): any {
+  return Object.hasOwn(table, key) ? table[key] : undefined;
+}
 
 class OutgoingMessage extends Writable {
   _hdrs: any = null;
@@ -1093,7 +1100,7 @@ class OutgoingMessage extends Writable {
       __httpValidateHeaderValue(name, value);
     }
     const key: string = String(name).toLowerCase();
-    const entry: any = this._hdrs[key];
+    const entry: any = __httpHdr(this._hdrs, key);
     if (entry === undefined) {
       this._hdrs[key] = [String(name), Array.isArray(value) ? value.slice() : value];
       return this;
@@ -1111,7 +1118,7 @@ class OutgoingMessage extends Writable {
 
   getHeader(name: any): any {
     if (typeof name !== "string") throw new ERR_INVALID_ARG_TYPE("name", "string", name);
-    const entry: any = this._hdrs[name.toLowerCase()];
+    const entry: any = __httpHdr(this._hdrs, name.toLowerCase());
     if (entry === undefined) return undefined;
     return entry[1];
   }
@@ -1136,7 +1143,7 @@ class OutgoingMessage extends Writable {
 
   hasHeader(name: any): any {
     if (typeof name !== "string") throw new ERR_INVALID_ARG_TYPE("name", "string", name);
-    return this._hdrs[name.toLowerCase()] !== undefined;
+    return __httpHdr(this._hdrs, name.toLowerCase()) !== undefined;
   }
 
   removeHeader(name: any): any {
@@ -1334,7 +1341,7 @@ function __httpStoreHeader(self: any, firstLine: string): void {
   let date = false;
   const keys: string[] = Object.keys(self._hdrs);
   for (const key of keys) {
-    const entry: any = self._hdrs[key];
+    const entry: any = __httpHdr(self._hdrs, key);
     const name: string = String(entry[0]);
     const value: any = entry[1];
     if (Array.isArray(value)) {
