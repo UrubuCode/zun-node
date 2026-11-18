@@ -2230,15 +2230,23 @@ function __utilIsStreamLike(stream: any): boolean {
 
 // `lib/internal/util/colors.js`' `shouldColorize`, reduced to what is readable
 // here: the environment overrides plus the stream's own `hasColors`.
+// `lib/internal/util/colors.js`' `shouldColorize`: `FORCE_COLOR` decides on
+// its own (through `getColorDepth`'s reading of it, where only `0`/`false`
+// mean fewer than 16 colours), and otherwise the stream must be a TTY whose
+// own `getColorDepth` -- which consults `NO_COLOR`/`NODE_DISABLE_COLORS` --
+// answers more than 2.
 function __utilShouldColorize(stream: any): boolean {
-  if (__utilEnv("NODE_DISABLE_COLORS") !== undefined) return false;
-  if (__utilEnv("NO_COLOR") !== undefined) return false;
   const forced = __utilEnv("FORCE_COLOR");
-  if (forced !== undefined) return String(forced) !== "0";
-  if (stream !== null && stream !== undefined && __utilIsFn(stream["hasColors"])) {
-    return __utilCall(stream["hasColors"], []) === true;
+  if (forced !== undefined) {
+    const f: string = String(forced);
+    return f !== "0" && f !== "false";
   }
-  return false;
+  if (stream === null || stream === undefined) return false;
+  if (stream["isTTY"] !== true) return false;
+  if (__utilIsFn(stream["getColorDepth"])) {
+    return Number(stream.getColorDepth()) > 2;
+  }
+  return true;
 }
 
 function __utilEnv(name: string): any {
