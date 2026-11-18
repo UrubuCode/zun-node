@@ -22,10 +22,11 @@
 //! # Algorithms
 //!
 //! RSA (PKCS#1 v1.5 and PSS signatures; PKCS#1 v1.5, OAEP and raw
-//! encryption), ECDSA and ECDH over `prime256v1`, `secp384r1` and `secp256k1`,
-//! Ed25519 and X25519. RSA-PSS-restricted keys, DSA, X448/Ed448 and the
-//! post-quantum families are not implemented and answer
-//! `ERR_CRYPTO_UNSUPPORTED_OPERATION`-shaped errors.
+//! encryption), RSA-PSS-restricted keys, ECDSA and ECDH over `prime256v1`,
+//! `secp384r1`, `secp521r1` and `secp256k1`, Ed25519, Ed448, X25519, X448,
+//! DSA and X9.42 `dh` keys (the last three through `ff.rs`), plus the SPKAC
+//! parser behind `crypto.Certificate`. The post-quantum families are not
+//! implemented and answer `ERR_CRYPTO_UNSUPPORTED_OPERATION`-shaped errors.
 //!
 //! Failure is reported in band, with the `(code, message)` convention
 //! `mod.rs` documents.
@@ -2170,6 +2171,11 @@ native!(
     }
 );
 
+/// A small-order peer point: the shared secret is all zeroes.
+fn failed_derivation<T>() -> Res<T> {
+    err("ERR_OSSL_FAILED_DURING_DERIVATION", "error:1C80006D:Provider routines::failed during derivation")
+}
+
 native!(
     /// `cryptoDiffieHellmanKeys(pkcs8, spki)` → `+<secret>`, the stateless
     /// `crypto.diffieHellman({ privateKey, publicKey })`.
@@ -2181,12 +2187,16 @@ native!(
             (Private::Ec(c1, raw), Public::Ec(c2, point)) if c1 == c2 => on_curve!(*c1, ecdh(raw, point))?,
             (Private::X25519(raw), Public::X25519(peer)) => {
                 let secret = x25519_dalek::StaticSecret::from(*raw);
-                secret.diffie_hellman(&x25519_dalek::PublicKey::from(*peer)).to_bytes().to_vec()
+                let out = secret.diffie_hellman(&x25519_dalek::PublicKey::from(*peer)).to_bytes();
+                if out.iter().all(|b| *b == 0) {
+                    return failed_derivation();
+                }
+                out.to_vec()
             }
             (Private::X448(raw), Public::X448(peer)) => {
                 let out = ff::x448(raw, peer);
                 if out.iter().all(|b| *b == 0) {
-                    return err("ERR_CRYPTO_OPERATION_FAILED", "Failed to derive shared secret");
+                    return failed_derivation();
                 }
                 out.to_vec()
             }

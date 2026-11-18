@@ -103,11 +103,12 @@
 // ---------------------------------------------------------------------------
 //
 // The asymmetric half covers RSA, RSA-PSS, EC (P-256/P-384/P-521/secp256k1),
-// Ed25519 and X25519 keys, sign/verify, RSA encryption, ECDH and classic
-// Diffie-Hellman (see `src/crypto/asym.rs`). Absent: DSA, Ed448/X448, `dh`
-// KeyObjects, `X509Certificate`, `checkPrime` / `generatePrime`, the
-// post-quantum families (ML-DSA, ML-KEM, SLH-DSA) and the full WebCrypto
-// surface. The symmetric gaps are
+// Ed25519, Ed448, X25519, X448, DSA and `dh` keys, sign/verify, RSA
+// encryption, ECDH and classic Diffie-Hellman, `checkPrime` /
+// `generatePrime`, `Certificate` (SPKAC) and the `subtle` operations over
+// those (see `src/crypto/asym.rs` and `src/crypto/ff.rs`). Absent:
+// `X509Certificate`, the post-quantum families (ML-DSA, ML-KEM, SLH-DSA),
+// `subtle.generateKey` / `deriveKey` / `wrapKey` / `unwrapKey`. The symmetric gaps are
 // the CCM, OCB, XTS and key-wrap modes and the legacy block ciphers (DES,
 // Camellia, ARIA, SM4), which `getCiphers()` still lists because that function
 // describes algorithms rather than capability — see `src/crypto/ciphers.rs`.
@@ -434,6 +435,14 @@ function __cKeyToBase64(key: any, encoding: any, name: string): string {
     const text: string = key;
     const bytes: Buffer = Buffer.from(text, __cInputEncoding(encoding));
     return bytes.toString("base64");
+  }
+  if (key instanceof ArrayBuffer || key instanceof SharedArrayBuffer) {
+    const bytes: Buffer = Buffer.from(key);
+    return bytes.toString("base64");
+  }
+  if (key instanceof CryptoKey) {
+    const crypto_key: any = key;
+    return String(crypto_key.__cKeyObject.__cBase64);
   }
   if (__cIsByteView(key)) {
     const view: Buffer = __cAsBuffer(key);
@@ -972,15 +981,41 @@ class __CErrIncompatibleOptionPair extends NodeError {
   }
 }
 
+function __cNewKeyObject(type: string, base64: any): any {
+  return new KeyObject(type, { __cDer: base64 });
+}
+
 class KeyObject {
   type: any = "secret";
   // The bytes (secret) or the DER document (asymmetric), base64. Named with
   // the module prefix because it is not part of Node's surface.
   __cBase64: any = "";
   __cInfo: any = undefined;
-  constructor(type: any, base64: any) {
+  // Node's `new KeyObject(type, handle)`: the handle is an internal object,
+  // here `{ __cDer: base64 }` (see `__cNewKeyObject`).
+  constructor(type: any, handle: any) {
+    if (type !== "secret" && type !== "public" && type !== "private") {
+      throw new ERR_INVALID_ARG_VALUE("type", type, "is invalid");
+    }
+    if (handle === null || typeof handle !== "object") {
+      throw new ERR_INVALID_ARG_TYPE("handle", "object", handle);
+    }
     this.type = type;
-    this.__cBase64 = base64;
+    this.__cBase64 = handle.__cDer;
+  }
+
+  // `Symbol.toStringTag` is `'KeyObject'` in Node.
+  toString(): string {
+    return "[object KeyObject]";
+  }
+
+  // `KeyObject.from(cryptoKey)`.
+  static from(key: any): any {
+    if (!(key instanceof CryptoKey)) {
+      throw new ERR_INVALID_ARG_TYPE("key", "CryptoKey", key);
+    }
+    const held: any = key;
+    return held.__cKeyObject;
   }
 
   get symmetricKeySize(): any {
@@ -1255,7 +1290,7 @@ function __cCreatePrivateKey(key: any): any {
     throw new ERR_INVALID_ARG_TYPE("key", ["string", "ArrayBuffer", "Buffer", "TypedArray", "DataView"], held);
   }
   const parts: string[] = __cImportKey(key, true, "key");
-  return new KeyObject("private", parts[1]);
+  return __cNewKeyObject("private", parts[1]);
 }
 
 function __cCreatePublicKey(key: any): any {
@@ -1264,16 +1299,16 @@ function __cCreatePublicKey(key: any): any {
     if (String(held.type) !== "private") {
       throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(String(held.type), "private");
     }
-    return new KeyObject(
+    return __cNewKeyObject(
       "public",
       __cPayload(__cNative.cryptoKeyDerivePublic(String(held.__cBase64))),
     );
   }
   const parts: string[] = __cImportKey(key, false, "key");
   if (parts[0] === "private") {
-    return new KeyObject("public", __cPayload(__cNative.cryptoKeyDerivePublic(parts[1])));
+    return __cNewKeyObject("public", __cPayload(__cNative.cryptoKeyDerivePublic(parts[1])));
   }
-  return new KeyObject("public", parts[1]);
+  return __cNewKeyObject("public", parts[1]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1336,6 +1371,11 @@ function __cGenerateKeyPair(type: any, options: any): any {
   } else if (kind === "ec") {
     __cValidateString(opts.namedCurve, "options.namedCurve");
     curve = opts.namedCurve;
+    if (curve === "Oakley-EC2N-3" || curve === "Oakley-EC2N-4") {
+      const error: any = new Error("error:1C800082:Provider routines::missing OID");
+      error.code = "ERR_OSSL_MISSING_OID";
+      throw error;
+    }
   } else if (kind === "ed25519" || kind === "x25519" || kind === "ed448" || kind === "x448") {
     // No parameters.
   } else if (kind === "dsa") {
@@ -1403,8 +1443,8 @@ function __cGenerateKeyPair(type: any, options: any): any {
   }
   const payload: string = __cPayload(__cNative.cryptoKeyGenerate(kind, bits, exponent, curve));
   const parts: string[] = payload.split(__C_US);
-  const privateKey: any = new KeyObject("private", parts[0]);
-  const publicKey: any = new KeyObject("public", parts[1]);
+  const privateKey: any = __cNewKeyObject("private", parts[0]);
+  const publicKey: any = __cNewKeyObject("public", parts[1]);
   const pub: any = publicEncoding === undefined
     ? publicKey
     : __cExportKey(publicKey, publicEncoding, "options.publicKeyEncoding");
@@ -1600,7 +1640,7 @@ function __cRsaCrypt(op: string, key: any, buffer: any, defaultPadding: number):
   ) {
     if (key.padding !== undefined) {
       const n: number = __cValidateInt32(key.padding, "key.padding");
-      padding = "" + n;
+      padding = n;
     }
     if (key.oaepHash !== undefined) {
       __cValidateString(key.oaepHash, "key.oaepHash");
@@ -1608,7 +1648,13 @@ function __cRsaCrypt(op: string, key: any, buffer: any, defaultPadding: number):
     }
     if (key.oaepLabel !== undefined) label = __cKeyBytes(key.oaepLabel, key.encoding, "key.oaepLabel");
   }
-  const data: string = __cToBase64(buffer, undefined, "buffer");
+  let data: string = "";
+  if (buffer instanceof ArrayBuffer) {
+    const bytes: Buffer = Buffer.from(buffer);
+    data = bytes.toString("base64");
+  } else {
+    data = __cToBase64(buffer, undefined, "buffer");
+  }
   const opts: string = String(padding) + __C_US + hash + __C_US + label;
   const payload: string = __cPayload(
     __cNative.cryptoRsaCrypt(op, parts[0], parts[1], data, opts),
@@ -1789,13 +1835,13 @@ class __CryptoDhBase {
   }
   getPublicKey(encoding?: any): any {
     if (this.__cPublic === "") {
-      throw new Error("No public key - did you forget to generate one?");
+      throw new NodeError("ERR_CRYPTO_INVALID_STATE", "No public key - did you forget to generate one?");
     }
     return __cFromBase64(this.__cPublic, encoding);
   }
   getPrivateKey(encoding?: any): any {
     if (this.__cPrivate === "") {
-      throw new Error("No private key - did you forget to generate one?");
+      throw new NodeError("ERR_CRYPTO_INVALID_STATE", "No private key - did you forget to generate one?");
     }
     return __cFromBase64(this.__cPrivate, encoding);
   }
@@ -1961,6 +2007,15 @@ function __cGeneratePrime(size: number, options: any): any {
   const view: Uint8Array = new Uint8Array(out);
   for (let i = 0; i < Number(bytes.length); i++) view[i] = bytes[i];
   return out;
+}
+
+// Is `error` what a crypto job (rather than argument validation) raised?
+// Node runs those jobs asynchronously and hands their failure to the
+// callback; their codes are OpenSSL's.
+function __cIsJobError(error: any): boolean {
+  if (error === null || typeof error !== "object") return false;
+  const code: any = error.code;
+  return typeof code === "string" && code.indexOf("ERR_OSSL") === 0;
 }
 
 // `crypto.diffieHellman({ privateKey, publicKey })`.
@@ -2357,7 +2412,7 @@ function __cGenerateKeyBytes(type: any, options: any): number {
 }
 
 function __cGenerateKey(bytes: number): any {
-  return new KeyObject("secret", __cPayload(__cNative.cryptoRandomBytes(bytes)));
+  return __cNewKeyObject("secret", __cPayload(__cNative.cryptoRandomBytes(bytes)));
 }
 
 // ---------------------------------------------------------------------------
@@ -2435,7 +2490,7 @@ function __cSpkacVerify(spkac: any, encoding?: any): boolean {
 function __cSpkacPublicKey(spkac: any, encoding?: any): any {
   const der: string = __cPayload(__cNative.cryptoSpkac("publicKey", __cSpkacInput(spkac, encoding)));
   if (der === "") return "";
-  const key: any = new KeyObject("public", der);
+  const key: any = __cNewKeyObject("public", der);
   return key.export({ format: "pem", type: "spki" });
 }
 
@@ -2996,7 +3051,7 @@ const __node_crypto: any = {
   },
 
   createSecretKey(key: any, encoding?: any): any {
-    return new KeyObject("secret", __cKeyToBase64(key, encoding, "key"));
+    return __cNewKeyObject("secret", __cKeyToBase64(key, encoding, "key"));
   },
 
   generateKeySync(type: any, options: any): any {
@@ -3082,11 +3137,11 @@ const __node_crypto: any = {
   // consumer in the corpus immediately writes `Buffer.from(result)`, which
   // accepts either.
   hkdfSync(digest: any, key: any, salt: any, info: any, keylen: any): any {
-    return Buffer.from(__cHkdf(digest, key, salt, info, keylen), "base64");
+    return __cToArrayBuffer(Buffer.from(__cHkdf(digest, key, salt, info, keylen), "base64"));
   },
   hkdf(digest: any, key: any, salt: any, info: any, keylen: any, callback?: any): void {
     __cDeferred(callback, function (): any {
-      return Buffer.from(__cHkdf(digest, key, salt, info, keylen), "base64");
+      return __cToArrayBuffer(Buffer.from(__cHkdf(digest, key, salt, info, keylen), "base64"));
     });
   },
 
@@ -3228,8 +3283,17 @@ const __node_crypto: any = {
       opts = undefined;
     }
     __cValidateFunction(cb, "callback");
-    const pair: any = __cGenerateKeyPair(type, opts);
     const fn: any = cb;
+    let pair: any = undefined;
+    try {
+      pair = __cGenerateKeyPair(type, opts);
+    } catch (error) {
+      // A failure of the generation job itself (an OpenSSL-coded error)
+      // reaches the callback; argument validation still throws.
+      if (!__cIsJobError(error)) throw error;
+      __cTick(fn, error);
+      return;
+    }
     __processNextTick(function (): void {
       __cInvoke(fn, [null, pair.publicKey, pair.privateKey]);
     });
@@ -3256,13 +3320,20 @@ const __node_crypto: any = {
     return new DiffieHellmanGroup(name);
   },
   diffieHellman(options: any, callback?: any): any {
-    const secret: any = __cStatelessDh(options);
     if (callback !== undefined) {
       __cValidateFunction(callback, "callback");
+      let secret: any = undefined;
+      try {
+        secret = __cStatelessDh(options);
+      } catch (error) {
+        if (!__cIsJobError(error)) throw error;
+        __cTick(callback, error);
+        return undefined;
+      }
       __cTick(callback, null, secret);
       return undefined;
     }
-    return secret;
+    return __cStatelessDh(options);
   },
   createECDH(curve: any): any {
     return new ECDH(curve);
