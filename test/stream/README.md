@@ -170,7 +170,29 @@ Remaining gap: a plain `Uint8Array` answers `true` to `Buffer.isBuffer` and
 `instanceof Buffer` ([zun#113](https://github.com/UrubuCode/zun/issues/113)),
 so object-mode tests that assert a view is *not* a Buffer still fail.
 
-Remeasured 2026-11-18 after the `stream.once` fix: still **118 / 204**, the same
+Remeasured 2026-11-18 (stream-next): **129 / 204** (was 118). Four changes:
+the corpus now runs with `--ext` (`zun-ts+ext`), because the tests that touch
+`fs`, `net`, `os` or `dns` inline those modules and died on an undefined
+native; the bundler declares the fields a test's derived class uses (row 1
+below); the bundler types a local bound to `new Readable(...)` & co. as `any`,
+so the corpus' expandos and method overrides compile (an override is still not
+seen by the class's own `this.m()` calls,
+[zun#143](https://github.com/UrubuCode/zun/issues/143)); and `finished()`
+follows Node's `isServerResponse`/`isRequest` arms (a response waits for
+`'close'`; a `ClientRequest` listens for `complete`/`abort`/`req.finish`, and
+anything with a boolean `aborted` for `'aborted'`). A bare `Function()` is
+rewritten to an empty function expression in stream bundles: through an `any`
+receiver it was answering `EvalError: code generation from strings
+disallowed`. `test-stream-pipeline.js` now compiles and stops at
+[zun#139](https://github.com/UrubuCode/zun/issues/139) (interpreter panic).
+
+The http note that `res.end()` to a plain `Writable` skips its final empty
+write is **not** a stream bug — `Writable.write('')` reaches `_write` with a
+zero-length chunk exactly as in Node. It is `__httpOutFinal` in
+`src/http/http.ts`, which sends nothing when the tail is empty where Node's
+`end()` does `this._send('', 'latin1', finish)`.
+
+Earlier: remeasured 2026-11-18 after the `stream.once` fix: still **118 / 204**, the same
 set of passing files (the fix changed no file's outcome). First measured that
 day with the rebuilt engine: **118 / 204** (was
 111 / 204). The bundler also renames shim declarations that collide with new
@@ -209,7 +231,7 @@ The per-test breakdown, with the first line of each failing run, is in
 
 | # | Blocker | Where |
 |---|---|---|
-| 1 | **A derived class cannot introduce an instance field** — `class MyReadable extends Readable { constructor() { super(); this.n = 0; } }` is `no field or setter 'n' on this type`. Field inference from `this.x = …` in a constructor is gated on the class having **no base** (`crates/zun_syntax/src/oxc.rs`, `if base.is_none()`). **New engine bug.** | 10 files subclass a stream and assign to a new field in the constructor |
+| 1 | **A derived class cannot introduce an instance field** — `class MyReadable extends Readable { constructor() { super(); this.n = 0; } }` is `no field or setter 'n' on this type`. Field inference from `this.x = …` in a constructor is gated on the class having **no base** (`crates/zun_syntax/src/oxc.rs`, `if base.is_none()`). [zun#77](https://github.com/UrubuCode/zun/issues/77). **Worked around in the bundler** (`DECLARE_DERIVED_FIELDS`: every `this.x` a test's derived class uses and the library's classes do not declare becomes a bare field declaration). | 10 files subclass a stream and assign to a new field in the constructor |
 | 2 | **A constructor's declared parameters are all required** — `class MyWritable extends Writable { constructor(options) {…} }` + `new MyWritable()` is `expects 1 to 1 argument(s), found 0`, although [zun#61](https://github.com/UrubuCode/zun/issues/61) records that a *function* accepts too few. **New engine bug.** | 11 files give the subclass constructor a declared parameter and then construct with none |
 | 3 | **`setTimeout`/`setImmediate` reject a dynamic callback** ([zun#29](https://github.com/UrubuCode/zun/issues/29)) | every test that defers with a closure |
 | 4 | **A `number` cannot be a Buffer size or fill byte, and `Buffer.from` rejects an `any`** ([zun#58](https://github.com/UrubuCode/zun/issues/58)) | the tests that build their own payloads |

@@ -1194,11 +1194,32 @@ function __sIsClosed(stream: any): any {
   return null;
 }
 
+// utils.js `isServerResponse`: an `http.ServerResponse` has no stream state
+// but always emits 'close', which `willEmitClose` has to know.
+function __sIsServerResponse(stream: any): boolean {
+  return (
+    typeof stream._sent100 === "boolean" &&
+    typeof stream._removedConnection === "boolean" &&
+    typeof stream._removedContLen === "boolean" &&
+    typeof stream._removedTE === "boolean" &&
+    typeof stream._closed === "boolean"
+  );
+}
+
+// end-of-stream.js `isRequest`: an `http.ClientRequest`.
+function __sIsRequest(stream: any): boolean {
+  return stream.setHeader !== undefined && stream.setHeader !== null && typeof stream.abort === "function";
+}
+
 function __sWillEmitClose(stream: any): any {
   if (!__sIsNodeStream(stream)) return null;
   const w: any = stream._writableState;
   const r: any = stream._readableState;
   const state: any = w !== undefined && w !== null ? w : r;
+  // Node's `ServerResponse` carries no stream state, so its `!state &&
+  // isServerResponse(stream)` arm fires; this library's `OutgoingMessage` is
+  // built over a writable state, so the response test comes first instead.
+  if (__sIsServerResponse(stream)) return true;
   if (!__sIsObj(state)) return false;
   return state.autoDestroy === true && state.emitClose === true && state.closed === false;
 }
@@ -3972,10 +3993,24 @@ function __sEos(stream: any, options: any, callback: any): any {
   };
   h.onclosed = onclosed;
 
-  if (writable && !__sIsObj(wState)) {
+  const onrequest: any = function (): void {
+    stream.req.on("finish", h.onfinish);
+  };
+
+  if (__sIsRequest(stream)) {
+    stream.on("complete", onfinish);
+    if (!h.willEmitClose) stream.on("abort", onclose);
+    if (stream.req) __sInvoke(onrequest, []);
+    else stream.on("request", onrequest);
+  } else if (writable && !__sIsObj(wState)) {
     // A legacy stream with no writable state.
     stream.on("end", onlegacyfinish);
     stream.on("close", onlegacyfinish);
+  }
+
+  // Not all streams will emit 'close' after 'aborted'.
+  if (!h.willEmitClose && typeof stream.aborted === "boolean") {
+    stream.on("aborted", onclose);
   }
 
   stream.on("end", onend);
@@ -4013,6 +4048,11 @@ function __sEos(stream: any, options: any, callback: any): any {
     stream.removeListener("end", h.onend);
     stream.removeListener("error", h.onerror);
     stream.removeListener("close", h.onclose);
+    stream.removeListener("aborted", h.onclose);
+    stream.removeListener("complete", h.onfinish);
+    stream.removeListener("abort", h.onclose);
+    stream.removeListener("request", onrequest);
+    if (stream.req) stream.req.removeListener("finish", h.onfinish);
   };
 
   if (opts.signal !== undefined && opts.signal !== null && !h.closed) {

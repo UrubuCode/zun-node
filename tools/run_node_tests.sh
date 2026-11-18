@@ -95,7 +95,7 @@ case "$MODULE" in
   # is the one file about the module surface itself, and `test-readable-` covers
   # `Readable.from` and the async iterator -- that last one shares no prefix
   # with the others at all.
-  stream)      KIND="zun-ts"; PATTERNS="test-stream- test-stream2- test-stream3- test-streams- test-readable-";
+  stream)      KIND="zun-ts+ext"; PATTERNS="test-stream- test-stream2- test-stream3- test-streams- test-readable-";
                PATTERN="test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-";;
   fs)     KIND="zun-ts+ext"; PATTERNS="test-fs-";                         PATTERN="test-fs-";;
   # `timers`' corpus is `test-timers*`, which includes `test-timers.js` itself.
