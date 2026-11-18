@@ -129,7 +129,14 @@ const __C_US: string = "\u001f";
 // Re-type an `any` known to hold a byte view (zun#38). Not style: without it
 // `value.length` reads `undefined` and `value.toString("base64")` throws.
 function __cAsBuffer(value: any): Buffer {
-  return value;
+  if (Buffer.isBuffer(value)) return value;
+  // Any other ArrayBufferView (Uint16Array, Float64Array, DataView, ...) is
+  // read as the bytes it spans, as Node does.
+  const backing: any = value.buffer;
+  const offset: number = value.byteOffset;
+  const length: number = value.byteLength;
+  const bytes: Buffer = Buffer.from(backing, offset, length);
+  return bytes;
 }
 
 // ---------------------------------------------------------------------------
@@ -357,7 +364,7 @@ function __cValidateEncoding(data: string, encoding: any): void {
 // `byteLength` is unreadable through `any` (zun#38).
 function __cIsByteView(value: any): boolean {
   if (value === null || value === undefined) return false;
-  return Buffer.isBuffer(value);
+  return Buffer.isBuffer(value) || ArrayBuffer.isView(value);
 }
 
 // A data argument as base64, accepting what Node's `update()` accepts: a
@@ -381,6 +388,16 @@ function __cToBase64(data: any, encoding: any, name: string): string {
     ["string", "Buffer", "TypedArray", "DataView"],
     data,
   );
+}
+
+// A KDF input (`password`, `salt`, `info`): Node's `getArrayBufferOrView`,
+// which also takes a bare `ArrayBuffer` / `SharedArrayBuffer`.
+function __cKdfToBase64(data: any, name: string): string {
+  if (data instanceof ArrayBuffer || data instanceof SharedArrayBuffer) {
+    const bytes: Buffer = Buffer.from(data);
+    return bytes.toString("base64");
+  }
+  return __cToBase64(data, undefined, name);
 }
 
 // The encoding a string data argument is decoded with: Node's default is
@@ -1050,8 +1067,8 @@ function __cPbkdf2(
   keylen: any,
   digest: any,
 ): string {
-  const passwordBase64: string = __cToBase64(password, undefined, "password");
-  const saltBase64: string = __cToBase64(salt, undefined, "salt");
+  const passwordBase64: string = __cKdfToBase64(password, "password");
+  const saltBase64: string = __cKdfToBase64(salt, "salt");
   __cValidateInteger(iterations, "iterations", 1, 2147483647);
   __cValidateInteger(keylen, "keylen", 0, 2147483647);
   if (digest === undefined || digest === null) {
@@ -1094,8 +1111,8 @@ function __cScryptParams(options: any): any {
 }
 
 function __cScrypt(password: any, salt: any, keylen: any, options: any): string {
-  const passwordBase64: string = __cToBase64(password, undefined, "password");
-  const saltBase64: string = __cToBase64(salt, undefined, "salt");
+  const passwordBase64: string = __cKdfToBase64(password, "password");
+  const saltBase64: string = __cKdfToBase64(salt, "salt");
   __cValidateInteger(keylen, "keylen", 0, 2147483647);
   const params: any = __cScryptParams(options);
   // `128 * r * (N + p)` is the memory scrypt needs, and exceeding `maxmem` is
@@ -1119,9 +1136,14 @@ function __cScrypt(password: any, salt: any, keylen: any, options: any): string 
 function __cHkdf(digest: any, key: any, salt: any, info: any, keylen: any): string {
   __cValidateString(digest, "digest");
   const keyBase64: string = __cKeyToBase64(key, undefined, "ikm");
-  const saltBase64: string = __cToBase64(salt, undefined, "salt");
-  const infoBase64: string = __cToBase64(info, undefined, "info");
+  const saltBase64: string = __cKdfToBase64(salt, "salt");
+  const infoBase64: string = __cKdfToBase64(info, "info");
   __cValidateInteger(keylen, "length", 0, 4294967295);
+  // OpenSSL caps the HKDF info at 1024 bytes; Node checks it before the digest.
+  const infoBytes: number = Buffer.from(infoBase64, "base64").length;
+  if (infoBytes > 1024) {
+    throw new ERR_OUT_OF_RANGE("info", "must not contain more than 1024 bytes", infoBytes);
+  }
   return __cPayload(
     __cNative.cryptoHkdf(String(digest), keyBase64, saltBase64, infoBase64, Number(keylen)),
   );
@@ -1130,21 +1152,15 @@ function __cHkdf(digest: any, key: any, salt: any, info: any, keylen: any): stri
 // The callback form of a KDF: Node computes on the threadpool and calls back
 // on a later tick. There is no threadpool here, so the answer is computed now
 // and *delivered* on the next tick, which preserves the ordering the corpus
-// asserts (see the header).
+// asserts (see the header). Every error `run` can raise is an argument
+// check -- an out-of-range length, an unknown digest, scrypt parameters over
+// `maxmem` -- and Node raises those synchronously from the call itself rather
+// than through the callback, so they propagate here too.
 function __cDeferred(callback: any, run: any): void {
+  // Node checks the callback last, after the arguments it guards.
+  const answer: any = run();
   __cValidateFunction(callback, "callback");
-  let failure: any = null;
-  let answer: any = undefined;
-  try {
-    answer = run();
-  } catch (error) {
-    failure = error;
-  }
-  if (failure !== null) {
-    __cTick(callback, failure);
-  } else {
-    __cTick(callback, null, answer);
-  }
+  __cTick(callback, null, answer);
 }
 
 // ---------------------------------------------------------------------------
@@ -1252,7 +1268,13 @@ function __cByteHex(byte: number): string {
 }
 
 function __cRandomUUID(options?: any): string {
-  if (options !== undefined && options !== null) __cValidateObject(options, "options");
+  if (options !== undefined) {
+    __cValidateObject(options, "options");
+    const cache: any = options.disableEntropyCache;
+    if (cache !== undefined && typeof cache !== "boolean") {
+      throw new ERR_INVALID_ARG_TYPE("options.disableEntropyCache", "boolean", cache);
+    }
+  }
   const payload: string = __cPayload(__cNative.cryptoRandomBytes(16));
   const bytes: Buffer = Buffer.from(payload, "base64");
   const octets: number[] = [];
@@ -1567,6 +1589,12 @@ const __node_crypto: any = {
     digest: any,
     callback: any,
   ): void {
+    // `pbkdf2(password, salt, iterations, keylen, callback)`: Node shifts a
+    // function in the digest position into the callback, leaving no digest.
+    if (__evIsFn(digest)) {
+      callback = digest;
+      digest = undefined;
+    }
     __cDeferred(callback, function (): any {
       return Buffer.from(__cPbkdf2(password, salt, iterations, keylen, digest), "base64");
     });
