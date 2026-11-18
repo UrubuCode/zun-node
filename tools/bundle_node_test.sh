@@ -1369,17 +1369,19 @@ $obj
   echo "__zunHarnessFinish();"
 } > "$OUT"
 
-# The engine prelude now declares global `setTimeout`, `setInterval`,
-# `clearTimeout`, `clearInterval` and `queueMicrotask`, and a user top-level
-# function of the same name is a "duplicate function declaration"
-# (zun#111). Until a user declaration may shadow a prelude name again, every
-# identifier use of those five in the bundle -- src/timers/timers.ts's own
-# declarations, the harness and the test body alike -- is renamed to a
-# `__node`-prefixed twin, so all of it still binds to the Node timers loop.
-# A member read (`globalThis.setTimeout`), a quoted occurrence and an object
-# key (`setTimeout: ...`) are left as written, which keeps the exported
-# `timers.setTimeout` property name intact.
-perl -pi -e 's/(?<![\x27"`A-Za-z0-9_\$.])(setTimeout|setInterval|clearTimeout|clearInterval|queueMicrotask)\b(?!\s*:(?!:))/__node_$1/g' "$OUT"
+# A module-scope declaration cannot shadow an engine global: `function
+# setTimeout` (timers.ts) and `class Blob` (buffer.ts) are 'duplicate function
+# declaration' / 'duplicate class' (https://github.com/UrubuCode/zun/issues/111,
+# #108). Every such name the bundle declares is renamed to `__zunShadow_<name>`
+# throughout the bundle, which keeps the shims' semantics: the test's bare
+# `setTimeout(...)` still reaches the inlined implementation. Member reads
+# (`globalThis.setTimeout`), explicit object keys (`{ setTimeout: ... }`) and
+# quoted text are left alone.
+for shadow in setTimeout setInterval clearTimeout clearInterval queueMicrotask Blob File; do
+  if grep -qE "^(export )?(async )?(function|class) $shadow\b" "$OUT"; then
+    perl -pi -e "s/(?<![.\\w\$'\"\`])$shadow\\b(?!\\s*:(?!:))/__zunShadow_$shadow/g" "$OUT"
+  fi
+done
 
 # Any `require` left over means the test needs a module the bundler does not
 # know; fail loudly rather than letting the engine report a mystery.

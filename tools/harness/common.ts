@@ -350,6 +350,28 @@ function __zunHarnessExit(): void {
   }
 }
 
+function __commonArrayBufferViews(buf: any): any[] {
+  const src: Uint8Array = buf;
+  const ab: ArrayBuffer = src.buffer;
+  const off = Number(src.byteOffset);
+  const len = Number(src.byteLength);
+  const out: any[] = [];
+  out.push(new Int8Array(ab, off, len));
+  out.push(new Uint8Array(ab, off, len));
+  out.push(new Uint8ClampedArray(ab, off, len));
+  if (len % 2 === 0) out.push(new Int16Array(ab, off, len / 2));
+  if (len % 2 === 0) out.push(new Uint16Array(ab, off, len / 2));
+  if (len % 4 === 0) out.push(new Int32Array(ab, off, len / 4));
+  if (len % 4 === 0) out.push(new Uint32Array(ab, off, len / 4));
+  if (len % 4 === 0) out.push(new Float32Array(ab, off, len / 4));
+  if (len % 8 === 0) out.push(new Float64Array(ab, off, len / 8));
+  if (len % 8 === 0) out.push(new BigInt64Array(ab, off, len / 8));
+  if (len % 8 === 0) out.push(new BigUint64Array(ab, off, len / 8));
+  out.push(new DataView(ab, off, len));
+  return out;
+}
+
+
 const common: any = {
   isWindows: process.platform === "win32",
   isLinux: process.platform === "linux",
@@ -428,6 +450,22 @@ const common: any = {
 
   mustNotMutateObjectDeep(value: any): any {
     return value;
+  },
+
+  // `test/common/index.js`: every ArrayBufferView kind over the same bytes,
+  // skipping the kinds whose element size does not divide the length. Spelled
+  // out per constructor because a typed-array constructor held in an `any` is
+  // opaque (zun#38).
+  getArrayBufferViews(buf: any): any[] {
+    return __commonArrayBufferViews(buf);
+  },
+
+  // `getArrayBufferViews` plus the backing ArrayBuffer itself.
+  getBufferSources(buf: any): any[] {
+    const out: any[] = __commonArrayBufferViews(buf);
+    const src: Uint8Array = buf;
+    out.push(new Uint8Array(src).buffer);
+    return out;
   },
 
   // `common.mustSucceed(fn?, exact?)` — a callback that asserts `err` is falsy
