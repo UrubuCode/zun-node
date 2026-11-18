@@ -1,0 +1,4 @@
+test/fixtures/url-searchparams.js
+test/fixtures/url-setter-tests-additional.js
+test/fixtures/url-tests-additional.js
+test/fixtures/wpt/url/resources/urltestdata.json

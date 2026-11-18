@@ -243,6 +243,7 @@ cluster __node_cluster -
 internal/test/binding __node_internal_test_binding -
 internal/errors __node_internal_errors -
 [.][.]/common/internet __node_harness_internet -
+[.][.]/common/wpt __node_harness_wpt -
 perf_hooks __node_perf_hooks PerformanceEntry,PerformanceMark,PerformanceMeasure,PerformanceObserver,PerformanceObserverEntryList,PerformanceResourceTiming,Performance,createHistogram,monitorEventLoopDelay
 module __node_module Module,builtinModules,isBuiltin,createRequire,SourceMap,stripTypeScriptTypes,findPackageJSON
 "
@@ -545,6 +546,7 @@ internal/errors tools/harness/binding.ts
 module src/fs/fs.ts
 module src/module/module.ts
 [.][.]/common/internet tools/harness/internet.ts
+[.][.]/common/wpt tools/harness/wpt.ts
 "
 
 # The harness, which stands on everything above it.
@@ -1400,6 +1402,32 @@ done
 # `name(<params without parens>)[: type] {` line; a call that passes a callback
 # has a nested `(` and is left renamed.
 perl -pi -e 's/^(\s+(?:static\s+|async\s+)*)__zunShadow_(\w+)(\s*\([^()]*\)\s*(?::[^{;=]*)?\{\s*)$/$1$2$3/' "$OUT"
+
+# `require(fixtures.path('a', 'b.js'))` loads a data fixture (the WHATWG URL
+# tests' tables). There is no CommonJS loader, so a fixture that exists next to
+# the test (`<test dir>/../fixtures/...`, where the runner downloads the ones a
+# module lists in `test/<module>/NODE_FIXTURES.txt`) is inlined in place: a
+# `.json` file as a parenthesized expression, a `.js` file as an IIFE that
+# hands its `module.exports` back. A missing fixture is left alone and fails
+# the unresolved-require check below.
+FIXTURE_DIR="$(cd "$(dirname "$SRC")/.." 2>/dev/null && pwd)/fixtures"
+if grep -q "fixtures\.path" "$OUT"; then
+  FIXTURE_DIR="$FIXTURE_DIR" perl -0pi -e '
+    sub __fixture {
+      my ($args) = @_;
+      my @parts = ($args =~ /'"'"'([^'"'"']*)'"'"'/g);
+      my $file = join("/", $ENV{FIXTURE_DIR}, @parts);
+      return undef unless -f $file;
+      open(my $fh, "<", $file) or return undef;
+      local $/; my $text = <$fh>; close($fh);
+      $text =~ s/^\x{FEFF}//;
+      $text =~ s/^\s*["'"'"']use strict["'"'"'];?//m;
+      return "(" . $text . ")" if $file =~ /\.json$/;
+      return "((function (): any { const module: any = { exports: {} }; const exports: any = module.exports;\n" . $text . "\nreturn module.exports; })())";
+    }
+    s{require\(\s*fixtures\.path\(\s*((?:'"'"'[^'"'"']*'"'"'\s*,?\s*)+)\)\s*\)}{ my $r = __fixture($1); defined $r ? $r : $& }ge;
+  ' "$OUT"
+fi
 
 # Any `require` left over means the test needs a module the bundler does not
 # know; fail loudly rather than letting the engine report a mystery.

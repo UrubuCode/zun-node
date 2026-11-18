@@ -46,11 +46,10 @@
 //   * No regular expressions anywhere: a RegExp loses its methods through an
 //     `any` (https://github.com/UrubuCode/zun/issues/7), and a URL parser is
 //     the last place that should own a backtracking engine.
-//   * `Symbol.toStringTag`, `Symbol.iterator` and reading a class method as a
-//     value (https://github.com/UrubuCode/zun/issues/19) are not available, so
-//     `URLSearchParams` exposes `entries()`/`keys()`/`values()` as objects with
-//     a `next()` **and** an `items` array (which is what `for (... of ...)`
-//     reaches for here), rather than as real ECMAScript iterators.
+//   * A class may declare only one computed `Symbol` member
+//     (https://github.com/UrubuCode/zun/issues/124), so `Symbol.toStringTag`,
+//     `util.inspect.custom` and the `Symbol.iterator` aliasing are installed on
+//     the prototypes with `Object.defineProperty` after the classes.
 //   * **IDNA is punycode, not full UTS#46.** There is no ICU in this runtime;
 //     `common.hasIntl` is `false` and Node's own IDNA-dependent tests are
 //     written `{ skip: !hasIntl }`. `__wuDomainToASCII` therefore does the
@@ -1930,6 +1929,15 @@ class NodeURLSearchParams {
       out.push([this.list[i][0] as string, this.list[i][1] as string]);
     }
     return __wuMakeIterator(out, "URLSearchParams Iterator");
+  }
+
+  // Declared in the class body so the checker sees the type as iterable. The
+  // prototype slot is then replaced by `entries` itself (below), which is
+  // what a dynamic read sees; a typed read of `params[Symbol.iterator]` still
+  // resolves to this method.
+  [Symbol.iterator](): any {
+    const self: any = this;
+    return self.entries();
   }
 
   get size(): number {
