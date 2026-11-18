@@ -35,10 +35,23 @@ for (const __harnessUvEntry of util.getSystemErrorMap()) {
   __harnessUvConstants["UV_" + String(__harnessUvEntry[1][0])] = __harnessUvEntry[0];
 }
 
+// `internalBinding('buffer')` — opened (and only opened) by
+// `test-process-binding.js`. Each member is the realm `Buffer`'s own
+// operation under the name Node's C++ binding gives it, never a stand-in.
+const __harnessBufferBinding: any = {
+  byteLengthUtf8(s: any): number {
+    return Buffer.byteLength(String(s), "utf8");
+  },
+  compare(a: any, b: any): number {
+    return Buffer.compare(a, b);
+  },
+};
+
 const __node_internal_test_binding: any = {
   internalBinding(name: any): any {
     if (name === "cares_wrap") return __dnsCares;
     if (name === "uv") return __harnessUvConstants;
+    if (name === "buffer") return __harnessBufferBinding;
     throw new Error("internalBinding: " + String(name) + " is not served by the harness");
   },
   primordials: {},
