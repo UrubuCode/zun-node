@@ -828,6 +828,9 @@ class MessagePort extends EventTarget {
 
   __wtQueue: any[] = [];
   __wtSibling: any = null;
+  // The cross-process link this port speaks over, or null for an in-process
+  // port. Only a worker's `parentPort` has one (see "The Worker process").
+  __wtLink: any = null;
   __wtStarted: boolean = false;
   // `__wtDetached` is set the instant `close()` or a transfer happens, because
   // Node's detachment is synchronous and instant even though the handle lives
@@ -859,6 +862,7 @@ class MessagePort extends EventTarget {
     this.__wtReceivingPorts = null;
     this.__wtQueue = [];
     this.__wtSibling = null;
+    this.__wtLink = null;
     this.__wtStarted = false;
     this.__wtDetached = false;
     this.__wtActive = true;
@@ -1259,6 +1263,14 @@ function __wtPortPostMessage(port: any, value: any, options: any): void {
     // The clone failed after the list was moved, which is the order Node has
     // too: the transfer is not undone, and the message is simply not sent.
     throw error;
+  }
+
+  // A worker's `parentPort` has no in-process sibling: its other end is the
+  // `Worker` object in the parent process, reached over the link.
+  if (port.__wtLink !== null && port.__wtLink !== undefined) {
+    if (port.__wtDetached === true) return;
+    __wtLinkSend(port.__wtLink, { t: "m", v: __wtEncode(data) });
+    return;
   }
 
   if (losesTarget) {
@@ -1820,6 +1832,9 @@ class Worker extends EventEmitter {
   stderr: any = null;
   resourceLimits: any = {};
   performance: any = null;
+  // The parent's end of the link to the worker process (see "The Worker
+  // process" below).
+  __wtLinkRef: any = null;
 
   constructor(filename: any, options: any = undefined) {
     super();
@@ -1891,27 +1906,82 @@ class Worker extends EventEmitter {
     // The `workerData` clone is the last validation, and it is a real one: a
     // value a worker could not receive is a `DataCloneError` at construction.
     const transferList: any[] = opts.transferList === undefined || opts.transferList === null ? [] : opts.transferList;
-    __wtClone(opts.workerData, transferList, transferList);
+    const data: any = __wtClone(opts.workerData, transferList, transferList);
 
-    throw new ERR_METHOD_NOT_IMPLEMENTED(
-      "worker_threads.Worker constructor (" +
-        String(resolved) +
-        "): this runtime has one thread and one realm, so a Worker has to be a " +
-        "child process, which needs the poll-based loop under src/io/",
-    );
+    const host: any = __wtHost.impl;
+    if (host === null || host === undefined || !__ioAvailable()) {
+      throw new ERR_METHOD_NOT_IMPLEMENTED(
+        "worker_threads.Worker constructor (" +
+          String(resolved) +
+          "): a Worker is a child Zun process, which needs the native extension " +
+          "(the I/O loop and child_process)",
+      );
+    }
+
+    let code: any = null;
+    let script: string = String(resolved);
+    if (opts.eval === true || opts.eval === "classic") {
+      code = String(filename);
+    } else if (script.slice(0, 5) === "data:") {
+      code = __wtDataUrlSource(script);
+    }
+
+    this.threadId = Number(__wtLinkState.nextThreadId);
+    __wtLinkState.nextThreadId = Number(__wtLinkState.nextThreadId) + 1;
+    const link: any = __wtLinkNew(this);
+    this.__wtLinkRef = link;
+    __wtSpawnWorker(link, host, opts, code, script, data);
+    if (link.child !== null) {
+      this.stdout = link.stdout;
+      this.stderr = link.stderr;
+    }
   }
 
-  postMessage(): void {
-    throw new ERR_METHOD_NOT_IMPLEMENTED("worker.postMessage");
+  // A rest parameter rather than `(value = MISSING, options = undefined)`:
+  // on this class the checker demands both arguments of the defaulted form
+  // at a statically typed call site.
+  postMessage(...rest: any[]): void {
+    if (Number(rest.length) === 0) {
+      throw new NodeTypeError("ERR_MISSING_ARGS", "Not enough arguments to Worker.postMessage");
+    }
+    const value: any = rest[0];
+    const options: any = rest[1];
+    const list: any[] = __wtResolveTransferList(options);
+    const data: any = __wtClone(value, list, list);
+    const link: any = this.__wtLinkRef;
+    if (link === null || link === undefined || link.exited === true) return;
+    __wtLinkSend(link, { t: "m", v: __wtEncode(data) });
   }
 
-  terminate(): any {
-    throw new ERR_METHOD_NOT_IMPLEMENTED("worker.terminate");
+  terminate(callback?: any): any {
+    const link: any = this.__wtLinkRef;
+    const self: any = this;
+    if (link === null || link === undefined || link.exited === true) {
+      const done: any = link === null || link === undefined ? undefined : link.exitCode;
+      return Promise.resolve(done);
+    }
+    const promise: any = new Promise((resolve: any): void => {
+      self.once("exit", (exitCode: any): void => {
+        resolve(exitCode);
+      });
+    });
+    if (link.terminated !== true) {
+      link.terminated = true;
+      const child: any = link.child;
+      if (child !== null && child !== undefined) child.kill();
+    }
+    return promise;
   }
 
-  ref(): void {}
+  ref(): void {
+    const link: any = this.__wtLinkRef;
+    if (link !== null && link !== undefined && link.child !== null) link.child.ref();
+  }
 
-  unref(): void {}
+  unref(): void {
+    const link: any = this.__wtLinkRef;
+    if (link !== null && link !== undefined && link.child !== null) link.child.unref();
+  }
 
   getHeapSnapshot(): any {
     throw new ERR_METHOD_NOT_IMPLEMENTED("worker.getHeapSnapshot");
@@ -1934,6 +2004,746 @@ function __wtIsExplicitlyRelative(filename: string): boolean {
   if (filename.slice(0, 2) === "./" || filename.slice(0, 2) === ".\\") return true;
   if (filename.slice(0, 3) === "../" || filename.slice(0, 3) === "..\\") return true;
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// The Worker process
+// ---------------------------------------------------------------------------
+//
+// A `Worker` is a **child Zun process**: the VM has one thread and one realm,
+// so a second realm has to be a second process. What crosses between the two:
+//
+//   * **The boot record** travels in the child's environment, as the JSON
+//     value of `ZUN_NODE_WORKER`: the loopback port to connect back to, the
+//     `threadId`, the `name`, the encoded `workerData`, the `environmentData`
+//     entries and the `resourceLimits`. The environment rather than the link,
+//     because the worker script runs synchronously at startup and the link is
+//     asynchronous: `workerData` has to be readable on the script's first line.
+//   * **The script** is run through `process.execPath`, which under the test
+//     runner is the `zun-node-run` launcher (src/bin/zun-node-run.rs): it
+//     bundles the file -- or the `eval: true` text, as `-e` -- with this library
+//     inlined and runs it with `zun run --ext`. So the worker gets the same
+//     `worker_threads` module the parent has, and the boot below turns it into
+//     the worker's: `isMainThread === false`, `parentPort`, `workerData`,
+//     `threadId`.
+//   * **The link** is a loopback TCP connection on the shared I/O loop
+//     (src/io/io.ts): the parent listens on `127.0.0.1:0` before spawning, the
+//     child connects at boot. A stdio pipe would have been the obvious
+//     carrier, but a child Zun process has no non-blocking stdin -- only the
+//     parent side of a pipe is on the loop -- while a socket is on the loop at
+//     both ends, and leaves the worker's stdout and stderr to be its stdout and
+//     stderr.
+//   * **The framing** is one JSON document per line. A message is the
+//     structured clone (the same `__wtClone` an in-process port uses, so every
+//     `DataCloneError` is raised in the sender exactly as before) encoded by
+//     `__wtEncode` into a JSON tree that keeps what JSON alone would lose:
+//     `undefined`, `NaN`/`Infinity`/`-0`, `BigInt`, `Date`, `RegExp`, `Map`,
+//     `Set`, errors, byte buffers, typed arrays, and shared or cyclic
+//     references.
+//
+// Frames: `{t:"o"}` (the worker is running: `'online'`), `{t:"m",v}` (a
+// message, either direction), `{t:"e",e}` (an uncaught exception in the worker,
+// reported before it exits). A top-level throw in the worker never reaches any
+// JavaScript -- the engine prints it and exits 1 -- so the parent also reads
+// the worker's stderr and recognizes the engine's `unhandled exception:` line;
+// every other stderr line is forwarded to the parent's stderr.
+//
+// Documented differences from a thread: a worker has its own heap, so a
+// `SharedArrayBuffer` and `Atomics` are not shared; a `MessagePort` cannot be
+// transferred to another process (it is delivered as a closed port); and
+// `SHARE_ENV` gives a copy of `process.env`, not a shared one.
+
+// `__wtHost.impl` is installed by src/worker_threads/host.ts, which the bundler
+// appends only for a bundle that runs with the native extension (it needs
+// `child_process.spawn`). Without it a `Worker` cannot start, and says so.
+const __wtHost: any = { impl: null };
+
+function __wtInstallHost(impl: any): void {
+  __wtHost.impl = impl;
+}
+
+const __wtLinkState: any = { nextThreadId: 1, worker: null };
+
+function __wtLinkNew(owner: any): any {
+  return {
+    owner: owner,
+    id: 0,
+    server: 0,
+    connected: false,
+    closed: false,
+    inbuf: "",
+    out: [],
+    child: null,
+    stdout: null,
+    stderr: null,
+    errtext: "",
+    online: false,
+    error: null,
+    hasError: false,
+    exited: false,
+    exitCode: undefined,
+    terminated: false,
+    isWorkerSide: false,
+  };
+}
+
+// `data:text/javascript,<source>` (and the `;base64` form) is Node's other way
+// to give a worker its source inline.
+function __wtDataUrlSource(url: string): string {
+  const comma = Number(url.indexOf(","));
+  if (comma === -1) return "";
+  const meta: string = url.slice(5, comma);
+  const body: string = url.slice(comma + 1);
+  if (meta.endsWith(";base64")) return String(Buffer.from(body, "base64").toString("utf8"));
+  return decodeURIComponent(body);
+}
+
+// ---- encoding --------------------------------------------------------------
+
+function __wtTypedName(value: any): string {
+  if (value instanceof Int8Array) return "Int8Array";
+  if (value instanceof Uint8ClampedArray) return "Uint8ClampedArray";
+  if (value instanceof Uint8Array) return "Uint8Array";
+  if (value instanceof Int16Array) return "Int16Array";
+  if (value instanceof Uint16Array) return "Uint16Array";
+  if (value instanceof Int32Array) return "Int32Array";
+  if (value instanceof Uint32Array) return "Uint32Array";
+  if (value instanceof Float32Array) return "Float32Array";
+  if (value instanceof Float64Array) return "Float64Array";
+  return "";
+}
+
+function __wtBytesOf(view: any): number[] {
+  const bytes: any = new Uint8Array(view.buffer, Number(view.byteOffset), Number(view.byteLength));
+  const out: number[] = [];
+  const span = Number(bytes.length);
+  for (let i = 0; i < span; i++) out.push(Number(bytes[i]));
+  return out;
+}
+
+function __wtEncode(value: any): any {
+  const seen: any[] = [];
+  return __wtEncodeValue(value, seen);
+}
+
+function __wtEncodeValue(value: any, seen: any[]): any {
+  if (value === undefined) return { $: "u" };
+  if (value === null) return null;
+  const kind = typeof value;
+  if (kind === "string" || kind === "boolean") return value;
+  if (kind === "number") {
+    const n: number = value;
+    if (n !== n) return { $: "f", v: "NaN" };
+    if (n === Infinity) return { $: "f", v: "Infinity" };
+    if (n === -Infinity) return { $: "f", v: "-Infinity" };
+    if (n === 0 && 1 / n < 0) return { $: "f", v: "-0" };
+    return n;
+  }
+  if (kind === "bigint") return { $: "n", v: String(value) };
+  if (kind !== "object") return { $: "u" };
+
+  const index = Number(seen.indexOf(value));
+  if (index !== -1) return { $: "r", i: index };
+  const id = Number(seen.length);
+  seen.push(value);
+
+  if (value instanceof MessagePort) return { $: "p", i: id };
+  if (value instanceof Date) return { $: "d", i: id, v: Number(value.getTime()) };
+  if (value instanceof RegExp) return { $: "x", i: id, s: String(value.source), f: String(value.flags) };
+  if (value instanceof Error) {
+    const props: any = {};
+    for (const key of Object.keys(value)) {
+      if (key === "name" || key === "message" || key === "stack") continue;
+      props[key] = __wtEncodeValue(value[key], seen);
+    }
+    return {
+      $: "e",
+      i: id,
+      name: String(value.name),
+      message: String(value.message),
+      stack: typeof value.stack === "string" ? value.stack : null,
+      p: props,
+    };
+  }
+  if (Buffer.isBuffer(value)) return { $: "b", i: id, v: __wtBytesOf(value) };
+  if (value instanceof ArrayBuffer) {
+    const all: any = new Uint8Array(value);
+    return { $: "ab", i: id, v: __wtBytesOf(all) };
+  }
+  if (ArrayBuffer.isView(value) === true) {
+    const name: string = __wtTypedName(value);
+    if (name !== "") return { $: "t", i: id, k: name, v: __wtBytesOf(value) };
+  }
+  if (Array.isArray(value)) {
+    const items: any[] = [];
+    const total = Number(value.length);
+    for (let i = 0; i < total; i++) items.push(__wtEncodeValue(value[i], seen));
+    return { $: "a", i: id, v: items };
+  }
+  if (value instanceof Map) {
+    const entries: any[] = [];
+    for (const entry of value) {
+      entries.push([__wtEncodeValue(entry[0], seen), __wtEncodeValue(entry[1], seen)]);
+    }
+    return { $: "m", i: id, v: entries };
+  }
+  if (value instanceof Set) {
+    const items: any[] = [];
+    for (const item of value) items.push(__wtEncodeValue(item, seen));
+    return { $: "s", i: id, v: items };
+  }
+  const props: any = {};
+  for (const key of Object.keys(value)) props[key] = __wtEncodeValue(value[key], seen);
+  return { $: "o", i: id, v: props };
+}
+
+function __wtDecode(tree: any): any {
+  const refs: any[] = [];
+  return __wtDecodeValue(tree, refs);
+}
+
+function __wtMakeError(name: string, message: string): any {
+  if (name === "TypeError") return new TypeError(message);
+  if (name === "RangeError") return new RangeError(message);
+  if (name === "SyntaxError") return new SyntaxError(message);
+  if (name === "ReferenceError") return new ReferenceError(message);
+  const error: any = new Error(message);
+  if (name !== "Error") error.name = name;
+  return error;
+}
+
+function __wtBytesInto(view: any, bytes: any[]): void {
+  const target: any = new Uint8Array(view.buffer, Number(view.byteOffset), Number(view.byteLength));
+  const span = Number(bytes.length);
+  for (let i = 0; i < span; i++) target[i] = Number(bytes[i]);
+}
+
+function __wtTypedNew(name: string, length: number): any {
+  if (name === "Int8Array") return new Int8Array(length);
+  if (name === "Uint8ClampedArray") return new Uint8ClampedArray(length);
+  if (name === "Int16Array") return new Int16Array(length / 2);
+  if (name === "Uint16Array") return new Uint16Array(length / 2);
+  if (name === "Int32Array") return new Int32Array(length / 4);
+  if (name === "Uint32Array") return new Uint32Array(length / 4);
+  if (name === "Float32Array") return new Float32Array(length / 4);
+  if (name === "Float64Array") return new Float64Array(length / 8);
+  return new Uint8Array(length);
+}
+
+function __wtDecodeValue(tree: any, refs: any[]): any {
+  if (tree === null) return null;
+  const kind = typeof tree;
+  if (kind !== "object") return tree;
+  const tag: string = String(tree.$);
+  if (tag === "u") return undefined;
+  if (tag === "f") {
+    const text: string = String(tree.v);
+    if (text === "NaN") return NaN;
+    if (text === "Infinity") return Infinity;
+    if (text === "-Infinity") return -Infinity;
+    return -0;
+  }
+  if (tag === "n") return BigInt(String(tree.v));
+  if (tag === "r") return refs[Number(tree.i)];
+  const id = Number(tree.i);
+  if (tag === "p") {
+    // A port cannot cross a process boundary: it arrives closed.
+    const port: any = __wtNewPort();
+    port.__wtDetached = true;
+    port.__wtActive = false;
+    refs[id] = port;
+    return port;
+  }
+  if (tag === "d") {
+    const date: any = new Date(Number(tree.v));
+    refs[id] = date;
+    return date;
+  }
+  if (tag === "x") {
+    const re: any = new RegExp(String(tree.s), String(tree.f));
+    refs[id] = re;
+    return re;
+  }
+  if (tag === "e") {
+    const error: any = __wtMakeError(String(tree.name), String(tree.message));
+    refs[id] = error;
+    if (tree.stack !== null && tree.stack !== undefined) error.stack = tree.stack;
+    const props: any = tree.p;
+    if (props !== null && props !== undefined) {
+      for (const key of Object.keys(props)) error[key] = __wtDecodeValue(props[key], refs);
+    }
+    return error;
+  }
+  if (tag === "b") {
+    const buffer: any = Buffer.from(tree.v);
+    refs[id] = buffer;
+    return buffer;
+  }
+  if (tag === "ab") {
+    const bytes: any[] = tree.v;
+    const ab: any = new ArrayBuffer(Number(bytes.length));
+    const view: any = new Uint8Array(ab);
+    const span = Number(bytes.length);
+    for (let i = 0; i < span; i++) view[i] = Number(bytes[i]);
+    refs[id] = ab;
+    return ab;
+  }
+  if (tag === "t") {
+    const bytes: any[] = tree.v;
+    const typed: any = __wtTypedNew(String(tree.k), Number(bytes.length));
+    __wtBytesInto(typed, bytes);
+    refs[id] = typed;
+    return typed;
+  }
+  if (tag === "a") {
+    const out: any[] = [];
+    refs[id] = out;
+    for (const item of tree.v) out.push(__wtDecodeValue(item, refs));
+    return out;
+  }
+  if (tag === "m") {
+    const out: any = new Map();
+    refs[id] = out;
+    for (const entry of tree.v) {
+      out.set(__wtDecodeValue(entry[0], refs), __wtDecodeValue(entry[1], refs));
+    }
+    return out;
+  }
+  if (tag === "s") {
+    const out: any = new Set();
+    refs[id] = out;
+    for (const item of tree.v) out.add(__wtDecodeValue(item, refs));
+    return out;
+  }
+  const out: any = {};
+  refs[id] = out;
+  const props: any = tree.v;
+  for (const key of Object.keys(props)) out[key] = __wtDecodeValue(props[key], refs);
+  return out;
+}
+
+// ---- the link: framing over a loopback socket -------------------------------
+
+function __wtLinkSend(link: any, frame: any): void {
+  if (link.closed === true) return;
+  const text: string = JSON.stringify(frame) + "\n";
+  link.out.push(Buffer.from(text, "utf8"));
+  __wtLinkFlush(link);
+}
+
+// Write as much of the outgoing queue as the socket takes now; the rest waits
+// for a writable event.
+function __wtLinkFlush(link: any): void {
+  const ops: any = __ioOps();
+  if (ops === null || ops === undefined) return;
+  if (link.connected !== true || link.closed === true) return;
+  const id = Number(link.id);
+  while (Number(link.out.length) > 0) {
+    const head: any = link.out[0];
+    const reply: string = String(ops.write(id, head.toString("base64")));
+    if (reply === "-") {
+      link.out = [];
+      break;
+    }
+    if (reply === "+A") break;
+    const taken = Number(reply.slice(1));
+    if (taken >= Number(head.length)) {
+      link.out.shift();
+    } else {
+      link.out[0] = head.subarray(taken);
+      break;
+    }
+  }
+  if (Number(link.out.length) > 0) {
+    __ioWant(id, __IO_WRITE);
+  } else {
+    __ioUnwant(id, __IO_WRITE);
+  }
+  __wtLinkSyncRef(link);
+}
+
+// Read everything pending and dispatch each complete line. Answers false once
+// the peer has closed.
+function __wtLinkRead(link: any): boolean {
+  const ops: any = __ioOps();
+  if (ops === null || ops === undefined || link.closed === true || Number(link.id) === 0) return false;
+  let open = true;
+  while (true) {
+    const reply: string = String(ops.read(Number(link.id), 0));
+    if (reply === "-" || reply === "+E") {
+      open = false;
+      break;
+    }
+    if (reply === "+A") break;
+    link.inbuf = String(link.inbuf) + String(Buffer.from(reply.slice(2), "base64").toString("utf8"));
+  }
+  while (true) {
+    const text: string = String(link.inbuf);
+    const nl = Number(text.indexOf("\n"));
+    if (nl === -1) break;
+    link.inbuf = text.slice(nl + 1);
+    const line: string = text.slice(0, nl);
+    if (line === "") continue;
+    __wtLinkFrame(link, JSON.parse(line));
+  }
+  if (!open) __wtLinkClose(link);
+  return open;
+}
+
+function __wtLinkClose(link: any): void {
+  if (link.closed === true) return;
+  link.closed = true;
+  const id = Number(link.id);
+  if (id !== 0) __ioUnregister(id);
+  link.id = 0;
+  if (link.isWorkerSide === true) {
+    // The parent is gone (or terminated us): the worker's port closes.
+    const port: any = link.owner;
+    if (port !== null && port !== undefined) __wtClosePort(port);
+  }
+}
+
+function __wtLinkHandler(link: any): any {
+  return {
+    readable(): void {
+      __wtLinkRead(link);
+    },
+    writable(): void {
+      if (link.connected !== true) {
+        const ops: any = __ioOps();
+        const status: string = String(ops.connectError(Number(link.id)));
+        if (status === "-") {
+          __wtLinkClose(link);
+          return;
+        }
+        link.connected = true;
+        __ioWant(Number(link.id), __IO_READ);
+      }
+      __wtLinkFlush(link);
+    },
+    failed(): void {
+      __wtLinkRead(link);
+      __wtLinkClose(link);
+    },
+  };
+}
+
+// A worker keeps itself alive while its `parentPort` is ref'd (a `'message'`
+// listener or `ref()`), while it still has frames to write, and until it has
+// connected; the parent's link never holds the parent open -- the child
+// process handle does.
+function __wtLinkSyncRef(link: any): void {
+  if (link.isWorkerSide !== true || Number(link.id) === 0) return;
+  const port: any = link.owner;
+  const want: boolean =
+    link.connected !== true || Number(link.out.length) > 0 || (port !== null && port.hasRef() === true);
+  if (want) {
+    __ioRef(Number(link.id));
+  } else {
+    __ioUnref(Number(link.id));
+  }
+}
+
+function __wtLinkFrame(link: any, frame: any): void {
+  const type: string = String(frame.t);
+  if (link.isWorkerSide === true) {
+    if (type === "m") {
+      const port: any = link.owner;
+      if (port.__wtActive !== true) return;
+      port.__wtQueue.push({ data: __wtDecode(frame.v), ports: [] });
+      __wtArmDrain(port);
+    }
+    return;
+  }
+  const worker: any = link.owner;
+  if (type === "o") {
+    __wtLinkOnline(link);
+    return;
+  }
+  if (type === "m") {
+    __wtLinkOnline(link);
+    worker.emit("message", __wtDecode(frame.v));
+    return;
+  }
+  if (type === "e") {
+    link.error = __wtDecode(frame.e);
+    link.hasError = true;
+  }
+}
+
+function __wtLinkOnline(link: any): void {
+  if (link.online === true) return;
+  link.online = true;
+  link.owner.emit("online");
+}
+
+// ---- the parent side -------------------------------------------------------
+
+function __wtAccept(link: any): void {
+  const ops: any = __ioOps();
+  if (Number(link.server) === 0 || Number(link.id) !== 0) return;
+  const reply: string = String(ops.accept(Number(link.server)));
+  if (reply === "-" || reply === "+A") return;
+  const fields: string[] = __ioFields(reply);
+  const id = Number(fields[0]);
+  __ioUnregister(Number(link.server));
+  link.server = 0;
+  link.id = id;
+  link.connected = true;
+  __ioRegister(id, __wtLinkHandler(link));
+  __ioUnref(id);
+  __ioWant(id, __IO_READ);
+  __wtLinkFlush(link);
+}
+
+function __wtEnvCopy(source: any): any {
+  const env: any = {};
+  for (const key of Object.keys(source)) {
+    const value: any = source[key];
+    if (value !== undefined) env[key] = String(value);
+  }
+  return env;
+}
+
+function __wtSpawnWorker(link: any, host: any, opts: any, code: any, script: string, data: any): void {
+  const ops: any = __ioOps();
+  const listen: string = String(ops.listen("127.0.0.1", 0, 8, 0));
+  if (listen === "-") throw __ioLastError();
+  const fields: string[] = __ioFields(listen);
+  link.server = Number(fields[0]);
+  const port = Number(fields[2]);
+  __ioRegister(Number(link.server), {
+    readable(): void {
+      __wtAccept(link);
+    },
+    writable(): void {},
+    failed(): void {},
+  });
+  __ioUnref(Number(link.server));
+  __ioWant(Number(link.server), __IO_READ);
+
+  const envData: any[] = [];
+  for (const entry of __wtEnvironmentData) envData.push([entry[0], entry[1]]);
+  const boot: any = {
+    port: port,
+    threadId: Number(link.owner.threadId),
+    name: opts.name === undefined || opts.name === null ? "" : String(opts.name),
+    workerData: __wtEncode(data),
+    environmentData: __wtEncode(envData),
+    resourceLimits: link.owner.resourceLimits,
+  };
+  let env: any = null;
+  if (opts.env !== undefined && opts.env !== null && opts.env !== __wtShareEnv && typeof opts.env === "object") {
+    env = __wtEnvCopy(opts.env);
+  } else {
+    env = __wtEnvCopy(process.env);
+  }
+  env["ZUN_NODE_WORKER"] = JSON.stringify(boot);
+
+  const args: any[] = [];
+  if (opts.execArgv !== undefined && opts.execArgv !== null) {
+    for (const flag of opts.execArgv) args.push(String(flag));
+  }
+  if (code !== null) {
+    args.push("-e");
+    args.push(String(code));
+  } else {
+    args.push(script);
+  }
+  if (opts.argv !== undefined && opts.argv !== null) {
+    for (const item of opts.argv) args.push(String(item));
+  }
+  // The common case -- `new Worker(__filename)`, the test re-running itself as
+  // the worker -- needs no second bundling: the program already running *is*
+  // that script's bundle, so the worker runs it with `zun run` directly and
+  // gets its `process.argv` tail through `ZUN_NODE_ARGV`, as the launcher
+  // would hand it over. Bundling is the expensive part of starting a worker
+  // (seconds), compiling the bundle is not.
+  let file: string = String(process.execPath);
+  let argv: any[] = args;
+  const self: any = __wtSelfBundle(code, script);
+  if (self !== null) {
+    file = String(self.zun);
+    argv = ["run", "--ext", String(self.ext), String(self.bundle)];
+    const tail: string[] = [script];
+    if (opts.argv !== undefined && opts.argv !== null) {
+      for (const item of opts.argv) tail.push(String(item));
+    }
+    env["ZUN_NODE_ARGV"] = "A" + tail.join("\u001f");
+  }
+  const stdio: any[] = ["ignore", opts.stdout === true ? "pipe" : "inherit", "pipe"];
+  const child: any = host.spawn(file, argv, { env: env, stdio: stdio, windowsHide: true });
+  __ioPatience.holders = Number(__ioPatience.holders) + 1;
+  link.child = child;
+  if (opts.stdout === true) link.stdout = child.stdout;
+  const stderr: any = child.stderr;
+  if (stderr !== null && stderr !== undefined) {
+    stderr.on("data", (chunk: any): void => {
+      __wtOnStderr(link, String(chunk), false);
+    });
+  }
+  child.on("error", (error: any): void => {
+    if (link.hasError !== true) {
+      link.error = error;
+      link.hasError = true;
+    }
+  });
+  child.on("close", (exitCode: any, signal: any): void => {
+    __wtOnClose(link, exitCode, signal);
+  });
+}
+
+// `{ zun, ext, bundle }` when the worker script is the running program's own
+// source file and this program is a bundle run by `zun run --ext`, else null.
+function __wtSelfBundle(code: any, script: string): any {
+  if (code !== null) return null;
+  const zun: any = process.env["ZUN_NODE_ZUN"];
+  const ext: any = process.env["ZUN_NODE_EXT"];
+  const bundle: any = __processArgvSplit.script;
+  if (typeof zun !== "string" || zun === "" || typeof ext !== "string" || ext === "") return null;
+  if (typeof bundle !== "string" || !bundle.endsWith(".ts")) return null;
+  const own: string = String(__filename);
+  if (__wtSamePath(own, script)) return { zun: zun, ext: ext, bundle: bundle };
+  return null;
+}
+
+function __wtSamePath(a: string, b: string): boolean {
+  if (pathPlatformIsWindows()) {
+    return a.split("/").join("\\").toLowerCase() === b.split("/").join("\\").toLowerCase();
+  }
+  return a === b;
+}
+
+const __WT_FATAL_PREFIXES: string[] = ["zun: runtime error: unhandled exception: ", "Uncaught "];
+
+// The worker's stderr, line by line: the engine's report of an uncaught
+// exception becomes the `'error'` event, everything else is the worker's own
+// output and goes to the parent's stderr.
+function __wtOnStderr(link: any, text: string, final: boolean): void {
+  link.errtext = String(link.errtext) + text;
+  while (true) {
+    const all: string = String(link.errtext);
+    let nl = Number(all.indexOf("\n"));
+    if (nl === -1) {
+      if (!final || all === "") break;
+      nl = Number(all.length);
+    }
+    const line: string = all.slice(0, nl);
+    link.errtext = all.slice(nl + 1);
+    let fatal = false;
+    for (const prefix of __WT_FATAL_PREFIXES) {
+      if (line.startsWith(prefix) && link.hasError !== true) {
+        link.error = __wtParseFatal(line.slice(Number(prefix.length)));
+        link.hasError = true;
+        fatal = true;
+        break;
+      }
+    }
+    if (!fatal) process.stderr.write(line + "\n");
+  }
+}
+
+// `TypeError: message` back into a `TypeError`; a thrown non-error is
+// reported by the engine as its string form and is handed over as a string.
+function __wtParseFatal(text: string): any {
+  const colon = Number(text.indexOf(": "));
+  if (colon > 0) {
+    const name: string = text.slice(0, colon);
+    if (/^[A-Za-z_$][\w$]*Error$/.test(name)) {
+      return __wtMakeError(name, text.slice(colon + 2));
+    }
+  }
+  if (/^[A-Za-z_$][\w$]*Error$/.test(text)) return __wtMakeError(text, "");
+  return text;
+}
+
+function __wtOnClose(link: any, exitCode: any, signal: any): void {
+  __ioPatience.holders = Number(__ioPatience.holders) - 1;
+  // Whatever the worker wrote before it exited is still in the socket (or the
+  // connection is still waiting to be accepted): deliver it first.
+  __wtAccept(link);
+  if (Number(link.id) !== 0) __wtLinkRead(link);
+  __wtOnStderr(link, "", true);
+  __wtLinkClose(link);
+  if (Number(link.server) !== 0) {
+    __ioUnregister(Number(link.server));
+    link.server = 0;
+  }
+  let code: number = exitCode === null || exitCode === undefined ? 1 : Number(exitCode);
+  if (link.terminated === true) code = 1;
+  link.exited = true;
+  link.exitCode = code;
+  const worker: any = link.owner;
+  if (link.hasError === true && link.terminated !== true) {
+    __wtLinkOnline(link);
+    worker.emit("error", link.error);
+  } else if (link.terminated !== true && link.online !== true && code === 0) {
+    // A worker script that never loaded this module never connected, but it
+    // did run.
+    __wtLinkOnline(link);
+  }
+  worker.emit("exit", code);
+}
+
+// ---- the worker side -------------------------------------------------------
+
+function __wtBootWorker(module: any): void {
+  const raw: any = process.env["ZUN_NODE_WORKER"];
+  if (raw === undefined || raw === null || raw === "") return;
+  // Not inherited by anything this worker spawns in turn.
+  process.env["ZUN_NODE_WORKER"] = "";
+  const boot: any = JSON.parse(String(raw));
+  const port: any = __wtNewPort();
+  const link: any = __wtLinkNew(port);
+  link.isWorkerSide = true;
+  port.__wtLink = link;
+  __wtLinkState.worker = link;
+  __wtLinkState.nextThreadId = Number(boot.threadId) * 1000 + 1;
+
+  module.isMainThread = false;
+  module.threadId = Number(boot.threadId);
+  module.threadName = String(boot.name);
+  module.parentPort = port;
+  module.workerData = __wtDecode(boot.workerData);
+  const limits: any = boot.resourceLimits === undefined || boot.resourceLimits === null ? {} : boot.resourceLimits;
+  const filled: any = {
+    maxYoungGenerationSizeMb: 48,
+    maxOldGenerationSizeMb: 2048,
+    codeRangeSizeMb: 0,
+    stackSizeMb: 4,
+  };
+  for (const key of Object.keys(limits)) filled[key] = limits[key];
+  module.resourceLimits = filled;
+  const envData: any[] = __wtDecode(boot.environmentData);
+  for (const entry of envData) __wtEnvironmentData.set(entry[0], entry[1]);
+
+  const ops: any = __ioOps();
+  if (ops === null || ops === undefined) return;
+  const reserved: string = String(ops.socket());
+  if (reserved === "-") return;
+  const reservedId = Number(__ioFields(reserved)[0]);
+  const reply: string = String(ops.connect(reservedId, "127.0.0.1", Number(boot.port), "", 0));
+  if (reply === "-") return;
+  const fields: string[] = __ioFields(reply);
+  link.id = Number(fields[0]);
+  __ioRegister(Number(link.id), __wtLinkHandler(link));
+  if (String(fields[1]) === "1") {
+    link.connected = true;
+    __ioWant(Number(link.id), __IO_READ);
+  } else {
+    __ioWant(Number(link.id), __IO_WRITE);
+  }
+  __processWorkerHook.target = {
+    uncaught(error: any): void {
+      __wtLinkSend(link, { t: "e", e: __wtEncode(error) });
+    },
+  };
+  __ioTurnHooks.push({
+    turn(): void {
+      __wtLinkSyncRef(link);
+    },
+  });
+  __wtLinkSend(link, { t: "o" });
 }
 
 // ---------------------------------------------------------------------------
@@ -1994,3 +2804,6 @@ const __node_worker_threads: any = {
     return __wtReceiveMessage(port);
   },
 };
+
+// A worker process turns this module into the worker's view of it.
+__wtBootWorker(__node_worker_threads);

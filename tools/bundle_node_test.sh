@@ -811,6 +811,29 @@ src/worker_threads/worker_threads.ts
   esac
 fi
 
+# A real `Worker` is a child Zun process started through `child_process.spawn`
+# (see "The Worker process" in src/worker_threads/worker_threads.ts), so a
+# bundle that carries worker_threads and runs with the native extension also
+# carries child_process and src/worker_threads/host.ts, the file that hands
+# `spawn` to the module. Without the extension neither is appended, and
+# `new Worker(...)` reports that it cannot start.
+if [ -n "${ZUN_NODE_EXT:-}" ]; then
+  case "
+$FILES" in
+    *"
+src/worker_threads/worker_threads.ts
+"*)
+      for required in src/buffer/buffer.ts src/string_decoder/string_decoder.ts src/stream/stream.ts src/child_process/child_process.ts src/worker_threads/host.ts; do
+        case "
+$FILES" in *"
+$required
+"*) continue;; esac
+        FILES="$FILES$required
+"
+      done;;
+  esac
+fi
+
 # The global `console`.
 #
 # `src/console/console.ts` is in BUNDLE_FILES because `console` is a *global* in

@@ -771,6 +771,11 @@ function __processNextTick(fn: any, ...args: any[]): void {
 // out of reach; `…-errors.js`, which only exercises the validation, is not.
 const __processUncaught: any = { callback: undefined };
 
+// Set by src/worker_threads/worker_threads.ts in a worker process: an
+// unhandled exception there is reported to the parent's `Worker` as its
+// `'error'` event instead of being printed, and the worker exits 1.
+const __processWorkerHook: any = { target: null };
+
 function __processReportUncaught(error: any): void {
   if (Number(__processEmitter.listenerCount("uncaughtExceptionMonitor")) > 0) {
     __evEmit(__processEmitter, "uncaughtExceptionMonitor", [error, "uncaughtException"]);
@@ -782,6 +787,12 @@ function __processReportUncaught(error: any): void {
   }
   if (Number(__processEmitter.listenerCount("uncaughtException")) > 0) {
     __evEmit(__processEmitter, "uncaughtException", [error]);
+    return;
+  }
+  const worker: any = __processWorkerHook.target;
+  if (worker !== null && worker !== undefined) {
+    worker.uncaught(error);
+    process.exit(1);
     return;
   }
   // Unhandled: Node prints the error and exits with code 1 (after running
