@@ -729,7 +729,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-stream:start -->
 ### Node.js v25 `stream` compatibility
 
-`█████████████░░░░░░░░░░░` **54.4%** — 111 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
+`█████████████░░░░░░░░░░░` **57.8%** — 118 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
 <!-- node-stream:end -->
 
 > `stream` is the largest module here by a wide margin — 204 Node files against
