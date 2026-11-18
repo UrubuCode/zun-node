@@ -1248,6 +1248,11 @@ function __fsWriteSync(fd: any, data: any, a?: any, b?: any, c?: any): number {
     const base64: string = __fsDataToBase64(data, encoding);
     return Number(__fsOne(__fsNative.fsWrite(resolvedFd, base64, Number(position))));
   }
+  // A `DataView` or a non-byte typed array is written as the bytes it views;
+  // offset and length then count those bytes, as Node's `byteLength` does.
+  if (!__fsIsUint8Array(data) && ArrayBuffer.isView(data)) {
+    data = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  }
   if (!__fsIsUint8Array(data)) {
     throw new ERR_INVALID_ARG_TYPE(
       "buffer",
@@ -1263,12 +1268,27 @@ function __fsWriteSync(fd: any, data: any, a?: any, b?: any, c?: any): number {
     position = offset.position;
     offset = offset.offset;
   }
-  if (offset === undefined || offset === null) offset = 0;
-  if (length === undefined || length === null) {
-    // zun#38, as in `__fsReadSync`.
-    length = Number(__fsAsBuffer(data).length) - Number(offset);
+  // `lib/fs.js`' `write`/`writeSync` order: an integer offset >= 0, a length
+  // defaulted when it is not a number, then `validateOffsetLengthWrite`.
+  if (offset === undefined || offset === null || __evIsFn(offset)) {
+    offset = 0;
+  } else {
+    __fsValidateInteger(offset, "offset", 0, 9007199254740991);
   }
-  if (position === undefined || position === null) position = -1;
+  // zun#38, as in `__fsReadSync`: the byte length is read off the Buffer view.
+  const byteLength: number = Number(__fsAsBuffer(data).length);
+  if (typeof length !== "number") length = byteLength - Number(offset);
+  if (Number(offset) > byteLength) {
+    throw new ERR_OUT_OF_RANGE("offset", "<= " + String(byteLength), offset);
+  }
+  if (Number(length) > byteLength - Number(offset)) {
+    throw new ERR_OUT_OF_RANGE("length", "<= " + String(byteLength - Number(offset)), length);
+  }
+  if (Number(length) < 0) {
+    throw new ERR_OUT_OF_RANGE("length", ">= 0", length);
+  }
+  __fsValidateInteger(length, "length", 0, 2147483647);
+  if (typeof position !== "number") position = -1;
   const slice: Buffer = __fsSliceOfView(data, Number(offset), Number(length));
   return Number(
     __fsOne(__fsNative.fsWrite(resolvedFd, slice.toString("base64"), Number(position))),
@@ -1487,15 +1507,22 @@ function __fsReaddirInto(
   }
 }
 
-function __fsMkdtempSync(prefix: any, options?: any): any {
-  if (typeof prefix !== "string") {
-    throw new ERR_INVALID_ARG_TYPE("prefix", "string", prefix);
+let __fsMkdtempWarned: boolean = false;
+
+// `mkdtemp`'s prefix is a validated path since Node 24: a string, a Buffer, a
+// `Uint8Array` or a `file:` URL. A prefix ending in `X` warns once, because
+// some platforms' `mkdtemp(3)` would consume those as template characters.
+function __fsMkdtempSync(input: any, options?: any): any {
+  let source: any = input;
+  if (source instanceof Uint8Array && !Buffer.isBuffer(source)) {
+    source = Buffer.from(source.buffer, source.byteOffset, source.byteLength);
   }
-  if (Number(prefix.indexOf("\u0000")) !== -1) {
-    throw new ERR_INVALID_ARG_VALUE(
-      "prefix",
-      prefix,
-      "must be a string, Uint8Array, or URL without null bytes",
+  const prefix: string = __fsGetValidatedPath(source, "prefix");
+  if (prefix.endsWith("X") && !__fsMkdtempWarned) {
+    __fsMkdtempWarned = true;
+    process.emitWarning(
+      "mkdtemp() templates ending with X are not portable. " +
+        "For details see: https://nodejs.org/api/fs.html",
     );
   }
   const settings: any = __fsGetOptions(options, { encoding: "utf8" });
