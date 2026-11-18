@@ -385,6 +385,14 @@ run_one() {
     return
   fi
 
+  # A `// Flags:` line is Node's per-test command line. The `zun` CLI takes no
+  # Node options, so the few this library honours from `NODE_OPTIONS` are
+  # forwarded that way (each job is its own subshell, so the export stays in
+  # this test). Only `--dns-result-order` so far: it seeds `dns`' default order.
+  local forwarded
+  forwarded="$(grep -m1 '^// Flags:' "$src" | grep -o -- '--dns-result-order=[a-z0-9]*' | tr '\n' ' ')"
+  if [ -n "$forwarded" ]; then export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }$forwarded"; fi
+
   case "$KIND" in
     zun-ts|zun-ts+ext)
       bundle="$WORK/bundles/${name%.*}.ts"

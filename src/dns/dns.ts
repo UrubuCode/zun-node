@@ -1415,9 +1415,29 @@ function __dnsSetLocalAddress(handle: any, ipv4: any, ipv6: any): void {
 // ---------------------------------------------------------------------------
 
 // Node's module-level `dnsOrder`, which `--dns-result-order` seeds and
-// `setDefaultResultOrder()` replaces. The engine has no such flag, so the
-// initial value is the default Node uses without one.
-const __dnsOrderState: any = { order: "verbatim" };
+// `setDefaultResultOrder()` replaces. The `zun` CLI has no such flag, so it is
+// read where `src/process/process.ts` reads the other Node options this
+// library honours: `NODE_OPTIONS` (where Node accepts it too) and the engine's
+// own option vector. Node rejects an invalid value at startup; here it is
+// ignored and the default stands.
+const __dnsOrderState: any = { order: __dnsInitialOrder() };
+
+function __dnsInitialOrder(): string {
+  const words: string[] = [];
+  const raw: any = __processEnvGet("NODE_OPTIONS");
+  if (typeof raw === "string" && raw !== "") {
+    for (const word of raw.split(" ")) words.push(word);
+  }
+  for (const word of process.execArgv) words.push(String(word));
+  let order = "verbatim";
+  const prefix = "--dns-result-order=";
+  for (const word of words) {
+    if (word.slice(0, prefix.length) !== prefix) continue;
+    const value: string = word.slice(prefix.length);
+    if (Number(__DNS_VALID_ORDERS.indexOf(value)) !== -1) order = value;
+  }
+  return order;
+}
 
 function __dnsSetDefaultResultOrder(value: any): void {
   __dnsValidateOneOf(value, "dnsOrder", __DNS_VALID_ORDERS);
