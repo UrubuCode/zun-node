@@ -840,9 +840,11 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
 
   # `../common` and `../common/fixtures` are bound by the harness itself.
   printf "s#^\\(const\\|let\\|var\\)[[:space:]]\\{1,\\}common[[:space:]]*=[[:space:]]*require('\\.\\./common')[[:space:]]*;[[:space:]]*\$##\n"
-  printf "s#^\\(const\\|let\\|var\\)[[:space:]]\\{1,\\}fixtures[[:space:]]*=[[:space:]]*require('\\.\\./common/fixtures')[[:space:]]*;[[:space:]]*\$##\n"
+  # `fixtures` is spelled with any relative prefix, as `tmpdir` is below:
+  # `test-util-parse-env.js` reaches it as `../../test/common/fixtures`.
+  printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}fixtures[[:space:]]*=[[:space:]]*require('[^']*common/fixtures\(\.js\)\{0,1\}')[[:space:]]*;[[:space:]]*\$##\n"
   printf "s|^require('\\.\\./common')[[:space:]]*;[[:space:]]*\$||\n"
-  printf "s|require('\\.\\./common/fixtures')|fixtures|g\n"
+  printf "s|require('[^']*common/fixtures\(\.js\)\{0,1\}')|fixtures|g\n"
   printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}tmpdir[[:space:]]*=[[:space:]]*require('[^']*common/tmpdir\(\.js\)\{0,1\}')[[:space:]]*;[[:space:]]*\$##\n"
   printf "s|require('[^']*common/tmpdir\(\.js\)\{0,1\}')|tmpdir|g\n"
   printf "s|require('\\.\\./common')|common|g\n"
