@@ -3091,7 +3091,9 @@ function __httpClientInit(self: any, input: any, opts: any, cb: any): void {
   }
   const setHost: boolean =
     options.setHost === undefined ? options.setDefaultHeaders !== false : options.setHost === true;
-  if (Array.isArray(self.getHeader("host"))) {
+  // An object-form `headers.host` must be a single string (an array-form
+  // header list may repeat Host on purpose).
+  if (!Array.isArray(options.headers) && Array.isArray(self.getHeader("host"))) {
     throw new ERR_INVALID_ARG_TYPE("options.headers.host", "string", self.getHeader("host"));
   }
   // Headers given as an array are the whole header set: no Host, no
