@@ -6,6 +6,11 @@ license = "MIT"
 repository = "https://github.com/UrubuCode/zun-node"
 description = "Node.js-compatible library for the Zun platform, as a native zun_abi extension"
 
+# zun-node is its own workspace root (the Zun workspace excludes it). Declaring
+# it keeps a worktree under `.claude/worktrees/` from being captured by the
+# helper workspace `tools/setup_worktree_cargo.sh` writes there.
+[workspace]
+
 # A native Zun extension is a dynamic library the host loads and whose
 # `zun_register_v1` entry point it calls. `rlib` is kept so the modules can also
 # be unit-tested as plain Rust.
