@@ -47,7 +47,7 @@ separate that one engine gap from everything behind it:
 
 | File | with the descriptor block | without it |
 |---|---|---|
-| `test-perf-hooks-usertiming.js` | fails on the descriptor | **passes in full** — every `mark`/`measure`/`detail`/`getEntriesBy*` assertion in the file |
+| `test-perf-hooks-usertiming.js` | ✅ passes: the engine now stores `writable: false` for a symbol-keyed property (finding 2) |
 | `test-perf-hooks-resourcetiming.js` | fails on the descriptor | reaches the last assertion; the only remaining difference is the *indentation* `util.inspect` gives a class instance nested in an array (two spaces instead of four) |
 
 ## Verification: a differential run against Node
@@ -92,7 +92,7 @@ raises the error, not a `perf_hooks` one, and it is left to `util`.
 | `test-perf-hooks-histogram-fast-calls.js` | `require('internal/test/binding')` and `eval('%OptimizeFunctionOnNextCall(...)')` — V8 natives syntax, nothing to port |
 | `test-perf-hooks-histogram.js` | `MessageChannel`/`postMessage` (a histogram is a transferable in Node) and an `using` declaration; and, before either, `assert.strictEqual(h.minBigInt, 9223372036854775807n)` fails because a BigInt **loses identity across a value round-trip** ([new finding](#new-engine-findings) 1) |
 | `test-perf-hooks-resourcetiming.js` | `Object.getOwnPropertyDescriptor(PerformanceResourceTiming.prototype, Symbol.toStringTag)` reports `writable: true` ([new finding](#new-engine-findings) 2). Everything after it is correct — see the table above |
-| `test-perf-hooks-usertiming.js` | the same descriptor. The rest of the file passes — see the table above |
+| `test-perf-hooks-usertiming.js` | ✅ passes: the engine now stores `writable: false` for a symbol-keyed property (finding 2) |
 | `test-perf-hooks-worker-timeorigin.js` | `node:worker_threads` |
 | `test-performance-eventlooputil.js` | `node:worker_threads`; and `nodeTiming.idleTime`/`loopStart` are loop edges the VM does not publish (below) |
 | `test-performance-function-async.js` | `const { performance: { timerify } } = require('perf_hooks')` — a method read as a value through an `any` path is `undefined` ([zun#19](https://github.com/UrubuCode/zun/issues/19)); and `entry.name` needs `fn.name`, which is `undefined` for a function held in a parameter ([zun#17](https://github.com/UrubuCode/zun/issues/17)) |
@@ -101,11 +101,11 @@ raises the error, not a `perf_hooks` one, and it is left to `util`.
 | `test-performance-global.js` | assigns to the global (`performance = undefined`), which is not a declaration the engine has ([zun#4](https://github.com/UrubuCode/zun/issues/4) family): `unknown variable 'performance'` |
 | `test-performance-many-marks.js` | 10⁶ marks. **Class-instance allocation is quadratic** in the number of live class instances ([new finding](#new-engine-findings) 3): measured in this bundle, 20 000 marks take 2.6 s and 100 000 take 25 s, so 10⁶ cannot finish inside the tracker's 20 s. Object-literal allocation over the same shape is flat |
 | `test-performance-measure-detail.js` | ✅ passes |
-| `test-performance-measure.js` | ✅ **nominal pass, recorded honestly**: the run exits 0, but the `duration > 990` assertion *inside* the observer callback fails, because the VM's timer tier advances a **virtual clock** (`tools/harness/common.ts` jumps straight to the due time, see `test/timers/README.md`) while `performance.now()` reads a real one, so a `setTimeout(…, 1000)` costs 1–2 ms of wall time. The failure is invisible to the tracker because **an exception thrown inside a macrotask does not fail the run** ([new finding](#new-engine-findings) 4) |
+| `test-performance-measure.js` | the `duration > 990` assertion inside the observer callback fails: the VM's timer tier advances a **virtual clock** (`tools/harness/common.ts` jumps straight to the due time, see `test/timers/README.md`) while `performance.now()` reads a real one, so a `setTimeout(…, 1000)` costs 1–2 ms of wall time. It used to pass nominally; the engine now fails a run on an exception thrown in a macrotask ([zun#89](https://github.com/UrubuCode/zun/issues/89)) |
 | `test-performance-nodetiming-uvmetricsinfo.js` | `node:worker_threads`, `node:child_process` + a fixture, and `uvMetricsInfo` |
 | `test-performance-nodetiming.js` | the four process milestones (`nodeStart`, `v8Start`, `environment`, `bootstrapComplete`) must be *strictly increasing*, and `loopStart`/`loopExit` must be real loop edges. The VM publishes none of them (below) |
-| `test-performance-resourcetimingbufferfull.js` | `performance.markResourceTiming(...args)` **inside a function body** — a spread into a method call is lowered at top level but not inside a function ([new finding](#new-engine-findings) 5) |
-| `test-performance-resourcetimingbuffersize.js` | the same spread |
+| `test-performance-resourcetimingbufferfull.js` | ✅ passes. The spread into `markResourceTiming` inside a function body ([zun#92](https://github.com/UrubuCode/zun/issues/92), finding 5) is rewritten by `tools/bundle_node_test.sh` into `__zunPerformanceMarkResourceTiming(array)`, and listeners reach the engine's `EventTarget` through one-parameter adapters (it rejects `common.mustCall`'s boxed function) |
+| `test-performance-resourcetimingbuffersize.js` | ✅ passes, by the same two fixes |
 | `test-performance-timeline.mjs` | an ES module: `import … from 'perf_hooks'` is not rewritten by `tools/bundle_node_test.sh`, which only knows `require`. (Its ordering assertions would additionally need sub-millisecond `startTime`s, i.e. `--ext`, because every mark in it is separated only by a `setTimeout` the virtual clock makes free) |
 | `test-performanceobserver-gc.js` | ✅ passes |
 | `test-performanceobserver.js` | `require('internal/test/binding')` for `observerCounts` |

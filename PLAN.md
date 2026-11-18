@@ -972,7 +972,8 @@ gets deleted; nothing else in the tracker changes.
   BigInt identity lost across a value round-trip, `writable: false` not stored
   for a symbol-keyed property, quadratic class-instance allocation, a throw
   inside a macrotask not failing the run, and a spread into a method call
-  rejected inside a function body.
+  rejected inside a function body (zun#92, now routed around by the
+  bundler; 5/20 in the corpus).
 - **`node:zlib`: implemented except zstd, TS over natives (the `os` kind), in
   `src/zlib/*.rs` + `src/zlib/zlib.ts`.** The Rust half keeps one `z_stream`
   (or Brotli encoder/decoder) per handle in a handle table of the shape

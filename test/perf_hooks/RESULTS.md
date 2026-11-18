@@ -6,30 +6,30 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-perf-hooks-*|test-performance*
 <!-- node-perf_hooks:start -->
 ### Node.js v25 `perf_hooks` compatibility
 
-`██░░░░░░░░░░░░░░░░░░░░░░` **10.0%** — 2 / 20 Node `test-perf-hooks-*|test-performance*` tests passing
+`██████░░░░░░░░░░░░░░░░░░` **25.0%** — 5 / 20 Node `test-perf-hooks-*|test-performance*` tests passing
 <!-- node-perf_hooks:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-perf-hooks-histogram-fast-calls.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-perf-hooks-histogram-fast-calls.js: |
-| `test-perf-hooks-histogram.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-perf-hooks-resourcetiming.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
-| `test-perf-hooks-usertiming.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
-| `test-perf-hooks-worker-timeorigin.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-performance-eventlooputil.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-performance-function-async.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-performance-function.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-performance-gc.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-performance-global.js` | ❌ type error | bundles/test-performance-global.ts:19245:1: error: [SEM0001] unknown variable 'performance' |
+| `test-perf-hooks-histogram-fast-calls.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: __dnsNative is not defined |
+| `test-perf-hooks-histogram.js` | ❌ assertion | AssertionError [==]: false == true |
+| `test-perf-hooks-resourcetiming.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-perf-hooks-usertiming.js` | ✅ pass | |
+| `test-perf-hooks-worker-timeorigin.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ( |
+| `test-performance-eventlooputil.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-performance-function-async.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_INVALID_ARG_TYPE: The "fn" argument must be of type function. Rec |
+| `test-performance-function.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: value is not a function |
+| `test-performance-gc.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: gc is not a function |
+| `test-performance-global.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-performance-many-marks.js` | ❌ timeout |  |
 | `test-performance-measure-detail.js` | ✅ pass | |
 | `test-performance-measure.js` | ❌ assertion | AssertionError [==]: false == true |
-| `test-performance-nodetiming-uvmetricsinfo.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-performance-nodetiming-uvmetricsinfo.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: __cpNative is not defined |
 | `test-performance-nodetiming.js` | ❌ assertion | AssertionError [==]: expect nodeTiming['v8Start'] > nodeTiming['nodeStart'] |
-| `test-performance-resourcetimingbufferfull.js` | ❌ type error | bundles/test-performance-resourcetimingbufferfull.ts:19278:60: error: [SEM0001] spread arguments are not lower |
-| `test-performance-resourcetimingbuffersize.js` | ❌ type error | bundles/test-performance-resourcetimingbuffersize.ts:19276:41: error: [SEM0001] spread arguments are not lower |
-| `test-performance-timeline.mjs` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-performance-resourcetimingbufferfull.js` | ✅ pass | |
+| `test-performance-resourcetimingbuffersize.js` | ✅ pass | |
+| `test-performance-timeline.mjs` | ❌ runtime | zun: runtime error: unhandled exception: ERR_INVALID_ARG_TYPE: The "callback" argument must be of type functio |
 | `test-performanceobserver-gc.js` | ✅ pass | |
-| `test-performanceobserver.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-performanceobserver.js: |
+| `test-performanceobserver.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: __dnsNative is not defined |
