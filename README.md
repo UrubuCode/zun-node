@@ -240,7 +240,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-util:start -->
 ### Node.js v25 `util` compatibility
 
-`███████░░░░░░░░░░░░░░░░░` **30.7%** — 8 / 26 Node `test-util*` tests passing
+`████████░░░░░░░░░░░░░░░░` **34.6%** — 9 / 26 Node `test-util*` tests passing
 <!-- node-util:end -->
 
 > `util` is implemented end to end — `inspect` with every option Node documents
@@ -295,7 +295,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-assert:start -->
 ### Node.js v25 `assert` compatibility
 
-`█████░░░░░░░░░░░░░░░░░░░` **21.4%** — 3 / 14 Node `test-assert*` tests passing
+`██████░░░░░░░░░░░░░░░░░░` **28.5%** — 4 / 14 Node `test-assert*` tests passing
 <!-- node-assert:end -->
 
 > `assert` is the module every other corpus runs *through* — each
@@ -353,7 +353,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
 
-`███████████████░░░░░░░░░` **62.8%** — 22 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+`███████████████░░░░░░░░░` **65.7%** — 23 / 35 Node `test-event-emitter-*|test-events-*` tests passing
 <!-- node-events:end -->
 
 > `events` is implemented end to end — the whole `EventEmitter` surface, every

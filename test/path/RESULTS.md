@@ -26,7 +26,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-path-posix-exists.js` | ✅ pass | |
 | `test-path-posix-relative-on-windows.js` | ✅ pass | |
 | `test-path-relative.js` | ✅ pass | |
-| `test-path-resolve.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-path-resolve.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: __cpNative is not defined |
 | `test-path-win32-exists.js` | ✅ pass | |
 | `test-path-win32-normalize-device-names.js` | ✅ pass | |
 | `test-path-zero-length-strings.js` | ✅ pass | |
