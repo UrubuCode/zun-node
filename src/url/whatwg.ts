@@ -46,11 +46,10 @@
 //   * No regular expressions anywhere: a RegExp loses its methods through an
 //     `any` (https://github.com/UrubuCode/zun/issues/7), and a URL parser is
 //     the last place that should own a backtracking engine.
-//   * `Symbol.toStringTag`, `Symbol.iterator` and reading a class method as a
-//     value (https://github.com/UrubuCode/zun/issues/19) are not available, so
-//     `URLSearchParams` exposes `entries()`/`keys()`/`values()` as objects with
-//     a `next()` **and** an `items` array (which is what `for (... of ...)`
-//     reaches for here), rather than as real ECMAScript iterators.
+//   * A class may declare only one computed `Symbol` member
+//     (https://github.com/UrubuCode/zun/issues/124), so `Symbol.toStringTag`,
+//     `util.inspect.custom` and the `Symbol.iterator` aliasing are installed on
+//     the prototypes with `Object.defineProperty` after the classes.
 //   * **IDNA is punycode, not full UTS#46.** There is no ICU in this runtime;
 //     `common.hasIntl` is `false` and Node's own IDNA-dependent tests are
 //     written `{ skip: !hasIntl }`. `__wuDomainToASCII` therefore does the
@@ -1622,6 +1621,24 @@ class ERR_INVALID_THIS extends NodeTypeError {
   }
 }
 
+// Reject a detached method called on something that is not a `URLSearchParams`
+// (or a `URL`), as Node's brand checks do. `this` arrives as an `any`: a typed
+// `this` lets the checker fold the `instanceof` to `true`.
+// The `URL` brand check. Node's `URL` keeps its state in a private field, so a
+// foreign receiver fails with V8's own TypeError text: "Receiver must be an
+// instance of class URL" for the accessors that check explicitly, and "Cannot
+// read private member" for the ones that just touch the field.
+function __wuCheckURL(value: any, kind: string): void {
+  if (value instanceof NodeURL) return;
+  if (kind === "receiver") throw new TypeError("Receiver must be an instance of class URL");
+  throw new TypeError("Cannot read private member #context from an object whose class did not declare it");
+}
+
+function __wuCheckThis(value: any, type: string): void {
+  const ok: boolean = type === "URL" ? value instanceof NodeURL : value instanceof NodeURLSearchParams;
+  if (!ok) throw new ERR_INVALID_THIS(type);
+}
+
 // `ToUSVString`-ish argument conversion. Node converts every
 // `URLSearchParams` argument with `String(x)`, and a symbol legitimately
 // throws rather than answering `Symbol(x)` — which `String(aSymbol)` would, so
@@ -1658,6 +1675,58 @@ function __wuToString(value: any): string {
 // `url.searchParams.append(...)` change `url.href`.
 // ---------------------------------------------------------------------------
 
+function __wuTupleError(): any {
+  return new NodeTypeError("ERR_INVALID_TUPLE", "Each query pair must be an iterable [name, value] tuple");
+}
+
+// Drain an iterable into an array. Engine workaround: a built-in
+// `Symbol.iterator` (an array's) read as a value has no `.call` ("call is not
+// a function"), so the iteration goes through `for...of`, which re-reads the
+// method the caller already checked.
+function __wuDrain(source: any, method: any): any {
+  const out: any = [];
+  for (const item of source) out.push(item);
+  return out;
+}
+
+// The object/function branch of the URLSearchParams constructor, as the URL
+// Standard and Node's `lib/internal/url.js` write it: anything with a
+// `Symbol.iterator` is a sequence of pairs (each itself iterable, of length
+// 2); anything else is a record of its own enumerable keys, symbols included,
+// which then fail their string conversion as Node's do.
+function __wuPairsFromInit(init: any): any {
+  const method: any = init[Symbol.iterator];
+  const built: any = [];
+  if (method !== undefined && method !== null) {
+    if (typeof method !== "function") {
+      throw new NodeTypeError("ERR_ARG_NOT_ITERABLE", "Query pairs must be iterable");
+    }
+    const seq: any = __wuDrain(init, method);
+    const pairs: any = [];
+    for (let i = 0; i < __wuALen(seq); i++) {
+      const pair: any = seq[i];
+      if (pair === null || (typeof pair !== "object" && typeof pair !== "function")) throw __wuTupleError();
+      const inner: any = pair[Symbol.iterator];
+      if (typeof inner !== "function") throw __wuTupleError();
+      const items: any = __wuDrain(pair, inner);
+      if (__wuALen(items) !== 2) throw __wuTupleError();
+      pairs.push(items);
+    }
+    for (let i = 0; i < __wuALen(pairs); i++) {
+      built.push([__wuToString(pairs[i][0]), __wuToString(pairs[i][1])]);
+    }
+    return built;
+  }
+  const keys: any = Reflect.ownKeys(init);
+  for (let i = 0; i < __wuALen(keys); i++) {
+    const key: any = keys[i];
+    const desc: any = Object.getOwnPropertyDescriptor(init, key);
+    if (desc === undefined || desc.enumerable !== true) continue;
+    built.push([__wuToString(key), __wuToString(init[key])]);
+  }
+  return built;
+}
+
 class NodeURLSearchParams {
   list: any = [];
   owner: any = null;
@@ -1681,30 +1750,11 @@ class NodeURLSearchParams {
         this.list = copy;
         return;
       }
-      if (Array.isArray(init)) {
-        const seq: any = init;
-        const built: any = [];
-        for (let i = 0; i < __wuALen(seq); i++) {
-          const pair: any = seq[i];
-          if (pair === null || pair === undefined || !Array.isArray(pair) || __wuALen(pair) !== 2) {
-            throw new NodeTypeError(
-              "ERR_INVALID_TUPLE",
-              "Each query pair must be an iterable [name, value] tuple",
-            );
-          }
-          built.push([__wuToString(pair[0]), __wuToString(pair[1])]);
-        }
-        this.list = built;
-        return;
-      }
-      // A record: every own enumerable key, in insertion order.
-      const keys: any = Object.keys(init);
-      const built: any = [];
-      for (let i = 0; i < __wuALen(keys); i++) {
-        const key: string = keys[i] as string;
-        built.push([__wuToString(key), __wuToString(init[key])]);
-      }
-      this.list = built;
+      this.list = __wuPairsFromInit(init);
+      return;
+    }
+    if (typeof init === "function") {
+      this.list = __wuPairsFromInit(init);
       return;
     }
     // A primitive that is not a string is stringified, as Node does.
@@ -1721,12 +1771,16 @@ class NodeURLSearchParams {
   // fewer arguments than it declares, on purpose, to see the
   // `ERR_MISSING_ARGS` it answers.
   append(...args: any[]): void {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (__wuALen(args) < 2) throw new ERR_MISSING_ARGS("name", "value");
     this.list.push([__wuToString(args[0]), __wuToString(args[1])]);
     this.update();
   }
 
   delete(...args: any[]): void {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (__wuALen(args) < 1) throw new ERR_MISSING_ARGS("name");
     const key = __wuToString(args[0]);
     const hasValue = __wuALen(args) > 1 && args[1] !== undefined;
@@ -1745,6 +1799,8 @@ class NodeURLSearchParams {
   }
 
   get(...args: any[]): any {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (__wuALen(args) < 1) throw new ERR_MISSING_ARGS("name");
     const key = __wuToString(args[0]);
     for (let i = 0; i < __wuALen(this.list); i++) {
@@ -1754,6 +1810,8 @@ class NodeURLSearchParams {
   }
 
   getAll(...args: any[]): any {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (__wuALen(args) < 1) throw new ERR_MISSING_ARGS("name");
     const key = __wuToString(args[0]);
     const out: string[] = [];
@@ -1764,6 +1822,8 @@ class NodeURLSearchParams {
   }
 
   has(...args: any[]): boolean {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (__wuALen(args) < 1) throw new ERR_MISSING_ARGS("name");
     const key = __wuToString(args[0]);
     const hasValue = __wuALen(args) > 1 && args[1] !== undefined;
@@ -1778,6 +1838,8 @@ class NodeURLSearchParams {
   }
 
   set(...args: any[]): void {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (__wuALen(args) < 2) throw new ERR_MISSING_ARGS("name", "value");
     const key = __wuToString(args[0]);
     const text = __wuToString(args[1]);
@@ -1802,6 +1864,8 @@ class NodeURLSearchParams {
   // not specified to be stable here, so the comparison falls back to the
   // original index.
   sort(): void {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     const n = __wuALen(this.list);
     const tagged: any = [];
     for (let i = 0; i < n; i++) tagged.push([this.list[i], i]);
@@ -1828,6 +1892,8 @@ class NodeURLSearchParams {
   // that `params.forEach()` with no argument is a compile error here rather
   // than the `ERR_MISSING_ARGS` Node answers.
   forEach(callback: any, ...rest: any[]): void {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (callback === undefined) throw new ERR_MISSING_ARGS("callback");
     // The list is re-read on every step, as the standard's iteration does, so
     // a callback that appends is observed.
@@ -1840,18 +1906,24 @@ class NodeURLSearchParams {
   }
 
   keys(): any {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     const out: string[] = [];
     for (let i = 0; i < __wuALen(this.list); i++) out.push(this.list[i][0] as string);
     return __wuMakeIterator(out, "URLSearchParams Iterator");
   }
 
   values(): any {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     const out: string[] = [];
     for (let i = 0; i < __wuALen(this.list); i++) out.push(this.list[i][1] as string);
     return __wuMakeIterator(out, "URLSearchParams Iterator");
   }
 
   entries(): any {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     const out: any = [];
     for (let i = 0; i < __wuALen(this.list); i++) {
       out.push([this.list[i][0] as string, this.list[i][1] as string]);
@@ -1859,11 +1931,24 @@ class NodeURLSearchParams {
     return __wuMakeIterator(out, "URLSearchParams Iterator");
   }
 
+  // Declared in the class body so the checker sees the type as iterable. The
+  // prototype slot is then replaced by `entries` itself (below), which is
+  // what a dynamic read sees; a typed read of `params[Symbol.iterator]` still
+  // resolves to this method.
+  [Symbol.iterator](): any {
+    const self: any = this;
+    return self.entries();
+  }
+
   get size(): number {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     return __wuALen(this.list);
   }
 
   toString(): string {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     const out: string[] = [];
     for (let i = 0; i < __wuALen(this.list); i++) {
       if (i > 0) out.push("&");
@@ -1884,27 +1969,51 @@ class NodeURLSearchParams {
   }
 }
 
-// An iterator-ish object: `next()`, an `items` array (which is what a `for
-// (... of ...)` over it reaches for on this engine) and a `length`. A real
-// ECMAScript iterator would need `Symbol.iterator`, which is not available
-// here (see the header note).
-function __wuMakeIterator(items: any, tag: string): any {
-  let index = 0;
-  const it: any = {
-    items: items,
-    length: __wuALen(items),
-    tag: tag,
-    next: function (...rest: any[]): any {
-      if (index >= __wuALen(items)) {
-        return { value: undefined, done: true };
-      }
-      const value: any = items[index];
-      index = index + 1;
-      return { value: value, done: false };
-    },
-  };
-  return it;
+// `URLSearchParams Iterator`: a class instance, so `next` can reject a foreign
+// `this` and `Object.prototype.toString` can answer its tag. `items` and
+// `length` stay readable for the in-module callers that index the snapshot.
+class NodeURLSearchParamsIterator {
+  items: any = [];
+  length: number = 0;
+  index: number = 0;
+
+  constructor(items: any) {
+    this.items = items;
+    this.length = __wuALen(items);
+  }
+
+  next(): any {
+    const thisArg: any = this;
+    __wuCheckIter(thisArg);
+    if (this.index >= __wuALen(this.items)) return { value: undefined, done: true };
+    const value: any = this.items[this.index];
+    this.index = this.index + 1;
+    return { value: value, done: false };
+  }
+
+  [Symbol.iterator](): any {
+    return this;
+  }
 }
+
+function __wuMakeIterator(items: any, tag: string): any {
+  return new NodeURLSearchParamsIterator(items);
+}
+
+function __wuCheckIter(value: any): void {
+  if (!(value instanceof NodeURLSearchParamsIterator)) {
+    throw new ERR_INVALID_THIS("URLSearchParamsIterator");
+  }
+}
+
+// Engine workaround (https://github.com/UrubuCode/zun/issues/124): a class
+// with two computed `Symbol` members fails to load
+// ("duplicate module export: [symbol]@0@this"), so each tag is installed on
+// the prototype after the class instead of as a `get [Symbol.toStringTag]`.
+Object.defineProperty(NodeURLSearchParamsIterator.prototype, Symbol.toStringTag, {
+  value: "URLSearchParams Iterator",
+  configurable: true,
+});
 
 // ---------------------------------------------------------------------------
 // URL
@@ -1961,10 +2070,14 @@ class NodeURL {
   }
 
   get href(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "receiver");
     return __wuSerializeURL(this.rec, false);
   }
 
   set href(value: any) {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     const parsed = __wuBasicParse(__wuToString(value), null, 0, null);
     if (parsed === null) throw new ERR_INVALID_URL(__wuToString(value));
     this.rec = parsed;
@@ -1972,58 +2085,84 @@ class NodeURL {
   }
 
   get origin(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     return __wuSerializeOrigin(this.rec);
   }
 
   get protocol(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     return this.rec.scheme + ":";
   }
 
   set protocol(value: any) {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     __wuBasicParse(__wuToString(value) + ":", null, __WU_S_SCHEME_START, this.rec);
   }
 
   get username(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     return this.rec.username as string;
   }
 
   set username(value: any) {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     if (__wuCannotHaveCredentials(this.rec)) return;
     this.rec.username = __wuPercentEncode(__wuToString(value), __WU_SET_USERINFO);
   }
 
   get password(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     return this.rec.password as string;
   }
 
   set password(value: any) {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     if (__wuCannotHaveCredentials(this.rec)) return;
     this.rec.password = __wuPercentEncode(__wuToString(value), __WU_SET_USERINFO);
   }
 
   get host(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     return __wuSerializeHostPort(this.rec);
   }
 
   set host(value: any) {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     if (__wuHasOpaquePath(this.rec)) return;
     __wuBasicParse(__wuToString(value), null, __WU_S_HOST, this.rec);
   }
 
   get hostname(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     return this.rec.host === null ? "" : (this.rec.host as string);
   }
 
   set hostname(value: any) {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     if (__wuHasOpaquePath(this.rec)) return;
     __wuBasicParse(__wuToString(value), null, __WU_S_HOSTNAME, this.rec);
   }
 
   get port(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     return this.rec.port === null ? "" : String(this.rec.port);
   }
 
   set port(value: any) {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     if (__wuCannotHaveCredentials(this.rec)) return;
     const text = __wuToString(value);
     if (text === "") {
@@ -2034,21 +2173,29 @@ class NodeURL {
   }
 
   get pathname(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     return __wuSerializePath(this.rec);
   }
 
   set pathname(value: any) {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     if (__wuHasOpaquePath(this.rec)) return;
     this.rec.path = [];
     __wuBasicParse(__wuToString(value), null, __WU_S_PATH_START, this.rec);
   }
 
   get search(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "receiver");
     if (this.rec.query === null || this.rec.query === "") return "";
     return "?" + (this.rec.query as string);
   }
 
   set search(value: any) {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     const text = __wuToString(value);
     if (text === "") {
       this.rec.query = null;
@@ -2063,6 +2210,8 @@ class NodeURL {
   }
 
   get searchParams(): any {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     if (this.sp === null) {
       const text: string = this.rec.query === null ? "" : (this.rec.query as string);
       const params: any = new NodeURLSearchParams(text);
@@ -2073,11 +2222,15 @@ class NodeURL {
   }
 
   get hash(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     if (this.rec.fragment === null || this.rec.fragment === "") return "";
     return "#" + (this.rec.fragment as string);
   }
 
   set hash(value: any) {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "private");
     const text = __wuToString(value);
     if (text === "") {
       this.rec.fragment = null;
@@ -2090,10 +2243,14 @@ class NodeURL {
   }
 
   toString(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "receiver");
     return __wuSerializeURL(this.rec, false);
   }
 
   toJSON(): string {
+    const thisArg: any = this;
+    __wuCheckURL(thisArg, "receiver");
     return __wuSerializeURL(this.rec, false);
   }
 
@@ -2165,3 +2322,131 @@ function __wuRecordFrom(
   rec.path = path;
   return rec;
 }
+
+Object.defineProperty(NodeURLSearchParams.prototype, Symbol.toStringTag, {
+  value: "URLSearchParams",
+  configurable: true,
+});
+Object.defineProperty(NodeURL.prototype, Symbol.toStringTag, {
+  value: "URL",
+  configurable: true,
+});
+
+// The default iterator of a `URLSearchParams` is the very `entries` function,
+// as WebIDL's iterable declarations require (`test-whatwg-url-properties.js`
+// compares the function's name).
+Object.defineProperty(NodeURLSearchParams.prototype, Symbol.iterator, {
+  value: NodeURLSearchParams.prototype.entries,
+  writable: true,
+  configurable: true,
+});
+
+// `util.inspect` output, ported from Node's `lib/internal/url.js`. The methods
+// are object-literal methods so that, like Node's, they own no `prototype`;
+// the engine leaves a computed method's `name` empty
+// (https://github.com/UrubuCode/zun/issues/125), so it is set explicitly.
+const __wuInspectSymbol: any = Symbol.for("nodejs.util.inspect.custom");
+
+function __wuInnerOptions(depth: any, options: any): any {
+  const inner: any = {};
+  if (options !== undefined && options !== null) {
+    const keys: any = Object.keys(options);
+    for (let i = 0; i < __wuALen(keys); i++) inner[keys[i] as string] = options[keys[i] as string];
+  }
+  if (depth !== null && depth !== undefined) inner.depth = Number(depth) - 1;
+  return inner;
+}
+
+function __wuBreakLength(options: any): number {
+  if (options === undefined || options === null || options.breakLength === undefined) return 128;
+  return Number(options.breakLength);
+}
+
+const __wuInspectMethods: any = {
+  [__wuInspectSymbol](depth: any, options: any): any {
+    const self: any = this;
+    __wuCheckThis(self, "URLSearchParams");
+    if (typeof depth === "number" && depth < 0) return "[Object]";
+    const inner: any = __wuInnerOptions(depth, options);
+    const output: string[] = [];
+    let length = -2;
+    for (let i = 0; i < __wuALen(self.list); i++) {
+      const piece: string = inspect(self.list[i][0], inner) + " => " + inspect(self.list[i][1], inner);
+      output.push(piece);
+      length = length + __wuLen(piece) + 2;
+    }
+    if (__wuALen(output) === 0) return "URLSearchParams {}";
+    if (length > __wuBreakLength(options)) return "URLSearchParams {\n  " + output.join(",\n  ") + " }";
+    return "URLSearchParams { " + output.join(", ") + " }";
+  },
+};
+
+const __wuIteratorInspectMethods: any = {
+  [__wuInspectSymbol](depth: any, options: any): any {
+    const self: any = this;
+    __wuCheckIter(self);
+    if (typeof depth === "number" && depth < 0) return "[Object]";
+    const inner: any = __wuInnerOptions(depth, options);
+    const rest: any = [];
+    for (let i = Number(self.index); i < __wuALen(self.items); i++) rest.push(self.items[i]);
+    const strs: string[] = [];
+    for (let i = 0; i < __wuALen(rest); i++) strs.push(inspect(rest[i], inner));
+    const whole: string = inspect(rest, inner);
+    const body: string = Number(whole.indexOf("\n")) >= 0
+      ? "\n  " + strs.join(",\n  ")
+      : " " + strs.join(", ");
+    return "URLSearchParams Iterator {" + body + " }";
+  },
+};
+
+const __wuURLInspectMethods: any = {
+  [__wuInspectSymbol](depth: any, options: any): any {
+    const self: any = this;
+    __wuCheckURL(self, "private");
+    if (typeof depth === "number" && depth < 0) return self;
+    const ctor: any = self.constructor;
+    const name: string = ctor === NodeURL || ctor === undefined ? "URL" : String(ctor.name);
+    const obj: any = {
+      href: self.href,
+      origin: self.origin,
+      protocol: self.protocol,
+      username: self.username,
+      password: self.password,
+      host: self.host,
+      hostname: self.hostname,
+      port: self.port,
+      pathname: self.pathname,
+      search: self.search,
+      searchParams: self.searchParams,
+      hash: self.hash,
+    };
+    return name + " " + inspect(obj, options);
+  },
+};
+
+function __wuInstallInspect(target: any, holder: any): void {
+  const fn: any = holder[__wuInspectSymbol];
+  Object.defineProperty(fn, "name", { value: "[nodejs.util.inspect.custom]", configurable: true });
+  Object.defineProperty(target, __wuInspectSymbol, { value: fn, writable: true, configurable: true });
+}
+__wuInstallInspect(NodeURLSearchParams.prototype, __wuInspectMethods);
+__wuInstallInspect(NodeURL.prototype, __wuURLInspectMethods);
+__wuInstallInspect(NodeURLSearchParamsIterator.prototype, __wuIteratorInspectMethods);
+
+// WebIDL makes every string-keyed operation and attribute enumerable, where a
+// class body makes them non-enumerable; Node redefines them, and so does this.
+// Statics (`canParse`, `parse`, ...) follow suit.
+function __wuMakeEnumerable(target: any): void {
+  const names: any = Object.getOwnPropertyNames(target);
+  for (let i = 0; i < __wuALen(names); i++) {
+    const name: string = names[i] as string;
+    if (name === "constructor" || name === "prototype" || name === "length" || name === "name") continue;
+    const desc: any = Object.getOwnPropertyDescriptor(target, name);
+    if (desc === undefined || desc.configurable !== true) continue;
+    desc.enumerable = true;
+    Object.defineProperty(target, name, desc);
+  }
+}
+__wuMakeEnumerable(NodeURL.prototype);
+__wuMakeEnumerable(NodeURL);
+__wuMakeEnumerable(NodeURLSearchParams.prototype);
