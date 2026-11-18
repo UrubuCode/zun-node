@@ -353,6 +353,10 @@ function __vmScan(code: string): any {
   const bounds: number[] = [0];
   const vars: string[] = [];
   const fns: string[] = [];
+  // Every identifier the source assigns to (`x = ...`, `x += ...`, `x++`,
+  // `++x`) and every identifier it declares anywhere; see `__vmAssignedNames`.
+  const assigned: string[] = [];
+  const declared: string[] = [];
   const n: number = Number(code.length);
   let i = 0;
   let depth = 0;
@@ -439,6 +443,35 @@ function __vmScan(code: string): any {
       const at: number = i;
       while (i < n && __vmIsIdentChar(code.charAt(i))) i++;
       const word: string = code.slice(at, i);
+      if (
+        prevWord === "let" || prevWord === "const" || prevWord === "var" ||
+        prevWord === "function" || prevWord === "class"
+      ) {
+        if (!__vmHas(declared, word)) declared.push(word);
+      } else if (prev !== ".") {
+        let j: number = i;
+        while (j < n && (code.charAt(j) === " " || code.charAt(j) === "	")) j++;
+        const a: string = code.charAt(j);
+        const b: string = j + 1 < n ? code.charAt(j + 1) : "";
+        const pre2: string = at >= 2 ? code.slice(at - 2, at) : "";
+        let isWrite = false;
+        if (a === "=" && b !== "=" && b !== ">") isWrite = true;
+        else if ((a === "+" && b === "+") || (a === "-" && b === "-")) isWrite = true;
+        else if (pre2 === "++" || pre2 === "--") isWrite = true;
+        else if (b === "=" && "+-*/%|&^".indexOf(a) !== -1 && a !== "") isWrite = true;
+        else {
+          const rest: string = code.slice(j, j + 4);
+          if (
+            rest.slice(0, 3) === "**=" || rest.slice(0, 3) === "<<=" ||
+            rest.slice(0, 3) === ">>=" || rest === ">>>=" ||
+            rest.slice(0, 3) === "??=" || rest.slice(0, 3) === "||=" ||
+            rest.slice(0, 3) === "&&="
+          ) {
+            isWrite = true;
+          }
+        }
+        if (isWrite && !__vmHas(assigned, word)) assigned.push(word);
+      }
       if (depth === 0) {
         if (word === "var") {
           mode = "var";
@@ -484,7 +517,7 @@ function __vmScan(code: string): any {
     }
     i++;
   }
-  return { bounds: bounds, vars: vars, fns: fns };
+  return { bounds: bounds, vars: vars, fns: fns, assigned: assigned, declared: declared };
 }
 
 // Trailing whitespace and one trailing `;` removed, so a statement such as
@@ -625,6 +658,37 @@ function __vmBuildBody(
   return out + "return " + __VM_RESULT + ";\n";
 }
 
+// The implicit globals a script assigns, found lexically. The engine used to
+// reject a write to an undeclared name at compile time and name it in the
+// diagnostic, which `__vmUnknownNames` still reads; it now compiles the write
+// and throws `ReferenceError` when it runs, so the names have to be known up
+// front. Over-approximating is harmless -- an extra bridged `let` is shadowed
+// by any inner binding of the same name -- and a bridged name that collides
+// with a declaration the scan missed makes the compile fail, which
+// `__vmCompile` answers by retrying without the lexical guesses.
+const __VM_KEYWORDS: string[] = [
+  "this", "true", "false", "null", "undefined", "arguments", "eval", "if", "for",
+  "while", "return", "typeof", "new", "delete", "void", "in", "of", "instanceof",
+];
+let __vmNoGuess: any = false;
+function __vmAssignedNames(scan: any, params: string[], vars: string[], fns: string[]): string[] {
+  const out: string[] = [];
+  const assigned: string[] = scan.assigned;
+  const n: number = Number(assigned.length);
+  for (let i = 0; i < n; i++) {
+    const name: string = assigned[i];
+    if (
+      __vmHas(scan.declared, name) || __vmHas(params, name) || __vmHas(vars, name) ||
+      __vmHas(fns, name) || __vmHas(__VM_KEYWORDS, name) || !__vmIsIdentifier(name) ||
+      name === __VM_CTX || name === __VM_ARGS || name === __VM_RESULT
+    ) {
+      continue;
+    }
+    out.push(name);
+  }
+  return out;
+}
+
 // Compile `code` into a callable, discovering the implicit globals it assigns
 // and (for a script) the completion-value split.
 //
@@ -639,7 +703,10 @@ function __vmCompile(code: string, params: string[], asFunction: boolean): any {
   const scan: any = __vmScan(code);
   const hoistedVars: string[] = asFunction ? [] : scan.vars;
   const hoistedFns: string[] = asFunction ? [] : scan.fns;
-  const bridged: string[] = [];
+  const bridged: string[] = __vmNoGuess
+    ? []
+    : __vmAssignedNames(scan, params, hoistedVars, hoistedFns);
+  const guessed: boolean = Number(bridged.length) > 0;
   let error = "";
   let rounds = 0;
   while (rounds < __VM_MAX_BRIDGE_ROUNDS) {
@@ -668,6 +735,16 @@ function __vmCompile(code: string, params: string[], asFunction: boolean): any {
       }
     }
     if (!added) break;
+  }
+  if (error !== "" && guessed) {
+    __vmNoGuess = true;
+    let retry: any;
+    try {
+      retry = __vmCompile(code, params, asFunction);
+    } finally {
+      __vmNoGuess = false;
+    }
+    if (retry.error === "") return retry;
   }
   // A copy-back line can be the only thing that fails to compile -- a
   // `function` name read as a value is lost in this engine (zun#17/#19) -- and
@@ -832,7 +909,10 @@ function __vmValidateContext(contextifiedObject: any): void {
 
 // `lib/vm.js`' `createContext`.
 function __vmCreateContext(contextObject?: any, options?: any): any {
-  let target: any = contextObject === undefined ? {} : contextObject;
+  // `target` is never reassigned: in this engine a later `target = {}` made a
+  // dynamic call (`vm.createContext(obj)`) see `contextObject` as `undefined`
+  // at function entry, so the DONT_CONTEXTIFY case picks its own binding.
+  const target: any = contextObject === undefined ? {} : contextObject;
   if (target !== __vmDontContextify && __vmIsContext(target)) return target;
 
   const opts: any = options === undefined ? {} : options;
@@ -859,9 +939,17 @@ function __vmCreateContext(contextObject?: any, options?: any): any {
   // `vm.constants.DONT_CONTEXTIFY` asks for a context whose global is a plain
   // new global object rather than a proxy over a sandbox; the object this
   // returns is that global.
-  if (target === __vmDontContextify) target = {};
-  __vmContexts.push(target);
-  return target;
+  const global: any = target === __vmDontContextify ? {} : target;
+  __vmContexts.push(global);
+  return global;
+}
+
+// The canonical binding of `vm.createContext` (see the bundler's table): a
+// dynamic `vm.createContext(obj)` call reached `__vmCreateContext` with its
+// first argument read as `undefined` in this engine, so the call is made
+// static.
+function createContext(contextObject?: any, options?: any): any {
+  return __vmCreateContext(contextObject, options);
 }
 
 // `lib/vm.js`' `getContextOptions` — the `contextName`/`contextOrigin`/
@@ -1014,7 +1102,9 @@ function __vmRunCompiled(fn: any, context: any, isThisContext: boolean): any {
   const saved: any[] = isThisContext ? [] : __vmInstall(context);
   global[__VM_CTX] = isThisContext ? globalThis : context;
   try {
-    return fn();
+    // A script's `this` is its context global: `this.x = 1` and
+    // `Object.defineProperty(this, ...)` must land on the sandbox.
+    return fn.call(isThisContext ? globalThis : context);
   } finally {
     if (!isThisContext) __vmUninstall(context, saved);
     if (hadContext) {
@@ -1350,7 +1440,7 @@ const __vmConstants: any = {
 // a compile entry point the engine does not expose (see the header).
 const __node_vm: any = {
   Script: Script,
-  createContext: __vmCreateContext,
+  createContext: createContext,
   createScript: __vmCreateScript,
   runInContext: __vmRunInContext,
   runInNewContext: __vmRunInNewContext,
