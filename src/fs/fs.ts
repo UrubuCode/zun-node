@@ -1169,16 +1169,18 @@ function __fsTruncateSync(path: any, len?: any): void {
     return;
   }
   const resolved: string = __fsGetValidatedPath(path);
-  const length: number = len === undefined || len === null ? 0 : Number(len);
+  // Only an omitted length defaults; `null` is rejected by the integer check.
+  const length: any = len === undefined ? 0 : len;
   __fsValidateInteger(length, "len", -9007199254740991, 9007199254740991);
-  __fsVoid(__fsNative.fsTruncate(resolved, length));
+  __fsVoid(__fsNative.fsTruncate(resolved, Number(length)));
 }
 
 function __fsFtruncateSync(fd: any, len?: any): void {
   const resolvedFd: number = __fsGetValidatedFd(fd);
-  const length: number = len === undefined || len === null ? 0 : Number(len);
+  // Only an omitted length defaults; `null` is rejected by the integer check.
+  const length: any = len === undefined ? 0 : len;
   __fsValidateInteger(length, "len", -9007199254740991, 9007199254740991);
-  __fsVoid(__fsNative.fsFtruncate(resolvedFd, length));
+  __fsVoid(__fsNative.fsFtruncate(resolvedFd, Number(length)));
 }
 
 function __fsOpenSync(path: any, flags?: any, mode?: any): number {
@@ -2220,6 +2222,9 @@ const fs: any = {
   },
   ftruncate(fd: any, len?: any, callback?: any): void {
     const tail: any[] = __fsTail(len, callback);
+    // Node validates the descriptor and the length before the callback.
+    __fsGetValidatedFd(fd);
+    if (tail[0] !== undefined) __fsValidateInteger(tail[0], "len", -9007199254740991, 9007199254740991);
     __fsRunAsync(tail[1], function (): any {
       __fsFtruncateSync(fd, tail[0]);
       return undefined;
@@ -2434,6 +2439,8 @@ const fs: any = {
   },
   truncate(path: any, len?: any, callback?: any): void {
     const tail: any[] = __fsTail(len, callback);
+    // Node validates the length before the callback.
+    if (tail[0] !== undefined) __fsValidateInteger(tail[0], "len", -9007199254740991, 9007199254740991);
     __fsRunAsync(tail[1], function (): any {
       __fsTruncateSync(path, tail[0]);
       return undefined;
