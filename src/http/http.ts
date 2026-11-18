@@ -374,6 +374,8 @@ function __httpNewParser(kind: number, handler: any): any {
     trailers: [],
     consumed: 0,
     lenient: false,
+    // Node's `parser.incoming`: the request being received or read.
+    incoming: null,
   };
 }
 
@@ -423,6 +425,11 @@ function __httpDrive(p: any): void {
         return;
       }
       let line: string = buf.slice(0, eol);
+      if (line.indexOf("\r") >= 0 || line.indexOf("\n") >= 0) {
+        // A bare CR or LF inside the size line (smuggling).
+        __httpParserError(p, "HPE_LF_EXPECTED", "Expected LF after chunk size");
+        return;
+      }
       const semi: number = Number(line.indexOf(";"));
       if (semi >= 0) line = line.slice(0, semi);
       line = line.trim();
@@ -523,6 +530,12 @@ function __httpParseHead(p: any): boolean {
   }
   p.buf = buf;
   if (Number(buf.length) === 0) return false;
+  // llhttp knows its methods and fails on the first byte that cannot start
+  // one, without waiting for the rest of the head.
+  if (Number(p.kind) === 0 && !__httpMethodPrefixOk(buf)) {
+    __httpParserError(p, "HPE_INVALID_METHOD", "Invalid method encountered");
+    return false;
+  }
   const end: number = Number(buf.indexOf("\r\n\r\n"));
   if (end < 0) {
     if (Number(buf.length) > Number(p.maxHeaderSize)) {
@@ -558,7 +571,7 @@ function __httpParseHead(p: any): boolean {
       return false;
     }
     const method: string = first.slice(0, sp1);
-    if (!__httpCheckIsToken(method)) {
+    if (__HTTP_METHODS.indexOf(method) < 0) {
       __httpParserError(p, "HPE_INVALID_METHOD", "Invalid method encountered");
       return false;
     }
@@ -642,7 +655,7 @@ function __httpParseHead(p: any): boolean {
     const value: string = line.slice(colon + 1).trim();
     // llhttp is strict about line endings and control characters in values: a
     // bare CR or LF is how header smuggling hides a second header.
-    const badValue: number = __httpBadValueChar(value);
+    const badValue: number = __httpBadValueChar(line.slice(colon + 1));
     if (badValue === 13) {
       __httpParserError(p, "HPE_LF_EXPECTED", "Missing expected LF after header value");
       return false;
@@ -671,15 +684,6 @@ function __httpParseHead(p: any): boolean {
       contentLength = n;
     } else if (lname === "transfer-encoding") {
       hasTE = true;
-      const parts: string[] = value.toLowerCase().split(",");
-      for (const part of parts) {
-        if (chunked) {
-          // `chunked` must be the final coding.
-          __httpParserError(p, "HPE_INVALID_TRANSFER_ENCODING", "Invalid `Transfer-Encoding` header value");
-          return false;
-        }
-        if (part.trim() === "chunked") chunked = true;
-      }
     } else if (lname === "connection") {
       connection = connection === "" ? value.toLowerCase() : connection + "," + value.toLowerCase();
     } else if (lname === "upgrade") {
@@ -687,12 +691,24 @@ function __httpParseHead(p: any): boolean {
     }
   }
 
+  // Transfer codings, read after the loop so that an obs-fold continuation
+  // counts: `chunked` must be the final one.
+  let h = 0;
+  while (hasTE && h + 1 < Number(info.headers.length)) {
+    if (String(info.headers[h]).toLowerCase() === "transfer-encoding") {
+      const parts: string[] = String(info.headers[h + 1]).toLowerCase().split(",");
+      for (const part of parts) {
+        if (chunked) {
+          __httpParserError(p, "HPE_INVALID_TRANSFER_ENCODING", "Invalid `Transfer-Encoding` header value");
+          return false;
+        }
+        if (part.trim() === "chunked") chunked = true;
+      }
+    }
+    h = h + 2;
+  }
   if (hasTE && contentLength >= 0) {
     __httpParserError(p, "HPE_INVALID_TRANSFER_ENCODING", "Transfer-Encoding can't be present with Content-Length");
-    return false;
-  }
-  if (hasTE && !chunked && Number(p.kind) === 0) {
-    __httpParserError(p, "HPE_INVALID_TRANSFER_ENCODING", "Request has invalid `Transfer-Encoding`");
     return false;
   }
 
@@ -721,6 +737,12 @@ function __httpParseHead(p: any): boolean {
     return false;
   }
   if (Number(p.state) === 7) return false;
+  if (hasTE && !chunked && Number(p.kind) === 0) {
+    // llhttp reports this after the head callback: the request is emitted,
+    // its body never arrives.
+    __httpParserError(p, "HPE_INVALID_TRANSFER_ENCODING", "Request has invalid `Transfer-Encoding`");
+    return false;
+  }
 
   const status: number = Number(info.statusCode);
   let noBody = false;
@@ -754,6 +776,18 @@ function __httpParseHead(p: any): boolean {
   // A response without a length runs until the connection closes.
   p.state = 6;
   return true;
+}
+
+// Whether the start of a request buffer can still be (or is) a known method.
+function __httpMethodPrefixOk(buf: string): boolean {
+  const sp: number = Number(buf.indexOf(" "));
+  const head: string = sp >= 0 ? buf.slice(0, sp) : buf;
+  if (sp >= 0) return __HTTP_METHODS.indexOf(head) >= 0;
+  if (Number(head.length) > 24) return false;
+  for (const m of __HTTP_METHODS) {
+    if (m.slice(0, Number(head.length)) === head) return true;
+  }
+  return false;
 }
 
 // The first character a header value may not hold (a CTL other than HTAB), or 0.
@@ -1434,6 +1468,13 @@ function __httpStoreHeader(self: any, firstLine: string): void {
       keepAliveHdr = true;
     }
   }
+  // Node's `writeHead`: a 204/304 must not be chunked, so the connection
+  // closes instead of keeping a framing the peer will not read.
+  const status: number = Number(self.statusCode);
+  if (self.chunkedEncoding === true && (status === 204 || status === 304)) {
+    self.chunkedEncoding = false;
+    self.shouldKeepAlive = false;
+  }
   if (self.sendDate === true && !date) {
     header = header + "Date: " + new Date().toUTCString() + "\r\n";
   }
@@ -1883,6 +1924,7 @@ function __httpServerAttach(server: any, socket: any): void {
   };
   conn.parser = __httpNewParser(0, handler);
   conn.parser.maxHeaderSize = Number(server._httpState.maxHeaderSize);
+  socket.parser = conn.parser;
 
   socket.on("data", function (chunk: any): void {
     if (conn.closed === true) return;
@@ -2132,6 +2174,7 @@ function __httpServerOnHeaders(conn: any, info: any): any {
   }
 
   conn.req = req;
+  conn.parser.incoming = req;
   socket.setTimeout(Number(server.timeout));
 
   const res: any = new ServerResponse(req);
@@ -2225,6 +2268,17 @@ function __httpServerResFinish(conn: any, res: any): void {
   }
   res.detachSocket(socket);
   if (conn.current === res) conn.current = null;
+  // Node's `clearIncoming`.
+  const parser: any = conn.parser;
+  if (req !== null && req !== undefined && parser.incoming === req) {
+    if (req.readableEnded === true) {
+      parser.incoming = null;
+    } else {
+      req.once("end", function (): void {
+        if (parser.incoming === req) parser.incoming = null;
+      });
+    }
+  }
   __httpTick(function (): void {
     if (res._closeEmitted !== true) {
       res._closeEmitted = true;
@@ -2655,8 +2709,9 @@ function __httpClientSetSocketTimeout(sock: any, msecs: any): void {
 function __httpClientListenTimeout(req: any): void {
   if (req._timeoutArmed === true) return;
   req._timeoutArmed = true;
+  // Node's `listenSocketTimeout` delegates the socket's timeout once.
   const arm: any = function (s: any): void {
-    s.on("timeout", function (): void {
+    s.once("timeout", function (): void {
       const cs: any = s._httpConn;
       if (cs !== null && cs !== undefined && cs.req === req) req.emit("timeout");
     });
