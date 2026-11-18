@@ -696,6 +696,17 @@ function __wtCloneValue(value: any, moved: any[], replacements: any[], seen: any
     clones.push(copy);
     return copy;
   }
+  if (value instanceof ArrayBuffer) {
+    // An ArrayBuffer that is not in the transfer list is copied byte by byte.
+    const source: any = new Uint8Array(value);
+    const span = Number(source.length);
+    const copy: any = new ArrayBuffer(span);
+    const target: any = new Uint8Array(copy);
+    for (let i = 0; i < span; i++) target[i] = source[i];
+    seen.push(value);
+    clones.push(copy);
+    return copy;
+  }
   if (Array.isArray(value)) {
     const copy: any[] = [];
     seen.push(value);
@@ -794,6 +805,9 @@ function __wtIsArrayBufferLike(value: any): boolean {
   if (Array.isArray(value)) return false;
   if (value instanceof MessagePort) return false;
   if (ArrayBuffer.isView(value) === true) return false;
+  // Newer engines expose a real `ArrayBuffer`; older ones only leave the
+  // `constructor === undefined` fingerprint described above.
+  if (value instanceof ArrayBuffer) return true;
   return value.constructor === undefined;
 }
 
@@ -1067,9 +1081,9 @@ function __wtArmDrain(port: any): void {
   if (Number(port.__wtQueue.length) === 0) return;
   port.__wtDrainArmed = true;
   if (Number(__wtDraining.depth) > 0) {
-    port.__wtDrainHandle = setTimeout(__wtDrainPort, 0, port);
+    port.__wtDrainHandle = setTimeout(() => __wtDrainPort(port), 0);
   } else {
-    port.__wtDrainHandle = setImmediate(__wtDrainPort, port);
+    port.__wtDrainHandle = setImmediate(() => __wtDrainPort(port));
   }
 }
 
@@ -1285,7 +1299,7 @@ function __wtClosePort(port: any): void {
     sibling.__wtClosing = true;
     sibling.__wtDetached = true;
   }
-  const handle: any = setImmediate(__wtFinishClose, port);
+  const handle: any = setImmediate(() => __wtFinishClose(port));
   // A closing port always keeps the loop alive long enough to fire 'close':
   // Node's handle close is a real loop event, and `close(cb)` must run its
   // callback.
@@ -1400,9 +1414,12 @@ class BroadcastChannel extends EventTarget {
   __wtRefed: boolean = true;
   __wtDrainArmed: boolean = false;
 
-  constructor(name: any = __WT_MISSING) {
+  // A rest parameter, not a defaulted one: `new BroadcastChannel(undefined)`
+  // is legal (name "undefined") and only a missing argument throws.
+  constructor(...args: any[]) {
     super();
-    if (name === __WT_MISSING) {
+    const name: any = args[0];
+    if (Number(args.length) === 0) {
       throw new NodeTypeError("ERR_MISSING_ARGS", 'The "name" argument must be specified');
     }
     this.__wtEntries = [];
@@ -1535,7 +1552,7 @@ function __wtArmBroadcastDrain(channel: any): void {
   if (channel.__wtDrainArmed === true) return;
   if (Number(channel.__wtQueue.length) === 0) return;
   channel.__wtDrainArmed = true;
-  const handle: any = setImmediate(__wtDrainBroadcast, channel);
+  const handle: any = setImmediate(() => __wtDrainBroadcast(channel));
   if (channel.__wtRefed !== true) handle.unref();
 }
 
