@@ -170,7 +170,9 @@ Remaining gap: a plain `Uint8Array` answers `true` to `Buffer.isBuffer` and
 `instanceof Buffer` ([zun#113](https://github.com/UrubuCode/zun/issues/113)),
 so object-mode tests that assert a view is *not* a Buffer still fail.
 
-Measured 2026-11-18 on Windows with the rebuilt engine: **118 / 204** (was
+Remeasured 2026-11-18 after the `stream.once` fix: still **118 / 204**, the same
+set of passing files (the fix changed no file's outcome). First measured that
+day with the rebuilt engine: **118 / 204** (was
 111 / 204). The bundler also renames shim declarations that collide with new
 engine globals (`setTimeout`, `Blob`, ...;
 [zun#111](https://github.com/UrubuCode/zun/issues/111)) — without it every

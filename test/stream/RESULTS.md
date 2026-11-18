@@ -29,14 +29,14 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-big-push.js` | ✅ pass | |
 | `test-stream-catch-rejections.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-stream-compose-operator.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: compose is not a function |
-| `test-stream-compose.js` | ❌ type error | bundles/test-stream-compose.ts:27698:12: error: [SEM0001] no field or setter 'stuff' on this type |
+| `test-stream-compose.js` | ❌ type error | bundles/test-stream-compose.ts:28111:12: error: [SEM0001] no field or setter 'stuff' on this type |
 | `test-stream-construct.js` | ✅ pass | |
 | `test-stream-consumers.js` | ❌ assertion | AssertionError [rejects]: Expected values to be strictly deep-equal: |
 | `test-stream-decoder-objectmode.js` | ✅ pass | |
 | `test-stream-destroy-event-order.js` | ✅ pass | |
 | `test-stream-destroy.js` | ❌ runtime | Error [ERR_METHOD_NOT_IMPLEMENTED]: node:net needs the zun-node native extension (run with --ext) |
 | `test-stream-drop-take.js` | ❌ assertion | AssertionError [throws]: Missing expected exception. |
-| `test-stream-duplex-destroy.js` | ❌ type error | bundles/test-stream-duplex-destroy.ts:27428:10: error: [SEM0001] no field or setter 'end' on this type |
+| `test-stream-duplex-destroy.js` | ❌ type error | bundles/test-stream-duplex-destroy.ts:27841:10: error: [SEM0001] no field or setter 'end' on this type |
 | `test-stream-duplex-end.js` | ✅ pass | |
 | `test-stream-duplex-from.js` | ❌ parse | zun: runtime error: unhandled exception: ERR_INVALID_ARG_TYPE: The "body" argument must be of type function or |
 | `test-stream-duplex-props.js` | ✅ pass | |
@@ -50,23 +50,23 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-err-multiple-callback-construction.js` | ✅ pass | |
 | `test-stream-error-once.js` | ✅ pass | |
 | `test-stream-event-names.js` | ✅ pass | |
-| `test-stream-events-prepend.js` | ❌ type error | bundles/test-stream-events-prepend.ts:27223:7: error: [SEM0001] duplicate class |
+| `test-stream-events-prepend.js` | ❌ type error | bundles/test-stream-events-prepend.ts:27615:7: error: [SEM0001] duplicate class |
 | `test-stream-filter.js` | ❌ assertion | AssertionError [throws]: Missing expected exception. |
-| `test-stream-finished.js` | ❌ type error | bundles/test-stream-finished.ts:38181:12: error: [SEM0001] no field or setter 'response' on this type |
+| `test-stream-finished.js` | ❌ type error | bundles/test-stream-finished.ts:38786:12: error: [SEM0001] no field or setter 'response' on this type |
 | `test-stream-flatMap.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: __fsNative is not defined |
 | `test-stream-forEach.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-stream-inheritance.js` | ❌ assertion | AssertionError [==]: false == true |
 | `test-stream-ispaused.js` | ✅ pass | |
 | `test-stream-map.js` | ❌ assertion | AssertionError [throws]: Missing expected exception. |
-| `test-stream-objectmode-undefined.js` | ❌ type error | bundles/test-stream-objectmode-undefined.ts:27266:14: error: [SEM0001] no method 'push' on this type |
+| `test-stream-objectmode-undefined.js` | ❌ type error | bundles/test-stream-objectmode-undefined.ts:27645:14: error: [SEM0001] no method 'push' on this type |
 | `test-stream-once-readable-pipe.js` | ✅ pass | |
 | `test-stream-passthrough-drain.js` | ✅ pass | |
-| `test-stream-pipe-after-end.js` | ❌ type error | bundles/test-stream-pipe-after-end.ts:27261:10: error: [SEM0001] no field or setter '_ended' on this type |
+| `test-stream-pipe-after-end.js` | ❌ type error | bundles/test-stream-pipe-after-end.ts:27640:10: error: [SEM0001] no field or setter '_ended' on this type |
 | `test-stream-pipe-await-drain-manual-resume.js` | ✅ pass | |
 | `test-stream-pipe-await-drain-push-while-write.js` | ✅ pass | |
 | `test-stream-pipe-await-drain.js` | ✅ pass | |
 | `test-stream-pipe-cleanup-pause.js` | ✅ pass | |
-| `test-stream-pipe-cleanup.js` | ❌ type error | bundles/test-stream-pipe-cleanup.ts:27302:22: error: [SEM0001] no field or getter 'endCalls' on this type |
+| `test-stream-pipe-cleanup.js` | ❌ type error | bundles/test-stream-pipe-cleanup.ts:27681:22: error: [SEM0001] no field or getter 'endCalls' on this type |
 | `test-stream-pipe-deadlock.js` | ✅ pass | |
 | `test-stream-pipe-error-handling.js` | ❌ runtime | zun: runtime error: unhandled exception: Error: This stream turned into bacon. |
 | `test-stream-pipe-error-unhandled.js` | ✅ pass | |
@@ -74,12 +74,12 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-pipe-flow-after-unpipe.js` | ✅ pass | |
 | `test-stream-pipe-flow.js` | ❌ parse | TypeError [ERR_INVALID_ARG_TYPE]: The "chunk" argument must be of type string or an instance of Buffer, TypedA |
 | `test-stream-pipe-manual-resume.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: Readable is not defined |
-| `test-stream-pipe-multiple-pipes.js` | ❌ type error | bundles/test-stream-pipe-multiple-pipes.ts:27250:10: error: [SEM0001] no field or setter 'output' on this type |
+| `test-stream-pipe-multiple-pipes.js` | ❌ type error | bundles/test-stream-pipe-multiple-pipes.ts:27629:10: error: [SEM0001] no field or setter 'output' on this type |
 | `test-stream-pipe-needDrain.js` | ✅ pass | |
 | `test-stream-pipe-objectmode-to-non-objectmode.js` | ✅ pass | |
 | `test-stream-pipe-same-destination-twice.js` | ✅ pass | |
 | `test-stream-pipe-unpipe-streams.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: Readable is not defined |
-| `test-stream-pipe-without-listenerCount.js` | ❌ type error | bundles/test-stream-pipe-without-listenerCount.ts:27237:3: error: [SEM0001] no field or setter 'listenerCount' |
+| `test-stream-pipe-without-listenerCount.js` | ❌ type error | bundles/test-stream-pipe-without-listenerCount.ts:27616:3: error: [SEM0001] no field or setter 'listenerCount' |
 | `test-stream-pipeline-async-iterator.js` | ✅ pass | |
 | `test-stream-pipeline-duplex.js` | ✅ pass | |
 | `test-stream-pipeline-http2.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-stream-pipeline-http2.js: |
@@ -88,17 +88,17 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-pipeline-queued-end-in-destroy.js` | ✅ pass | |
 | `test-stream-pipeline-uncaught.js` | ❌ parse | zun: runtime error: unhandled exception: ERR_INVALID_RETURN_VALUE: Expected AsyncIterable or Promise to be ret |
 | `test-stream-pipeline-with-empty-string.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-stream-pipeline.js` | ❌ type error | bundles/test-stream-pipeline.ts:39408:12: error: [SEM0001] no field or setter 'endCount' on this type |
+| `test-stream-pipeline.js` | ❌ type error | bundles/test-stream-pipeline.ts:40013:12: error: [SEM0001] no field or setter 'endCount' on this type |
 | `test-stream-preprocess.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: __fsNative is not defined |
 | `test-stream-promises.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: __fsNative is not defined |
 | `test-stream-push-order.js` | ✅ pass | |
-| `test-stream-push-strings.js` | ❌ type error | bundles/test-stream-push-strings.ts:27262:10: error: [SEM0001] no field or setter '_chunks' on this type |
+| `test-stream-push-strings.js` | ❌ type error | bundles/test-stream-push-strings.ts:27641:10: error: [SEM0001] no field or setter '_chunks' on this type |
 | `test-stream-readable-aborted.js` | ✅ pass | |
 | `test-stream-readable-add-chunk-during-data.js` | ✅ pass | |
-| `test-stream-readable-async-iterators.js` | ❌ parse | bundles/test-stream-readable-async-iterators.ts:37707:12: error: [SEM0001] no field or setter 'destroy' on thi |
+| `test-stream-readable-async-iterators.js` | ❌ parse | bundles/test-stream-readable-async-iterators.ts:38312:12: error: [SEM0001] no field or setter 'destroy' on thi |
 | `test-stream-readable-constructor-set-methods.js` | ✅ pass | |
 | `test-stream-readable-data.js` | ✅ pass | |
-| `test-stream-readable-default-encoding.js` | ❌ type error | bundles/test-stream-readable-default-encoding.ts:27256:3: error: [SEM0001] 'on' expects 2 to 2 argument(s), fo |
+| `test-stream-readable-default-encoding.js` | ❌ type error | bundles/test-stream-readable-default-encoding.ts:27635:3: error: [SEM0001] 'on' expects 2 to 2 argument(s), fo |
 | `test-stream-readable-destroy.js` | ❌ assertion | AssertionError [strictEqual]: Values have same structure but are not reference-equal: |
 | `test-stream-readable-didRead.js` | ✅ pass | |
 | `test-stream-readable-dispose.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: undefined is not a function |
@@ -130,12 +130,12 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-readable-strategy-option.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: ByteLengthQueuingStrategy is not defined |
 | `test-stream-readable-to-web-termination.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The Readable.toWeb() (no WHATWG stream gl |
 | `test-stream-readable-unpipe-resume.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: __fsNative is not defined |
-| `test-stream-readable-unshift.js` | ❌ type error | bundles/test-stream-readable-unshift.ts:27370:12: error: [SEM0001] no field or setter 'buffer' on this type |
+| `test-stream-readable-unshift.js` | ❌ type error | bundles/test-stream-readable-unshift.ts:27748:12: error: [SEM0001] no field or setter 'buffer' on this type |
 | `test-stream-readable-with-unimplemented-_read.js` | ✅ pass | |
 | `test-stream-readableListening-state.js` | ✅ pass | |
 | `test-stream-reduce.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-stream-set-default-hwm.js` | ✅ pass | |
-| `test-stream-toArray.js` | ❌ type error | bundles/test-stream-toArray.ts:27248:7: error: [SEM0001] 'fill' expects 1 to 3 argument(s), found 0 |
+| `test-stream-toArray.js` | ❌ type error | bundles/test-stream-toArray.ts:27626:7: error: [SEM0001] 'fill' expects 1 to 3 argument(s), found 0 |
 | `test-stream-toWeb-allows-server-response.js` | ❌ parse | Error [ERR_METHOD_NOT_IMPLEMENTED]: node:net needs the zun-node native extension (run with --ext) |
 | `test-stream-transform-callback-twice.js` | ✅ pass | |
 | `test-stream-transform-constructor-set-methods.js` | ✅ pass | |
@@ -156,16 +156,16 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-wrap-encoding.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-stream-wrap-encoding.js: |
 | `test-stream-wrap.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-stream-wrap.js: |
 | `test-stream-writable-aborted.js` | ✅ pass | |
-| `test-stream-writable-change-default-encoding.js` | ❌ type error | bundles/test-stream-writable-change-default-encoding.ts:27263:10: error: [SEM0001] no field or setter 'fn' on  |
+| `test-stream-writable-change-default-encoding.js` | ❌ type error | bundles/test-stream-writable-change-default-encoding.ts:27641:10: error: [SEM0001] no field or setter 'fn' on  |
 | `test-stream-writable-clear-buffer.js` | ✅ pass | |
 | `test-stream-writable-constructor-set-methods.js` | ✅ pass | |
-| `test-stream-writable-decoded-encoding.js` | ❌ type error | bundles/test-stream-writable-decoded-encoding.ts:27263:10: error: [SEM0001] no field or setter 'fn' on this ty |
+| `test-stream-writable-decoded-encoding.js` | ❌ type error | bundles/test-stream-writable-decoded-encoding.ts:27641:10: error: [SEM0001] no field or setter 'fn' on this ty |
 | `test-stream-writable-destroy.js` | ❌ assertion | AssertionError [strictEqual]: Values have same structure but are not reference-equal: |
 | `test-stream-writable-end-cb-error.js` | ✅ pass | |
 | `test-stream-writable-end-cb-uncaught.js` | ✅ pass | |
 | `test-stream-writable-end-multiple.js` | ✅ pass | |
 | `test-stream-writable-ended-state.js` | ✅ pass | |
-| `test-stream-writable-final-async.js` | ❌ parse | bundles/test-stream-writable-final-async.ts:27243:11: error: [SEM0001] async functions must declare a Promise  |
+| `test-stream-writable-final-async.js` | ❌ parse | bundles/test-stream-writable-final-async.ts:27621:11: error: [SEM0001] async functions must declare a Promise  |
 | `test-stream-writable-final-destroy.js` | ✅ pass | |
 | `test-stream-writable-final-throw.js` | ✅ pass | |
 | `test-stream-writable-finish-destroyed.js` | ✅ pass | |
@@ -179,7 +179,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-writable-writable.js` | ✅ pass | |
 | `test-stream-writable-write-cb-error.js` | ✅ pass | |
 | `test-stream-writable-write-cb-twice.js` | ✅ pass | |
-| `test-stream-writable-write-error.js` | ❌ type error | bundles/test-stream-writable-write-error.ts:27242:35: error: [SEM0001] spread arguments are not lowered yet |
+| `test-stream-writable-write-error.js` | ❌ type error | bundles/test-stream-writable-write-error.ts:27620:35: error: [SEM0001] spread arguments are not lowered yet |
 | `test-stream-writable-write-writev-finish.js` | ✅ pass | |
 | `test-stream-writableState-ending.js` | ✅ pass | |
 | `test-stream-writableState-uncorked-bufferedRequestCount.js` | ✅ pass | |
@@ -188,30 +188,30 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-stream-write-final.js` | ✅ pass | |
 | `test-stream-writev.js` | ✅ pass | |
 | `test-stream2-base64-single-char-read-end.js` | ✅ pass | |
-| `test-stream2-basic.js` | ❌ type error | bundles/test-stream2-basic.ts:27265:10: error: [SEM0001] no field or setter '_buffer' on this type |
-| `test-stream2-compatibility.js` | ❌ type error | bundles/test-stream2-compatibility.ts:27264:10: error: [SEM0001] no field or setter '_buffer' on this type |
+| `test-stream2-basic.js` | ❌ type error | bundles/test-stream2-basic.ts:27643:10: error: [SEM0001] no field or setter '_buffer' on this type |
+| `test-stream2-compatibility.js` | ❌ type error | bundles/test-stream2-compatibility.ts:27642:10: error: [SEM0001] no field or setter '_buffer' on this type |
 | `test-stream2-decode-partial.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: Readable is not defined |
 | `test-stream2-finish-pipe-error.js` | ✅ pass | |
 | `test-stream2-finish-pipe.js` | ✅ pass | |
 | `test-stream2-httpclient-response-end.js` | ❌ runtime | Error [ERR_METHOD_NOT_IMPLEMENTED]: node:net needs the zun-node native extension (run with --ext) |
 | `test-stream2-large-read-stall.js` | ✅ pass | |
-| `test-stream2-objects.js` | ❌ type error | bundles/test-stream2-objects.ts:27263:10: error: [SEM0001] no field or setter 'write' on this type |
-| `test-stream2-pipe-error-handling.js` | ❌ type error | bundles/test-stream2-pipe-error-handling.ts:27270:10: error: [SEM0001] no field or setter 'unpipe' on this typ |
+| `test-stream2-objects.js` | ❌ type error | bundles/test-stream2-objects.ts:27641:10: error: [SEM0001] no field or setter 'write' on this type |
+| `test-stream2-pipe-error-handling.js` | ❌ type error | bundles/test-stream2-pipe-error-handling.ts:27648:10: error: [SEM0001] no field or setter 'unpipe' on this typ |
 | `test-stream2-pipe-error-once-listener.js` | ✅ pass | |
 | `test-stream2-push.js` | ✅ pass | |
 | `test-stream2-read-sync-stack.js` | ❌ timeout |  |
 | `test-stream2-readable-empty-buffer-no-eof.js` | ✅ pass | |
-| `test-stream2-readable-legacy-drain.js` | ❌ type error | bundles/test-stream2-readable-legacy-drain.ts:27271:3: error: [SEM0001] no field or setter 'writable' on this  |
+| `test-stream2-readable-legacy-drain.js` | ❌ type error | bundles/test-stream2-readable-legacy-drain.ts:27649:3: error: [SEM0001] no field or setter 'writable' on this  |
 | `test-stream2-readable-non-empty-end.js` | ✅ pass | |
-| `test-stream2-readable-wrap-destroy.js` | ❌ type error | bundles/test-stream2-readable-wrap-destroy.ts:27240:11: error: [SEM0001] no field or setter 'pause' on this ty |
-| `test-stream2-readable-wrap-empty.js` | ❌ type error | bundles/test-stream2-readable-wrap-empty.ts:27261:11: error: [SEM0001] no field or setter 'pause' on this type |
+| `test-stream2-readable-wrap-destroy.js` | ❌ type error | bundles/test-stream2-readable-wrap-destroy.ts:27618:11: error: [SEM0001] no field or setter 'pause' on this ty |
+| `test-stream2-readable-wrap-empty.js` | ❌ type error | bundles/test-stream2-readable-wrap-empty.ts:27639:11: error: [SEM0001] no field or setter 'pause' on this type |
 | `test-stream2-readable-wrap-error.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-stream2-readable-wrap.js` | ❌ type error | bundles/test-stream2-readable-wrap.ts:27268:7: error: [SEM0001] no field or setter 'pause' on this type |
-| `test-stream2-set-encoding.js` | ❌ type error | bundles/test-stream2-set-encoding.ts:27262:10: error: [SEM0001] no field or setter 'pos' on this type |
-| `test-stream2-transform.js` | ❌ type error | bundles/test-stream2-transform.ts:27445:6: error: [SEM0001] no field or setter 'state' on this type |
-| `test-stream2-unpipe-drain.js` | ❌ type error | bundles/test-stream2-unpipe-drain.ts:27272:10: error: [SEM0001] no field or setter 'reads' on this type |
+| `test-stream2-readable-wrap.js` | ❌ type error | bundles/test-stream2-readable-wrap.ts:27646:7: error: [SEM0001] no field or setter 'pause' on this type |
+| `test-stream2-set-encoding.js` | ❌ type error | bundles/test-stream2-set-encoding.ts:27640:10: error: [SEM0001] no field or setter 'pos' on this type |
+| `test-stream2-transform.js` | ❌ type error | bundles/test-stream2-transform.ts:27823:6: error: [SEM0001] no field or setter 'state' on this type |
+| `test-stream2-unpipe-drain.js` | ❌ type error | bundles/test-stream2-unpipe-drain.ts:27650:10: error: [SEM0001] no field or setter 'reads' on this type |
 | `test-stream2-unpipe-leak.js` | ✅ pass | |
-| `test-stream2-writable.js` | ❌ type error | bundles/test-stream2-writable.ts:27263:10: error: [SEM0001] no field or setter 'buffer' on this type |
+| `test-stream2-writable.js` | ❌ type error | bundles/test-stream2-writable.ts:27641:10: error: [SEM0001] no field or setter 'buffer' on this type |
 | `test-stream3-cork-end.js` | ✅ pass | |
 | `test-stream3-cork-uncork.js` | ✅ pass | |
 | `test-stream3-pause-then-read.js` | ✅ pass | |
