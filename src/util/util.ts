@@ -2494,6 +2494,12 @@ function promisify(original: any): any {
   const custom: any = original[__promisifyCustomSymbol];
   if (custom !== undefined && custom !== null) {
     __utilValidateFunction(custom, "util.promisify.custom");
+    // Node marks the custom function as its own promisified form, so
+    // `promisify(promisify(fn)) === fn[promisify.custom]`.
+    // A plain store rather than Node's non-enumerable `defineProperty`. Today
+    // the store is lost when `custom` arrived through the `Any` lane, whose
+    // function wrapper does not carry the caller's own properties (zun#50).
+    custom[__promisifyCustomSymbol] = custom;
     return __utilBox(custom);
   }
 
