@@ -1405,3 +1405,20 @@ target/debug/zun run /tmp/bundle.ts
 
 `█████░░░░░░░░░░░░░░░░░░░` **21.4%** — 9 / 42 Node `test-runner-*` tests passing
 <!-- node-test_runner:end -->
+
+> `node:test` is library code in [`src/test/`](src/test/) (it used to be a
+> harness shim that ran every test synchronously at declaration): the suite
+> tree with Node's ordering, hook inheritance and `only`/name filtering,
+> `TestContext`/`SuiteContext`, the `spec`/`tap`/`dot` reporters and summary,
+> `mock` (functions, methods, accessors, properties, and `mock.timers` over
+> `setTimeout`/`setInterval`/`setImmediate`/`Date`/`scheduler.wait`), and
+> `run()`, which runs each file in a child process. `zun-node-run --test` is
+> the `node --test` CLI over it, including `--test-isolation=none`. Most
+> remaining failures need things the engine cannot do yet — a function
+> returned through a dynamic call loses its properties
+> ([zun#139](https://github.com/UrubuCode/zun/issues/139), worked around for
+> `mock.fn()` by boxing, which `then()` then ignores, zun#71), spread calls
+> into dynamic functions, source line/column locations, module loading at
+> run time (custom reporters, `mock.module`, coverage). Implementation and
+> gaps: [`test/test_runner/README.md`](test/test_runner/README.md); per-test
+> breakdown: [`test/test_runner/RESULTS.md`](test/test_runner/RESULTS.md).

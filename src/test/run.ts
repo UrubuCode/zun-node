@@ -542,42 +542,6 @@ __ntRunImpl.run = __ntRunMain;
 // src/bin/zun-node-run.rs turns that command line into a two-line script that
 // calls this with the Node flags it saw and the positional file arguments.
 
-function __ntCliFlag(flags: string[], name: string): any {
-  // The last occurrence wins, as with Node's option parser; a flag spelled
-  // `--name value` or `--name=value`. `true` for a bare boolean flag.
-  let value: any = undefined;
-  const n = Number(flags.length);
-  for (let i = 0; i < n; i++) {
-    const f = String(flags[i]);
-    if (f === name) {
-      if (i + 1 < n && String(flags[i + 1]).charAt(0) !== "-") {
-        value = String(flags[i + 1]);
-        i++;
-      } else {
-        value = true;
-      }
-    } else if (f.indexOf(name + "=") === 0) {
-      value = f.slice(name.length + 1);
-    }
-  }
-  return value;
-}
-
-function __ntCliFlagAll(flags: string[], name: string): string[] {
-  const out: string[] = [];
-  const n = Number(flags.length);
-  for (let i = 0; i < n; i++) {
-    const f = String(flags[i]);
-    if (f === name && i + 1 < n) {
-      out.push(String(flags[i + 1]));
-      i++;
-    } else if (f.indexOf(name + "=") === 0) {
-      out.push(f.slice(name.length + 1));
-    }
-  }
-  return out;
-}
-
 function __ntCli(run: any, flags: string[], files: string[]): void {
   const isolationFlag: any = __ntCliFlag(flags, "--test-isolation");
   const isolation: string = isolationFlag === undefined || isolationFlag === true ? "process" : String(isolationFlag);
@@ -639,30 +603,7 @@ function __ntCli(run: any, flags: string[], files: string[]): void {
   if (__ntCliFlag(flags, "--test-only") === true) forwarded.push("--test-only");
   if (forceExit) forwarded.push("--test-force-exit");
 
-  const options: any = {
-    isTestRunner: true,
-    concurrency: concurrency,
-    coverage: false,
-    coverageExcludeGlobs: undefined,
-    coverageIncludeGlobs: undefined,
-    destinations: Number(destinations.length) > 0 ? destinations : ["stdout"],
-    forceExit: forceExit,
-    isolation: isolation,
-    only: only,
-    reporters: reporters,
-    shard: undefined,
-    sourceMaps: false,
-    testNamePatterns: Number(namePatterns.length) > 0 ? namePatterns : null,
-    testSkipPatterns: Number(skipPatterns.length) > 0 ? skipPatterns : null,
-    timeout: timeout,
-    updateSnapshots: false,
-    watch: false,
-    globPatterns: files,
-  };
-  try {
-    const debug: any = __node_util.debuglog("test_runner");
-    debug("test runner configuration:", options);
-  } catch (e) {}
+  __ntCliDebug(flags, files);
 
   const runOptions: any = {
     concurrency: concurrency === true ? 4 : concurrency,

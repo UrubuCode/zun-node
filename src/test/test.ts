@@ -1885,3 +1885,99 @@ function __ntFileDone(name: any, mark: any): void {
     test(String(name));
   }
 }
+
+// ---------------------------------------------------------------------------
+// The `node --test` command line (shared by src/test/run.ts' `__ntCli` and
+// the `--test-isolation=none` program src/bin/zun-node-run.rs writes)
+// ---------------------------------------------------------------------------
+
+function __ntCliFlag(flags: string[], name: string): any {
+  // The last occurrence wins, as with Node's option parser; a flag spelled
+  // `--name value` or `--name=value`. `true` for a bare boolean flag.
+  let value: any = undefined;
+  const n = Number(flags.length);
+  for (let i = 0; i < n; i++) {
+    const f = String(flags[i]);
+    if (f === name) {
+      if (i + 1 < n && String(flags[i + 1]).charAt(0) !== "-") {
+        value = String(flags[i + 1]);
+        i++;
+      } else {
+        value = true;
+      }
+    } else if (f.indexOf(name + "=") === 0) {
+      value = f.slice(name.length + 1);
+    }
+  }
+  return value;
+}
+
+function __ntCliFlagAll(flags: string[], name: string): string[] {
+  const out: string[] = [];
+  const n = Number(flags.length);
+  for (let i = 0; i < n; i++) {
+    const f = String(flags[i]);
+    if (f === name && i + 1 < n) {
+      out.push(String(flags[i + 1]));
+      i++;
+    } else if (f.indexOf(name + "=") === 0) {
+      out.push(f.slice(name.length + 1));
+    }
+  }
+  return out;
+}
+
+// `NODE_DEBUG=test_runner`: the configuration line
+// lib/internal/main/test_runner.js logs before it starts.
+function __ntCliDebug(flags: string[], files: string[]): void {
+  const isolationFlag: any = __ntCliFlag(flags, "--test-isolation");
+  const isolation: string = isolationFlag === undefined || isolationFlag === true ? "process" : String(isolationFlag);
+  const concurrencyFlag: any = __ntCliFlag(flags, "--test-concurrency");
+  let concurrency: any = concurrencyFlag === undefined || concurrencyFlag === true ? true : Number(concurrencyFlag);
+  if (isolation === "none") concurrency = 1;
+  const timeoutFlag: any = __ntCliFlag(flags, "--test-timeout");
+  const timeout: any = timeoutFlag === undefined || timeoutFlag === true || Number(timeoutFlag) === 0 ? Infinity : Number(timeoutFlag);
+  const reporters: string[] = __ntCliFlagAll(flags, "--test-reporter");
+  const destinations: string[] = __ntCliFlagAll(flags, "--test-reporter-destination");
+  const namePatterns: string[] = __ntCliFlagAll(flags, "--test-name-pattern");
+  const skipPatterns: string[] = __ntCliFlagAll(flags, "--test-skip-pattern");
+  const options: any = {
+    isTestRunner: true,
+    concurrency: concurrency,
+    coverage: false,
+    coverageExcludeGlobs: undefined,
+    coverageIncludeGlobs: undefined,
+    destinations: Number(destinations.length) > 0 ? destinations : ["stdout"],
+    forceExit: __ntCliFlag(flags, "--test-force-exit") === true,
+    isolation: isolation,
+    only: __ntCliFlag(flags, "--test-only") === true && isolation === "none",
+    reporters: Number(reporters.length) > 0 ? reporters : ["spec"],
+    shard: undefined,
+    sourceMaps: false,
+    testNamePatterns: Number(namePatterns.length) > 0 ? namePatterns : null,
+    testSkipPatterns: Number(skipPatterns.length) > 0 ? skipPatterns : null,
+    timeout: timeout,
+    updateSnapshots: false,
+    watch: false,
+    globPatterns: files,
+  };
+  try {
+    const debug: any = __node_util.debuglog("test_runner");
+    debug("test runner configuration:", options);
+  } catch (e) {}
+}
+
+// A list handed over in the environment by src/bin/zun-node-run.rs, as a
+// JSON array of strings.
+function __ntCliEnvList(name: string): string[] {
+  const raw: any = process.env[name];
+  if (raw === undefined || raw === null || String(raw) === "") return [];
+  try {
+    const parsed: any = JSON.parse(String(raw));
+    const out: string[] = [];
+    for (const v of parsed) out.push(String(v));
+    return out;
+  } catch (e) {
+    return [];
+  }
+}

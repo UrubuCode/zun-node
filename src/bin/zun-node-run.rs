@@ -341,6 +341,7 @@ fn main() -> ExitCode {
     // `-e`/`-p` text becomes a file of its own so the bundler can take it.
     let flags = exec_flags(&args);
     let is_eval = matches!(source, Source::Text(..) | Source::Test(..));
+    let mut cli_env: Vec<(String, String)> = Vec::new();
     let script = match source {
         Source::File(path) => path,
         Source::Test(files) if isolation_none(&flags) => {
@@ -353,7 +354,13 @@ fn main() -> ExitCode {
             // test named after the file, which is what Node prints for it
             // (`__ntFileMark`/`__ntFileDone`, src/test/test.ts).
             let list = if files.is_empty() { discover_tests() } else { files };
-            let mut text = String::from("require('node:test');\n");
+            let quoted_flags: Vec<String> = flags.iter().map(|f| js_string(f)).collect();
+            let quoted_files: Vec<String> = list.iter().map(|f| js_string(f)).collect();
+            let mut text = format!(
+                "require('node:test');\n__ntCliDebug([{}], [{}]);\n",
+                quoted_flags.join(", "),
+                quoted_files.join(", ")
+            );
             for (index, file) in list.iter().enumerate() {
                 let Ok(source) = std::fs::read_to_string(file) else {
                     let shown = std::path::absolute(file).unwrap_or_else(|_| PathBuf::from(file));
@@ -380,20 +387,20 @@ fn main() -> ExitCode {
             file
         }
         Source::Test(files) => {
-            let files: Vec<String> = files.iter().map(|f| js_string(f)).collect();
-            let quoted: Vec<String> = flags.iter().map(|f| js_string(f)).collect();
-            let text = format!(
-                "const {{ run }} = require('node:test');\n__ntCli(run, [{}], [{}]);\n",
-                quoted.join(", "),
-                files.join(", ")
-            );
-            let mut hasher = DefaultHasher::new();
-            text.hash(&mut hasher);
+            // The flags and files travel in the environment rather than in
+            // the script, so every `--test` invocation shares one bundle. They
+            // are JSON arrays: `process.env` splits its own records on U+001F.
+            let json = |list: &[String]| format!("[{}]", list.iter().map(|v| js_string(v)).collect::<Vec<_>>().join(","));
+            cli_env.push(("ZUN_NODE_TEST_FLAGS".to_owned(), json(&flags)));
+            cli_env.push(("ZUN_NODE_TEST_FILES".to_owned(), json(&files)));
+            let text = "const { run } = require('node:test');\n\
+                        __ntCli(run, __ntCliEnvList('ZUN_NODE_TEST_FLAGS'), __ntCliEnvList('ZUN_NODE_TEST_FILES'));\n"
+                .to_owned();
             let directory = cache_dir();
             if std::fs::create_dir_all(&directory).is_err() {
                 return fail("cannot create the cache directory");
             }
-            let file = directory.join(format!("test-cli-{:016x}.js", hasher.finish()));
+            let file = directory.join("test-cli.js");
             if std::fs::write(&file, text).is_err() {
                 return fail("cannot write the test-runner script");
             }
@@ -438,6 +445,9 @@ fn main() -> ExitCode {
     command.env("ZUN_NODE_ARGV", format!("A{}", tail.join("\u{1f}")));
     command.env("ZUN_NODE_DEPTH", (depth + 1).to_string());
     command.env("ZUN_NODE_EXEC_ARGV", format!("A{}", flags.join("\u{1f}")));
+    for (name, value) in &cli_env {
+        command.env(name, value);
+    }
     command.arg(&bundled);
     match command.status() {
         Ok(status) => match status.code() {
