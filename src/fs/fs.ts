@@ -1840,6 +1840,58 @@ function __fsRunAsync(callback: any, work: any): void {
   __fsDeliver(target, [null, value]);
 }
 
+// `options.signal`, when `options` is an object that carries one.
+function __fsSignalOf(options: any): any {
+  if (options === null || options === undefined || typeof options !== "object") return undefined;
+  const signal: any = options.signal;
+  return signal === null ? undefined : signal;
+}
+
+// `__fsRunAsync` for the three whole-file operations that take an
+// `AbortSignal` (`readFile`, `writeFile`, `appendFile`). Node checks the
+// signal before the work starts and again between chunks, all of which happen
+// after the current tick; so with a signal the work is deferred one
+// `setImmediate`, which lets an `abort()` made synchronously or in a
+// `process.nextTick` after the call land first, and then fails with
+// `AbortError` exactly where Node's would.
+function __fsRunAbortable(callback: any, options: any, work: any): void {
+  const signal: any = __fsSignalOf(options);
+  if (signal === undefined) {
+    __fsRunAsync(callback, work);
+    return;
+  }
+  const target: any = __fsMakeCallback(callback);
+  setImmediate(function (): void {
+    if (signal.aborted === true) {
+      __evCall(target, [new AbortError(undefined, { cause: signal.reason })]);
+      return;
+    }
+    __fsRunAsync(target, work);
+  });
+}
+
+// `fsPromises.writeFile`/`appendFile` take a `FileHandle` where the callback
+// forms take a descriptor; the handle stands for its descriptor.
+function __fsHandleOrPath(file: any): any {
+  if (file instanceof FileHandle) return Number(file.fd);
+  return file;
+}
+
+// The promise form of `__fsRunAbortable`.
+function __fsPromiseAbortable(options: any, work: any): any {
+  const signal: any = __fsSignalOf(options);
+  if (signal === undefined) return __fsPromise(work);
+  return new Promise(function (resolve: any, reject: any): void {
+    setImmediate(function (): void {
+      if (signal.aborted === true) {
+        reject(new AbortError(undefined, { cause: signal.reason }));
+        return;
+      }
+      __fsPromise(work).then(resolve, reject);
+    });
+  });
+}
+
 // The options/callback tail every `fs` callback function accepts: the last
 // argument is the callback, and the one before it may be options.
 function __fsTail(options: any, callback: any): any[] {
@@ -2002,7 +2054,7 @@ const fs: any = {
   },
   appendFile(file: any, data: any, options?: any, callback?: any): void {
     const tail: any[] = __fsTail(options, callback);
-    __fsRunAsync(tail[1], function (): any {
+    __fsRunAbortable(tail[1], tail[0], function (): any {
       __fsAppendFileSync(file, data, tail[0]);
       return undefined;
     });
@@ -2233,7 +2285,7 @@ const fs: any = {
   },
   readFile(path: any, options?: any, callback?: any): void {
     const tail: any[] = __fsTail(options, callback);
-    __fsRunAsync(tail[1], function (): any {
+    __fsRunAbortable(tail[1], tail[0], function (): any {
       return __fsReadFileSync(path, tail[0]);
     });
   },
@@ -2362,7 +2414,7 @@ const fs: any = {
   },
   writeFile(file: any, data: any, options?: any, callback?: any): void {
     const tail: any[] = __fsTail(options, callback);
-    __fsRunAsync(tail[1], function (): any {
+    __fsRunAbortable(tail[1], tail[0], function (): any {
       __fsWriteFileSync(file, data, tail[0]);
       return undefined;
     });
@@ -2620,20 +2672,20 @@ class FileHandle {
   }
   readFile(options?: any): any {
     const fd: number = this.fd;
-    return __fsPromise(function (): any {
+    return __fsPromiseAbortable(options, function (): any {
       return __fsReadFileSync(fd, options);
     });
   }
   writeFile(data: any, options?: any): any {
     const fd: number = this.fd;
-    return __fsPromise(function (): any {
+    return __fsPromiseAbortable(options, function (): any {
       __fsWriteFileSync(fd, data, options);
       return undefined;
     });
   }
   appendFile(data: any, options?: any): any {
     const fd: number = this.fd;
-    return __fsPromise(function (): any {
+    return __fsPromiseAbortable(options, function (): any {
       __fsAppendFileSync(fd, data, options);
       return undefined;
     });
@@ -2654,8 +2706,8 @@ const __fsPromises: any = {
     });
   },
   appendFile(file: any, data: any, options?: any): any {
-    return __fsPromise(function (): any {
-      __fsAppendFileSync(file, data, options);
+    return __fsPromiseAbortable(options, function (): any {
+      __fsAppendFileSync(__fsHandleOrPath(file), data, options);
       return undefined;
     });
   },
@@ -2737,7 +2789,7 @@ const __fsPromises: any = {
     });
   },
   readFile(path: any, options?: any): any {
-    return __fsPromise(function (): any {
+    return __fsPromiseAbortable(options, function (): any {
       const handle: any = path;
       if (handle !== null && handle !== undefined && typeof handle === "object" && handle.fd !== undefined) {
         return __fsReadFileSync(Number(handle.fd), options);
@@ -2808,8 +2860,8 @@ const __fsPromises: any = {
     });
   },
   writeFile(file: any, data: any, options?: any): any {
-    return __fsPromise(function (): any {
-      __fsWriteFileSync(file, data, options);
+    return __fsPromiseAbortable(options, function (): any {
+      __fsWriteFileSync(__fsHandleOrPath(file), data, options);
       return undefined;
     });
   },
