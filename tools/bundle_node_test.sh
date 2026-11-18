@@ -641,6 +641,46 @@ requires_module() {
 #
 # This runs after the whole $REWRITE program, so it sees the module objects the
 # `require` rules have already substituted in.
+# Engine workaround: a derived class cannot introduce an instance field
+# (https://github.com/UrubuCode/zun/issues/77) -- `class T extends Readable {
+# constructor() { super(); this.n = 0; } }` is `no field or setter 'n' on this
+# type`, because field inference from `this.x = ...` is gated on the class
+# having no base. A *declared* field works, so for every `class X extends Y {`
+# in the test body each `this.<name>` the class reads or writes (other than a
+# call) and does not already declare is declared as a bare field (`n;`) right after the opening brace.
+#
+# A name the inlined library declares as a member anywhere (`_read`,
+# `readable`, `destroyed`, ...) is skipped: redeclaring it in the subclass would
+# shadow the base's accessor or field. The list is in $LIB_MEMBERS (one name a
+# line). Line numbers do not move: the declarations share the brace's line.
+DECLARE_DERIVED_FIELDS='
+  my %lib;
+  if (open(my $fh, "<", $ENV{LIB_MEMBERS})) { while (<$fh>) { chomp; $lib{$_} = 1; } close($fh); }
+  my $src = do { local $/; <STDIN> };
+  my @edits;
+  while ($src =~ /\bclass\s+[A-Za-z_\$][\w\$]*\s+extends\s+[A-Za-z_\$][\w\$.]*\s*\{/g) {
+    my $open = pos($src) - 1;
+    my ($depth, $i, $len) = (0, $open, length($src));
+    for (; $i < $len; $i++) {
+      my $c = substr($src, $i, 1);
+      if ($c eq "{") { $depth++; }
+      elsif ($c eq "}") { $depth--; last if $depth == 0; }
+    }
+    my $body = substr($src, $open + 1, $i - $open - 1);
+    my (%seen, @names);
+    while ($body =~ /\bthis\.([A-Za-z_\$][\w\$]*)(?!\s*\(|[\w\$])/g) {
+      my $n = $1;
+      next if $seen{$n}++ || $lib{$n};
+      next if $body =~ /^\s*(?:static\s+|async\s+|get\s+|set\s+|\*\s*)*\Q$n\E\s*[(=;:]/m;
+      push @names, $n;
+    }
+    push @edits, [$open + 1, " " . join(" ", map { "$_;" } @names)] if @names;
+    pos($src) = $open + 1;
+  }
+  for my $e (sort { $b->[0] <=> $a->[0] } @edits) { substr($src, $e->[0], 0) = $e->[1]; }
+  print $src;
+'
+
 UNPACK_MODULE_DESTRUCTURING='
 # A pattern that spans lines (`const {` ... `} = os.constants.priority;`) is
 # buffered and joined; the rewrite is printed on its first line and every
@@ -1375,6 +1415,22 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
   # out of reach too, since `_` is a word character and `\b` does not match
   # inside them.
   cat "$LATE"
+  # Engine workaround: a local bound to `new Readable(...)` (or any of the
+  # stream classes) is typed as that class (this runs after $LATE, so a
+  # renamed alias has already become the canonical class name), and an
+  # expando written onto it --
+  # `w.output = []`, `pt.state = ''`, `stream.end = fn`, which the stream
+  # corpus does constantly -- is rejected at compile time as `no field or
+  # setter 'x' on this type`. The same write through an `any` local works, so
+  # such a local is declared `: any`. Emitted only for a bundle that requires
+  # `stream`, so every other corpus' bundle stays byte-identical.
+  if requires_module "stream"; then
+    printf '%s\n' "s#\b\(const\|let\|var\)[[:space:]]\{1,\}\([A-Za-z_\$][A-Za-z0-9_\$]*\)[[:space:]]*=[[:space:]]*new[[:space:]]\{1,\}\(\(stream\.\)\{0,1\}\(Readable\|Writable\|Duplex\|Transform\|PassThrough\|Stream\)\)\b#\1 \2: any = new \3#g"
+    # `Function()` with no arguments is an empty function; through an `any`
+    # receiver the engine compiles it as `new Function('')` and answers
+    # `EvalError: code generation from strings disallowed`.
+    printf '%s\n' "s#\([^A-Za-z0-9_\$.]\)Function()#\1(function () {})#g"
+  fi
 
   # ZUN_NODE_REQUIRE, last of all: every `require` the rules above left in
   # the body becomes `__zunRequire`. It has to be last for the same reason
@@ -1428,6 +1484,9 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
 $FILES
 EOF_FILES
   cat "$@"
+  # Every member name the inlined library declares (see DECLARE_DERIVED_FIELDS).
+  LIB_MEMBERS="$OUT.members"
+  perl -ne '$c = 1 if /^(?:export\s+)?(?:abstract\s+)?class\s/; $c = 0 if /^\}/; print "$1\n" if $c && /^ {2}(?:static\s+|async\s+|get\s+|set\s+|readonly\s+|private\s+|public\s+|protected\s+|\*\s*)*([A-Za-z_\$][\w\$]*)\s*[(:;=?!]/' "$@" | sort -u > "$LIB_MEMBERS"
   echo "const __filename: string = $(json_string "$TEST_PATH");"
   echo "const __dirname: string = $(json_string "$TEST_DIR");"
   # The builtin registry and `require.main` (ZUN_NODE_REQUIRE only; see the
@@ -1459,11 +1518,12 @@ $obj
   fi
   echo "// ==== test body ===="
   if [ "$WRAP_BODY" = 1 ]; then echo "function __zunTestBody(): void {"; fi
-  sed -f "$REWRITE" "$SRC" | awk "$UNPACK_MODULE_DESTRUCTURING"
+  sed -f "$REWRITE" "$SRC" | awk "$UNPACK_MODULE_DESTRUCTURING" | LIB_MEMBERS="$LIB_MEMBERS" perl -e "$DECLARE_DERIVED_FIELDS"
   if [ "$WRAP_BODY" = 1 ]; then echo "}"; echo "__zunTestBody();"; fi
   echo "// ==== harness epilogue: settle the loop, emit 'exit', check call counts ===="
   echo "__zunHarnessFinish();"
 } > "$OUT"
+rm -f "$OUT.members"
 
 # A module-scope declaration cannot shadow an engine global: `function
 # setTimeout` (timers.ts) and `class Blob` (buffer.ts) are 'duplicate function
