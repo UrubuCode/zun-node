@@ -1377,7 +1377,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-http:start -->
 ### Node.js v25 `http` compatibility
 
-`█████████░░░░░░░░░░░░░░░` **37.7%** — 143 / 379 Node `test-http-*` tests passing
+`██████████░░░░░░░░░░░░░░` **43.2%** — 164 / 379 Node `test-http-*` tests passing
 <!-- node-http:end -->
 
 > `http` is **Zun TypeScript over `net`**, with no natives of its own:
