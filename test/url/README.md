@@ -112,7 +112,7 @@ number.
 URL Pattern implementation is" below), so its three files are no longer a
 blocker. What is left is engine and harness work.
 
-### Engine and harness blockers (35 / 44 at the last measurement)
+### Engine and harness blockers (38 / 44 at the last measurement)
 
 The brand checks (`ERR_INVALID_THIS`, "Receiver must be an instance of class
 URL"), `Symbol.iterator`, `Symbol.toStringTag`, WebIDL-enumerable members, the

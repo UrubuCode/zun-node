@@ -1155,17 +1155,18 @@ class NodeURLPattern {
     this._components = comps;
   }
 
-  get protocol(): string { __upBrand(this); return this._components[0].patternString as string; }
-  get username(): string { __upBrand(this); return this._components[1].patternString as string; }
-  get password(): string { __upBrand(this); return this._components[2].patternString as string; }
-  get hostname(): string { __upBrand(this); return this._components[3].patternString as string; }
-  get port(): string { __upBrand(this); return this._components[4].patternString as string; }
-  get pathname(): string { __upBrand(this); return this._components[5].patternString as string; }
-  get search(): string { __upBrand(this); return this._components[6].patternString as string; }
-  get hash(): string { __upBrand(this); return this._components[7].patternString as string; }
+  get protocol(): string { const self: any = this; __upBrand(self); return self._components[0].patternString as string; }
+  get username(): string { const self: any = this; __upBrand(self); return self._components[1].patternString as string; }
+  get password(): string { const self: any = this; __upBrand(self); return self._components[2].patternString as string; }
+  get hostname(): string { const self: any = this; __upBrand(self); return self._components[3].patternString as string; }
+  get port(): string { const self: any = this; __upBrand(self); return self._components[4].patternString as string; }
+  get pathname(): string { const self: any = this; __upBrand(self); return self._components[5].patternString as string; }
+  get search(): string { const self: any = this; __upBrand(self); return self._components[6].patternString as string; }
+  get hash(): string { const self: any = this; __upBrand(self); return self._components[7].patternString as string; }
 
   get hasRegExpGroups(): boolean {
-    __upBrand(this);
+    const self: any = this;
+    __upBrand(self);
     for (let i = 0; i < 8; i++) {
       if (this._components[i].hasRegexpGroups as boolean) return true;
     }
@@ -1173,13 +1174,15 @@ class NodeURLPattern {
   }
 
   exec(...rest: any[]): any {
-    __upBrand(this);
+    const self: any = this;
+    __upBrand(self);
     const args = __upExecArgs(rest);
     return __upMatch(this, args[0], args[1], false);
   }
 
   test(...rest: any[]): boolean {
-    __upBrand(this);
+    const self: any = this;
+    __upBrand(self);
     const args = __upExecArgs(rest);
     return __upMatch(this, args[0], args[1], true) === true;
   }

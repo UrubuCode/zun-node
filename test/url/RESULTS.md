@@ -6,7 +6,7 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-url*|test-whatwg-url-*.js`. Ge
 <!-- node-url:start -->
 ### Node.js v25 `url` compatibility
 
-`████████████████████░░░░` **84.0%** — 37 / 44 Node `test-url*|test-whatwg-url-*` tests passing
+`████████████████████░░░░` **86.3%** — 38 / 44 Node `test-url*|test-whatwg-url-*` tests passing
 <!-- node-url:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
@@ -23,11 +23,11 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-url-parse-format.js` | ✅ pass | |
 | `test-url-parse-invalid-input.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: spawnPromisified is not a function |
 | `test-url-parse-query.js` | ✅ pass | |
-| `test-url-pathtofileurl.js` | ❌ type error | bundles/test-url-pathtofileurl.ts:22571:38: error: [SEM0001] spread arguments are not lowered yet |
+| `test-url-pathtofileurl.js` | ❌ type error | bundles/test-url-pathtofileurl.ts:22574:38: error: [SEM0001] spread arguments are not lowered yet |
 | `test-url-relative.js` | ✅ pass | |
 | `test-url-revokeobjecturl.js` | ✅ pass | |
 | `test-url-urltooptions.js` | ✅ pass | |
-| `test-urlpattern-invalidthis.js` | ❌ assertion | AssertionError [throws]: protocol |
+| `test-urlpattern-invalidthis.js` | ✅ pass | |
 | `test-urlpattern-types.js` | ✅ pass | |
 | `test-urlpattern.js` | ✅ pass | |
 | `test-whatwg-url-canparse.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: __dnsNative is not defined |
@@ -36,7 +36,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-whatwg-url-custom-href-side-effect.js` | ✅ pass | |
 | `test-whatwg-url-custom-inspect.js` | ✅ pass | |
 | `test-whatwg-url-custom-parsing.js` | ✅ pass | |
-| `test-whatwg-url-custom-properties.js` | ❌ unsupported import/require | bundles/test-whatwg-url-custom-properties.ts:22491:28: error: [SEM0001] 'delete' requires an object receiver,  |
+| `test-whatwg-url-custom-properties.js` | ❌ unsupported import/require | bundles/test-whatwg-url-custom-properties.ts:22494:28: error: [SEM0001] 'delete' requires an object receiver,  |
 | `test-whatwg-url-custom-searchparams-append.js` | ✅ pass | |
 | `test-whatwg-url-custom-searchparams-constructor.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: Cannot convert undefined or null to object |
 | `test-whatwg-url-custom-searchparams-delete.js` | ✅ pass | |
