@@ -934,6 +934,14 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
       printf '%s\n' "s#^performance\(\.[A-Za-z_\$]\|\[\)#__zunPerformance\1#"
       printf '%s\n' "s#\([^'\"\`A-Za-z0-9_\$.]\)performance\(\.[A-Za-z_\$]\|\[\)#\1__zunPerformance\2#g"
     done
+    # A spread into a method call does not lower inside a function body (see
+    # `__zunPerformanceMarkResourceTiming`); route that spelling to a free
+    # function, where a spread does lower.
+    # A spread with leading arguments does not lower into a free function
+    # either, so the arguments are passed as one array instead:
+    # `m(...xs)` -> `f(xs)`, `m(a, ...xs)` -> `f([a].concat(xs))`.
+    printf '%s\n' "s#__zunPerformance\.markResourceTiming(\.\.\.\([A-Za-z_\$][A-Za-z0-9_\$]*\))#__zunPerformanceMarkResourceTiming(\1)#g"
+    printf '%s\n' "s#__zunPerformance\.markResourceTiming(\(.*\), *\.\.\.\([A-Za-z_\$][A-Za-z0-9_\$]*\))#__zunPerformanceMarkResourceTiming([\1].concat(\2))#g"
   fi
 
   # `crypto` as a *receiver* becomes `__zunCrypto`, for the same reason and by
