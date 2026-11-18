@@ -587,8 +587,30 @@ function __ntCli(run: any, flags: string[], files: string[]): void {
   const timeoutFlag: any = __ntCliFlag(flags, "--test-timeout");
   const timeout: any = timeoutFlag === undefined || timeoutFlag === true || Number(timeoutFlag) === 0 ? Infinity : Number(timeoutFlag);
   const reporters: string[] = __ntCliFlagAll(flags, "--test-reporter");
-  if (Number(reporters.length) === 0) reporters.push("spec");
   const destinations: string[] = __ntCliFlagAll(flags, "--test-reporter-destination");
+  // lib/internal/test_runner/utils.js' parseCommandLine().
+  if (Number(reporters.length) === 0 && Number(destinations.length) === 0) {
+    reporters.push("spec");
+  }
+  if (Number(destinations.length) === 0 && Number(reporters.length) === 1) {
+    destinations.push("stdout");
+  }
+  if (Number(reporters.length) !== Number(destinations.length)) {
+    const err: any = new ERR_INVALID_ARG_VALUE(
+      "--test-reporter", reporters, "must match the number of specified '--test-reporter-destination'",
+    );
+    process.stderr.write(String(err.stack === undefined ? err : err.stack) + "\n");
+    process.exitCode = 1;
+    return;
+  }
+  for (const r of reporters) {
+    if (__node_test_reporters[String(r)] === undefined) {
+      const err: any = new NodeError("ERR_MODULE_NOT_FOUND", "Cannot find package '" + String(r) + "' imported from " + String(process.cwd()));
+      process.stderr.write("Error [ERR_MODULE_NOT_FOUND]: " + String(err.message) + "\n");
+      process.exitCode = 1;
+      return;
+    }
+  }
   const namePatterns: string[] = __ntCliFlagAll(flags, "--test-name-pattern");
   const skipPatterns: string[] = __ntCliFlagAll(flags, "--test-skip-pattern");
   const only: boolean = __ntCliFlag(flags, "--test-only") === true && isolation === "none";
@@ -603,6 +625,7 @@ function __ntCli(run: any, flags: string[], files: string[]): void {
     forwarded.push(s);
   }
   if (__ntCliFlag(flags, "--test-only") === true) forwarded.push("--test-only");
+  if (forceExit) forwarded.push("--test-force-exit");
 
   const options: any = {
     isTestRunner: true,

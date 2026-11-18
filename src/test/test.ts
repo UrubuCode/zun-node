@@ -264,9 +264,19 @@ function __ntRoot(): any {
 // `internal/test_runner/utils`' `convertStringToRegExp`.
 function __ntStringToRegExp(str: string, name: string): any {
   const match: any = /^\/(.*)\/([a-z]*)$/s.exec(str);
-  const pattern: any = match === null ? str : match[1];
-  const flags: any = match === null ? "" : match[2];
-  if (match === null) return new RegExp(str);
+  const pattern: string = match === null ? str : String(match[1]);
+  const flags: string = match === null ? "" : String(match[2]);
+  // V8 reports a bad flag string with this exact text; it is checked here so
+  // the message does not depend on the engine's own wording.
+  for (let i = 0; i < flags.length; i++) {
+    const f = flags.charAt(i);
+    if ("dgimsuvy".indexOf(f) === -1 || flags.indexOf(f) !== i) {
+      throw new ERR_INVALID_ARG_VALUE(
+        name, str,
+        "is an invalid regular expression. Invalid flags supplied to RegExp constructor '" + flags + "'",
+      );
+    }
+  }
   try {
     return new RegExp(pattern, flags);
   } catch (err) {
@@ -935,6 +945,9 @@ async function __ntFinishRoot(): Promise<any> {
   }
   root.finished = true;
   __ntReportRoot(root);
+  // `--test-force-exit`: once every known test and hook has finished, exit
+  // regardless of ref'd handles (and of timers that would fail later).
+  if (__ntArgvHas("--test-force-exit")) process.exit();
 }
 
 // ---------------------------------------------------------------------------
@@ -1562,21 +1575,33 @@ function __ntSpecReporter(write: any): any {
 
 function __ntDotReporter(write: any): any {
   const state: any = { count: 0, failed: [] };
+  const columns = (): number => {
+    let c: any = undefined;
+    try {
+      c = process.stdout.columns;
+    } catch (e) {}
+    return Math.max(c === undefined || c === null ? 20 : Number(c), 20);
+  };
+  state.columns = columns();
   return (type: string, data: any): void => {
     if (type === "test:pass") write(".");
-    else if (type === "test:fail") {
+    if (type === "test:fail") {
       write("X");
       state.failed.push(data);
     }
     if (type === "test:pass" || type === "test:fail") {
       state.count = Number(state.count) + 1;
-      if (Number(state.count) % 20 === 0) write("\n");
+      if (Number(state.count) === Number(state.columns)) {
+        write("\n");
+        state.columns = columns();
+        state.count = 0;
+      }
     }
     if (type === "__end") {
       write("\n");
       if (Number(state.failed.length) > 0) {
-        write("\n✖ failing tests:\n\n");
-        for (const t of state.failed) write(__ntFormatTestReport("test:fail", t, "", "", false, true) + "\n");
+        write("\nFailed tests:\n\n");
+        for (const t of state.failed) write(__ntFormatTestReport("test:fail", t, "", "", false, true));
       }
     }
   };
@@ -1724,20 +1749,10 @@ const __ntMock: any = __ntNewMockTracker();
 (test as any).assert = __node_test_assert;
 (test as any).snapshot = __ntSnapshot;
 
-const __node_test: any = {
-  test: test,
-  it: test,
-  describe: __ntDescribe,
-  suite: __ntDescribe,
-  before: __ntBefore,
-  after: __ntAfter,
-  beforeEach: __ntBeforeEach,
-  afterEach: __ntAfterEach,
-  run: __ntRunApi,
-  mock: __ntMock,
-  assert: __node_test_assert,
-  snapshot: __ntSnapshot,
-};
+// The module object *is* `test`, as in Node (`require('node:test') === test`):
+// a nested `const test = require('node:test')` -- which the bundler rewrites
+// to `const test = __node_test` rather than deleting -- must stay callable.
+const __node_test: any = test;
 
 // `node:test/reporters`: the built-in reporters, as functions over an event
 // source. Each takes an async iterable of `{ type, data }` events (a run()
