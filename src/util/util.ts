@@ -1234,11 +1234,9 @@ function __utilFormatValue(ctx: any, value: any, recurseTimes: number): string {
     const maybeCustom: any = value[__inspectCustomSymbol];
     if (__utilIsFn(maybeCustom)) {
       const depth = ctx.depth === null ? null : Number(ctx.depth) - recurseTimes;
-      const produced: any = __utilCall(maybeCustom, [
-        depth,
-        __utilUserOptions(ctx, depth),
-        __utilBox(inspect),
-      ]);
+      // Node calls the hook with the inspected value as `this`.
+      const hook: any = __utilUnbox(maybeCustom);
+      const produced: any = hook.call(value, depth, __utilUserOptions(ctx, depth), __utilBox(inspect));
       if (produced !== value) {
         if (typeof produced !== "string") {
           return __utilFormatValue(ctx, produced, recurseTimes);
