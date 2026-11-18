@@ -123,6 +123,17 @@ class __FsUvError extends NodeError {
     this.syscall = syscall;
     if (path !== undefined) this.path = path;
     if (dest !== undefined) this.dest = dest;
+    // Node's uv exceptions are plain `Error`s (`lib/internal/errors.js`'
+    // `UVException`), and `test-fs-access.js` checks
+    // `err.constructor === Error`. An own, non-enumerable property, because
+    // the engine does not read `constructor` through a redefined prototype
+    // slot (zun#119).
+    Object.defineProperty(this, "constructor", {
+      value: Error,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
   }
 }
 
@@ -1076,9 +1087,11 @@ function __fsExistsSync(path: any): boolean {
 
 function __fsAccessSync(path: any, mode?: any): void {
   const resolved: string = __fsGetValidatedPath(path);
-  const resolvedMode: number = mode === undefined ? __FS_F_OK : Number(mode);
+  // `getValidMode`: an omitted or null mode is F_OK; anything else must
+  // already be an integer (no coercion).
+  const resolvedMode: any = mode === undefined || mode === null ? __FS_F_OK : mode;
   __fsValidateInteger(resolvedMode, "mode", 0, 7);
-  __fsVoid(__fsNative.fsAccess(resolved, resolvedMode));
+  __fsVoid(__fsNative.fsAccess(resolved, Number(resolvedMode)));
 }
 
 function __fsReadFileSync(path: any, options?: any): any {
@@ -2123,6 +2136,11 @@ const fs: any = {
   // ---- callbacks ----------------------------------------------------------
   access(path: any, mode?: any, callback?: any): void {
     const tail: any[] = __fsTail(mode, callback);
+    // Node validates the path and the mode before the callback.
+    __fsGetValidatedPath(path);
+    if (tail[0] !== undefined && tail[0] !== null) {
+      __fsValidateInteger(tail[0], "mode", 0, 7);
+    }
     __fsRunAsync(tail[1], function (): any {
       __fsAccessSync(path, tail[0]);
       return undefined;
