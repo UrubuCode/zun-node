@@ -262,7 +262,8 @@ function __evReceived(value: any): string {
   // a string comes out single-quoted (`'foo'`), which `JSON.stringify` cannot
   // produce. A differential run of `os` against Node caught the difference in
   // every `ERR_INVALID_ARG_TYPE` whose argument was a string.
-  let shown = kind === "string" ? __evInspect(value) : String(value);
+  // `util.inspect(2n)` is `2n`.
+  let shown = kind === "string" ? __evInspect(value) : kind === "bigint" ? String(value) + "n" : String(value);
   if (Number(shown.length) > 28) shown = shown.slice(0, 25) + "...";
   return " Received type " + kind + " (" + shown + ")";
 }
@@ -484,6 +485,16 @@ class ERR_UNHANDLED_ERROR extends NodeError {
 class ERR_METHOD_NOT_IMPLEMENTED extends NodeError {
   constructor(name: string) {
     super("ERR_METHOD_NOT_IMPLEMENTED", "The " + name + " method is not implemented");
+  }
+}
+
+// `ERR_WORKER_UNSUPPORTED_OPERATION`: what a worker thread answers for the
+// process-wide state it does not own (`process.chdir`, setting the umask,
+// `process.abort`). It lives with the bases because `process` raises it and
+// `worker_threads` switches it on.
+class ERR_WORKER_UNSUPPORTED_OPERATION extends NodeTypeError {
+  constructor(name: string) {
+    super("ERR_WORKER_UNSUPPORTED_OPERATION", name + " is not supported in workers");
   }
 }
 

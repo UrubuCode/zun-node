@@ -2806,6 +2806,7 @@ function __wtBootWorker(module: any): void {
   __wtLinkState.nextThreadId = Number(boot.threadId) * 1000 + 1;
 
   module.isMainThread = false;
+  __processState.isWorker = true;
   module.threadId = Number(boot.threadId);
   module.threadName = String(boot.name);
   module.parentPort = port;

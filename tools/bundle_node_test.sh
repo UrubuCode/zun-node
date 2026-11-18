@@ -759,11 +759,44 @@ function unpack(line,   kw, obj, inner, count, parts, out, ok, i, entry, key, na
 # declaration shadows an inlined name behaves differently inside a function),
 # so a file that does not need the wrapper does not get it.
 #
-# The test is lexical: a `return` at an indentation shallow enough to be
-# top-level in a Node test file. Node's style indents a nested `return` by at
-# least four spaces inside a function, and the `if (...) { ...; return; }`
-# skips above are at two.
-if grep -Eq '^[[:space:]]{0,3}return[[:space:]]*;' "$SRC"; then
+# The test is lexical, in two parts. First, a bare `return;` at an
+# indentation shallow enough to be top-level in a Node test file: Node's style
+# indents a nested `return` by at least four spaces inside a function, and the
+# `if (...) { ...; return; }` skips above are at two. Second, any `return`
+# (`return child();` inside a top-level `switch`, `return process.exit(100);`
+# inside an `if`) none of whose enclosing blocks -- tracked by indentation --
+# opens a function: a `function`, an arrow, a method (computed names
+# included), or a call's argument list.
+TOPLEVEL_RETURN_AWK='
+function indent(s) { match(s, /^[ ]*/); return RLENGTH }
+{
+  line = $0
+  if (line ~ /^[ ]*(\/\/|\*|\/\*)/ || line ~ /^[ ]*$/) next
+  ind = indent(line)
+  # Close every opener at this indentation or deeper.
+  carried = 0
+  while (n > 0 && ind <= ind_of[n] && line !~ /^[ ]*(case |default:)/) {
+    # `}) {` closing a multi-line signature continues that opener.
+    if (ind == ind_of[n] && line ~ /^[ ]*[})\]]/ && fn_of[n]) carried = 1
+    n--
+  }
+  while (n > 0 && ind < ind_of[n]) n--
+  if (line ~ /^[ ]*return([ ;(]|$)/) {
+    inside = 0
+    for (k = 1; k <= n; k++) if (fn_of[k]) inside = 1
+    if (!inside) { print 1; exit }
+  }
+  if (line ~ /[{:][ ]*$/ || line ~ /=>[ ]*\(?[ ]*$/ || line ~ /[(,][ ]*$/) {
+    fn = carried
+    if (line ~ /function[ *]*[A-Za-z0-9_$]*[ ]*\(/ || line ~ /=>/) fn = 1
+    else if (line ~ /^[ ]*(async[ ]+)?(static[ ]+)?(get[ ]+|set[ ]+)?\*?(\[.*\]|[A-Za-z0-9_$]+)[ ]*\([^)]*\)[ ]*\{[ ]*$/ && line !~ /^[ ]*(if|for|while|switch|catch|with)[ ]*\(/) fn = 1
+    else if (line ~ /[(,][ ]*$/) fn = 1
+    n++; ind_of[n] = ind; fn_of[n] = fn
+  }
+}
+'
+if grep -Eq '^[[:space:]]{0,3}return[[:space:]]*;' "$SRC" \
+   || [ -n "$(awk "$TOPLEVEL_RETURN_AWK" "$SRC")" ]; then
   WRAP_BODY=1
 else
   WRAP_BODY=0
@@ -1517,7 +1550,7 @@ $obj
     echo "__modInitMain();"
   fi
   echo "// ==== test body ===="
-  if [ "$WRAP_BODY" = 1 ]; then echo "function __zunTestBody(): void {"; fi
+  if [ "$WRAP_BODY" = 1 ]; then echo "function __zunTestBody(): any {"; fi
   sed -f "$REWRITE" "$SRC" | awk "$UNPACK_MODULE_DESTRUCTURING" | LIB_MEMBERS="$LIB_MEMBERS" perl -e "$DECLARE_DERIVED_FIELDS"
   if [ "$WRAP_BODY" = 1 ]; then echo "}"; echo "__zunTestBody();"; fi
   echo "// ==== harness epilogue: settle the loop, emit 'exit', check call counts ===="

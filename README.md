@@ -672,7 +672,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-process:start -->
 ### Node.js v25 `process` compatibility
 
-`██████████████░░░░░░░░░░` **59.3%** — 57 / 96 Node `test-process-*` tests passing
+`██████████████░░░░░░░░░░` **60.4%** — 58 / 96 Node `test-process-*` tests passing
 <!-- node-process:end -->
 
 > `process` is the module every other bundle in this library stands on, and the
