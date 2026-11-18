@@ -129,6 +129,20 @@ num-bigint-dig = { version = "0.8", default-features = false, features = ["std",
 rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
 ed448-goldilocks-plus = "0.16"
 
+# ---------------------------------------------------------------------------
+# `node:tls` / `node:https`.
+#
+# rustls is the TLS 1.2/1.3 state machine, driven as a memory BIO from
+# `src/tls/mod.rs`. Its crypto provider is `rustls-rustcrypto` -- the
+# RustCrypto primitives again, so the no-`cc` rule holds: `ring` and `aws-lc`
+# both compile C/assembly. The certificate fields `getPeerCertificate()`
+# reports are read with RustCrypto's `x509-cert`, over the same `der` the
+# `pkcs8`/`spki` keys above already use.
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
+rustls-rustcrypto = { version = "0.1.0-pre.0", default-features = false, features = ["std", "tls12"] }
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+der = { version = "0.7", default-features = false, features = ["std", "oid"] }
+
 
 # ---------------------------------------------------------------------------
 # Compression backends for `node:zlib`.

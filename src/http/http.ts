@@ -2974,7 +2974,10 @@ function __httpClientInit(self: any, input: any, opts: any, cb: any): void {
   }
 
   let agent: any = options.agent;
-  const defaultAgent: any = __httpDefaultAgent();
+  // `https.request` hands its own global agent in as `_defaultAgent`, which
+  // is how Node's `lib/https.js` reuses this client.
+  const defaultAgent: any =
+    options._defaultAgent !== undefined && options._defaultAgent !== null ? options._defaultAgent : __httpDefaultAgent();
   const customConnect: boolean = __httpIsFn(options.createConnection);
   if (agent === false) {
     agent = new Agent();

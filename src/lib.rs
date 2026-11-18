@@ -70,6 +70,7 @@ pub mod fs;
 pub mod io;
 pub mod os;
 pub mod process;
+pub mod tls;
 pub mod zlib;
 
 thread_local! {
@@ -402,6 +403,11 @@ const IO_MODULE_KEYS: &[&[u8]] = &[b"node:io\0"];
 /// rule. The Node-shaped module is `src/zlib/zlib.ts`, which imports this one
 /// and reshapes it into the nine `Transform` classes and their convenience
 /// methods; see `src/zlib/mod.rs`.
+/// Module key the `tls` natives (the rustls memory-BIO engine) are published
+/// under. The Node-shaped `tls` and `https` modules are `src/tls/tls.ts` and
+/// `src/https/https.ts`; see `src/tls/mod.rs`.
+const TLS_MODULE_KEYS: &[&[u8]] = &[b"node:tls "];
+
 const ZLIB_MODULE_KEYS: &[&[u8]] = &[b"node:zlib\0"];
 
 /// ABI v1 registration entry point. The host calls this once after loading the
@@ -467,6 +473,12 @@ pub unsafe extern "C" fn zun_register_v1(registry: *mut ZunRegistry) -> i32 {
     }
     for module in CRYPTO_MODULE_KEYS {
         let status = unsafe { register_module(registry, module, crypto::DESCRIPTORS) };
+        if status != 0 {
+            return status;
+        }
+    }
+    for module in TLS_MODULE_KEYS {
+        let status = unsafe { register_module(registry, module, tls::DESCRIPTORS) };
         if status != 0 {
             return status;
         }
