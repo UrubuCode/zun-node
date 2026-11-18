@@ -210,6 +210,22 @@ that now passes because of it.
 
 ### Per-test blockers
 
+Remeasured 2026-11-18 against the current engine: **26 / 115** (was 15).
+Eleven files moved to passing. Nine were unblocked by engine fixes. The other
+two, `test-crypto-pbkdf2.js` and `test-crypto-randomuuid.js`, needed fixes in
+this module:
+
+* KDF argument errors are thrown by the call itself, not passed to the
+  callback, and the callback is checked last.
+* `pbkdf2` moves a function passed in the digest position into the callback.
+* `hkdf` caps `info` at 1024 bytes.
+* Any `ArrayBufferView`, or a bare `ArrayBuffer` passed to a KDF, is read as
+  the bytes it covers.
+* `randomUUID` validates `disableEntropyCache`.
+
+Rows below that were written before this remeasure may name blockers that no
+longer apply.
+
 | Test | Blocker |
 |---|---|
 | `test-crypto-argon2-unsupported.js` | ✅ passes |
@@ -232,10 +248,10 @@ that now passes because of it.
 | `test-crypto-authenticated-stream.js` | [zun#58](https://github.com/UrubuCode/zun/issues/58) `Buffer.alloc(n)` where `n` is a loop variable — a `number` cannot be a Buffer size |
 | `test-crypto-cipheriv-decipheriv.js` | [zun#58](https://github.com/UrubuCode/zun/issues/58) `Buffer.alloc(n)` over the IV-length loop |
 | `test-crypto-classes.js` | [zun#19](https://github.com/UrubuCode/zun/issues/19) `crypto[clazz]` is an `any`-held constructor on the right of `instanceof`; the cases also include `Sign`, `Verify`, `DiffieHellman` and `ECDH` |
-| `test-crypto-domain.js` | requires `node:domain`, which the harness only stubs |
-| `test-crypto-domains.js` | requires `node:domain`, which the harness only stubs |
+| `test-crypto-domain.js` | ✅ passes |
+| `test-crypto-domains.js` | ✅ passes |
 | `test-crypto-fips.js` | requires `internal/test/binding`, `node:child_process` re-execution and `worker_threads`; this build is not FIPS-capable either |
-| `test-crypto-gcm-explicit-short-tag.js` | [zun#38](https://github.com/UrubuCode/zun/issues/38) `authTagLength: tag.byteLength` reads `undefined` off an `any`-held Buffer, so the explicit path is never taken and the DEP0182 warning the test forbids is emitted |
+| `test-crypto-gcm-explicit-short-tag.js` | ✅ passes |
 | `test-crypto-hash.js` | [zun#38](https://github.com/UrubuCode/zun/issues/38) `a3 = createHash(...).digest()` is a Buffer compared with `deepStrictEqual`; the test also needs `crypto.Hash('sha256')` without `new` ([zun#25](https://github.com/UrubuCode/zun/issues/25)). Every *string* digest in it — hex, base64, latin1, ucs2, the SHAKE lengths, `copy()` — is correct, and the same assertions pass in the differential probe |
 | `test-crypto-hkdf.js` | [zun#58](https://github.com/UrubuCode/zun/issues/58) `Buffer.from(secret)` where `secret` crossed an `any`; `hkdfSync` also answers a view rather than its `ArrayBuffer`, which has no reachable fields here |
 | `test-crypto-hmac.js` | [zun#17](https://github.com/UrubuCode/zun/issues/17) the `keyWrappers` array holds `crypto.createSecretKey` as a *value* and spreads a conditional array into it; the HMAC values themselves agree with Node for every algorithm in the differential probe |
@@ -244,18 +260,18 @@ that now passes because of it.
 | `test-crypto-key-objects-to-crypto-key.js` | needs the WebCrypto `CryptoKey` conversion, which is not implemented |
 | `test-crypto-lazy-transform-writable.js` | the test-body `class OldStream extends Stream` assigns `this.readable` with no field declaration, which is a compile error here; also `hasher.read().toString('hex')` ([zun#38](https://github.com/UrubuCode/zun/issues/38)) |
 | `test-crypto-no-algorithm.js` | requires `worker_threads` and `node:child_process` re-execution with `--openssl-config` |
-| `test-crypto-oneshot-hash.js` | [zun#38](https://github.com/UrubuCode/zun/issues/38) `input.toString()` on the fixture Buffer; the `crypto.hash` half of the test (every algorithm × hex/base64/buffer/default) is correct and agrees with Node in the differential probe |
-| `test-crypto-padding.js` | [zun#38](https://github.com/UrubuCode/zun/issues/38) its `dec()` helper string-concatenates the Buffer `update()` answers, which stringifies to `[object Object]`. The encryption half — both `openssl enc` vectors, with and without padding — is asserted and passes; the padding *errors* (`wrong final block length`, `bad decrypt`) carry OpenSSL’s exact code, message and reason |
-| `test-crypto-pbkdf2.js` | [zun#38](https://github.com/UrubuCode/zun/issues/38) `actual.toString(encoding)` on the derived key. The values are pinned against RFC 6070 and RFC 7914 in `cargo test` |
+| `test-crypto-oneshot-hash.js` | ✅ passes |
+| `test-crypto-padding.js` | ✅ passes |
+| `test-crypto-pbkdf2.js` | ✅ passes |
 | `test-crypto-random.js` | [zun#58](https://github.com/UrubuCode/zun/issues/58) `Buffer.from(buf)` where `buf` is already a byte view |
-| `test-crypto-randomuuid.js` | [zun#58](https://github.com/UrubuCode/zun/issues/58) `Buffer.from(uuid.slice(14, 16), 'hex')[0]` — the slice of an `any`-held string does not reach `Buffer.from` |
+| `test-crypto-randomuuid.js` | ✅ passes |
 | `test-crypto-scrypt.js` | `crypto.scrypt(...args)` — spread arguments are not lowered yet; the values are pinned against RFC 7914 in `cargo test` |
 | `test-crypto-sec-level.js` | requires `internal/crypto/util`’s `getOpenSSLSecLevel()` |
-| `test-crypto-secret-keygen.js` | [zun#38](https://github.com/UrubuCode/zun/issues/38) `keybuf.byteLength` on the exported key. Every error shape the test asserts — `ERR_INVALID_ARG_TYPE` for the type, options and `options.length`, `ERR_OUT_OF_RANGE` for an HMAC length below 8 or above 2³¹, `ERR_INVALID_ARG_VALUE` for an AES length that is not 128/192/256 and for an unknown type — is produced |
-| `test-crypto-secure-heap.js` | top-level `await` plus `node:child_process` re-execution with `--secure-heap` |
+| `test-crypto-secret-keygen.js` | ✅ passes |
+| `test-crypto-secure-heap.js` | ✅ passes |
 | `test-crypto-stream.js` | the test-body `class Stream2buffer extends stream.Writable` assigns `this._buffers` with no field declaration; needs `createSign` too |
-| `test-crypto-subtle-cross-realm.js` | needs `vm` realms and the full `subtle.encrypt`/`importKey` surface |
-| `test-crypto-subtle-zero-length.js` | needs `subtle.importKey`/`encrypt`/`decrypt` for AES-GCM |
+| `test-crypto-subtle-cross-realm.js` | ✅ passes |
+| `test-crypto-subtle-zero-length.js` | ✅ passes |
 | `test-crypto-update-encoding.js` | needs `createSign`/`createVerify`; the cipher and HMAC quarter of the test passes |
 | `test-crypto-verify-failure.js` | requires `node:tls` |
 | `test-crypto-worker-thread.js` | requires `worker_threads` |
