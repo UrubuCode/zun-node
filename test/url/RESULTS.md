@@ -23,7 +23,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-url-parse-format.js` | ✅ pass | |
 | `test-url-parse-invalid-input.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: spawnPromisified is not a function |
 | `test-url-parse-query.js` | ✅ pass | |
-| `test-url-pathtofileurl.js` | ❌ type error | bundles/test-url-pathtofileurl.ts:21001:38: error: [SEM0001] spread arguments are not lowered yet |
+| `test-url-pathtofileurl.js` | ❌ type error | bundles/test-url-pathtofileurl.ts:21264:38: error: [SEM0001] spread arguments are not lowered yet |
 | `test-url-relative.js` | ✅ pass | |
 | `test-url-revokeobjecturl.js` | ✅ pass | |
 | `test-url-urltooptions.js` | ✅ pass | |
@@ -36,7 +36,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-whatwg-url-custom-href-side-effect.js` | ✅ pass | |
 | `test-whatwg-url-custom-inspect.js` | ✅ pass | |
 | `test-whatwg-url-custom-parsing.js` | ✅ pass | |
-| `test-whatwg-url-custom-properties.js` | ❌ unsupported import/require | bundles/test-whatwg-url-custom-properties.ts:20921:28: error: [SEM0001] 'delete' requires an object receiver,  |
+| `test-whatwg-url-custom-properties.js` | ❌ unsupported import/require | bundles/test-whatwg-url-custom-properties.ts:21184:28: error: [SEM0001] 'delete' requires an object receiver,  |
 | `test-whatwg-url-custom-searchparams-append.js` | ✅ pass | |
 | `test-whatwg-url-custom-searchparams-constructor.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: Cannot convert undefined or null to object |
 | `test-whatwg-url-custom-searchparams-delete.js` | ✅ pass | |
