@@ -370,7 +370,22 @@ function __ioPollTimeout(): number {
 
 // One turn: wait for readiness, then deliver it. Answers whether anything is
 // still registered, so the driver knows whether to keep calling.
+// Objects with a `turn()` method, run at the top of every pump turn. A
+// consumer whose ref'd-ness depends on state nothing hooks (a worker's
+// `parentPort.onmessage = fn`, written straight into its slot) re-derives it
+// here. Objects rather than functions: a method survives an `any` path where a
+// bare function value does not (https://github.com/UrubuCode/zun/issues/17).
+const __ioTurnHooks: any[] = [];
+
+// How many consumers are waiting on something that legitimately takes longer
+// than the harness's I/O deadline (tools/harness/common.ts) -- a `Worker`
+// whose child process is still bundling and compiling its script. While this
+// is positive the harness keeps waiting; the runner's own timeout is then the
+// guard against a run that never finishes.
+const __ioPatience: any = { holders: 0 };
+
 function __ioPumpOnce(): boolean {
+  for (const hook of __ioTurnHooks) hook.turn();
   const ops: any = __ioState.ops;
   if (ops === null || ops === undefined) return false;
   if (Number(__ioState.ids.length) === 0) return false;

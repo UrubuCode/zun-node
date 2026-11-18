@@ -280,7 +280,11 @@ function __zunHarnessStep(): void {
   // A turn spent waiting on a socket does not count against the round budget;
   // the deadline above is its guard instead. See `__IO_DEADLINE_MS`.
   const io: number = __ioPendingRefs();
-  if (io > 0) {
+  if (io > 0 && Number(__ioPatience.holders) > 0) {
+    // A worker process is still starting (see `__ioPatience` in
+    // src/io/io.ts): neither the deadline nor the round budget runs.
+    __harnessLoop.deadline = 0;
+  } else if (io > 0) {
     if (Number(__harnessLoop.deadline) === 0) {
       __harnessLoop.deadline = Number(Date.now()) + __IO_DEADLINE_MS;
     }

@@ -1530,31 +1530,47 @@ gets deleted; nothing else in the tracker changes.
   to the property; the second is why `require.main` is a plain property set by
   one bundler-emitted call. Table in `test/module/README.md`.
 
-- **`node:worker_threads`: the message-port family implemented in
-  `src/worker_threads/worker_threads.ts`; `Worker` designed, not built.** The
-  module is two halves. The in-process half is there — `MessageChannel`,
-  `MessagePort` (queueing, `start`/`close`/`ref`/`unref`/`hasRef`, the
-  `message`/`messageerror`/`close` events, the hybrid
+- **`node:worker_threads`: implemented in `src/worker_threads/worker_threads.ts`,
+  `Worker` included, as a child Zun process.** The in-process half —
+  `MessageChannel`, `MessagePort` (queueing, `start`/`close`/`ref`/`unref`/
+  `hasRef`, the `message`/`messageerror`/`close` events, the hybrid
   `EventTarget`/`EventEmitter` dispatch of `lib/internal/event_target.js`),
   `MessageEvent`, `BroadcastChannel`, `receiveMessageOnPort`, the transfer-list
   validation and structured-clone rules with Node's `DataCloneError` messages,
   `markAsUntransferable`/`isMarkedAsUntransferable`/`markAsUncloneable`,
-  `environmentData`, `SHARE_ENV`, `threadId`, `isMainThread`, `parentPort`,
-  `workerData`, `resourceLimits`, `postMessageToThread` — and so is the whole
-  `Worker` *constructor*, validation for validation in Node's order, down to
-  the `DataCloneError` a `workerData` holding a closure raises. What is not
-  there is a worker: the VM has one thread and one realm. The design is a child
-  Zun process with the handshake and the messages framed as
-  `src/v8/v8.ts` V8-serialized payloads over its stdio, and the one thing it
-  waits on is a non-blocking read of that pipe (the poll-based loop under
-  `src/io/`). `worker_threads` is a pure Zun TypeScript module: a channel is two
-  queues and a dispatch rule, and the one capability it needs beyond
-  computation — a later loop turn to deliver on — is the VM's macrotask tier,
-  which `src/timers/timers.ts` already publishes. The acceptance bar is 100% of
-  Node 25's `test-worker*`/`test-messagechannel*`/`test-messageport*`/
-  `test-broadcastchannel*` suite (141 files), 113 of which construct a
-  `Worker`; the deviation table, the blocker tables and the six engine bugs
-  found here are in `test/worker_threads/README.md`.
+  `environmentData`, `SHARE_ENV`, `postMessageToThread` — is unchanged. The
+  `Worker` is Node's constructor, validation for validation, and then a real
+  worker: the VM has one thread and one realm, so the worker is a **child Zun
+  process**. Decisions: the child is the running bundle itself for
+  `new Worker(__filename)` (no second bundling) and otherwise
+  `process.execPath` — the `zun-node-run` launcher, which bundles the file, the
+  `eval: true` text or the `data:` URL source (cached by content, one bundler
+  per script at a time); the boot record (`threadId`, `name`, `workerData`,
+  `environmentData`, `resourceLimits`, `execArgv`, and the port to connect
+  back to) travels in the child's environment as `ZUN_NODE_WORKER`, because
+  `workerData` must be readable on the script's first line; the **link** is a
+  loopback TCP socket on the shared I/O loop (`src/io/`), not a stdio pipe,
+  because a Zun process has no non-blocking stdin while a socket is on the loop
+  at both ends; frames are line-delimited JSON, a message being the existing
+  structured clone encoded into a tagged JSON tree (`undefined`, `NaN`/`-0`,
+  `BigInt`, `Date`, `RegExp`, `Map`, `Set`, errors, buffers, typed arrays,
+  cycles). `MessagePort`s transfer across the link both ways (a forwarding
+  stand-in in the sender, a link-backed port in the receiver). `online`/
+  `message`/`error`/`exit`, `process.on('worker')`, `terminate()` (closes the
+  link, then kills — a launcher's grandchild would otherwise survive),
+  `ref`/`unref`, `worker.stdout`/`stderr` as pipes, `threadName`. An uncaught
+  exception reaches `'error'` through a hook in `process.ts` or, for a
+  top-level throw the engine reports itself, by recognizing the engine's
+  `unhandled exception:` line on the worker's stderr. **Documented gaps**: no
+  shared memory (`SharedArrayBuffer`/`Atomics` — the engine has neither),
+  `SHARE_ENV` is a copy, `resourceLimits` reported but not enforced, heap
+  snapshots/statistics/profiles are V8 facilities, and outside the test runner
+  only the self-bundle path can start a worker (`process.execPath` is then the
+  `zun` binary). The acceptance bar is 100% of Node 25's `test-worker*`/
+  `test-messagechannel*`/`test-messageport*`/`test-broadcastchannel*` suite
+  (141 files, 113 of which construct a `Worker`); the design, the deviation
+  table, the blocker tables and the engine bugs found here are in
+  `test/worker_threads/README.md`.
 
 ### Module keys and host dispatch
 
