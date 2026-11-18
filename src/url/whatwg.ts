@@ -1676,6 +1676,58 @@ function __wuToString(value: any): string {
 // `url.searchParams.append(...)` change `url.href`.
 // ---------------------------------------------------------------------------
 
+function __wuTupleError(): any {
+  return new NodeTypeError("ERR_INVALID_TUPLE", "Each query pair must be an iterable [name, value] tuple");
+}
+
+// Drain an iterable into an array. Engine workaround: a built-in
+// `Symbol.iterator` (an array's) read as a value has no `.call` ("call is not
+// a function"), so the iteration goes through `for...of`, which re-reads the
+// method the caller already checked.
+function __wuDrain(source: any, method: any): any {
+  const out: any = [];
+  for (const item of source) out.push(item);
+  return out;
+}
+
+// The object/function branch of the URLSearchParams constructor, as the URL
+// Standard and Node's `lib/internal/url.js` write it: anything with a
+// `Symbol.iterator` is a sequence of pairs (each itself iterable, of length
+// 2); anything else is a record of its own enumerable keys, symbols included,
+// which then fail their string conversion as Node's do.
+function __wuPairsFromInit(init: any): any {
+  const method: any = init[Symbol.iterator];
+  const built: any = [];
+  if (method !== undefined && method !== null) {
+    if (typeof method !== "function") {
+      throw new NodeTypeError("ERR_ARG_NOT_ITERABLE", "Query pairs must be iterable");
+    }
+    const seq: any = __wuDrain(init, method);
+    const pairs: any = [];
+    for (let i = 0; i < __wuALen(seq); i++) {
+      const pair: any = seq[i];
+      if (pair === null || (typeof pair !== "object" && typeof pair !== "function")) throw __wuTupleError();
+      const inner: any = pair[Symbol.iterator];
+      if (typeof inner !== "function") throw __wuTupleError();
+      const items: any = __wuDrain(pair, inner);
+      if (__wuALen(items) !== 2) throw __wuTupleError();
+      pairs.push(items);
+    }
+    for (let i = 0; i < __wuALen(pairs); i++) {
+      built.push([__wuToString(pairs[i][0]), __wuToString(pairs[i][1])]);
+    }
+    return built;
+  }
+  const keys: any = Reflect.ownKeys(init);
+  for (let i = 0; i < __wuALen(keys); i++) {
+    const key: any = keys[i];
+    const desc: any = Object.getOwnPropertyDescriptor(init, key);
+    if (desc === undefined || desc.enumerable !== true) continue;
+    built.push([__wuToString(key), __wuToString(init[key])]);
+  }
+  return built;
+}
+
 class NodeURLSearchParams {
   list: any = [];
   owner: any = null;
@@ -1699,30 +1751,11 @@ class NodeURLSearchParams {
         this.list = copy;
         return;
       }
-      if (Array.isArray(init)) {
-        const seq: any = init;
-        const built: any = [];
-        for (let i = 0; i < __wuALen(seq); i++) {
-          const pair: any = seq[i];
-          if (pair === null || pair === undefined || !Array.isArray(pair) || __wuALen(pair) !== 2) {
-            throw new NodeTypeError(
-              "ERR_INVALID_TUPLE",
-              "Each query pair must be an iterable [name, value] tuple",
-            );
-          }
-          built.push([__wuToString(pair[0]), __wuToString(pair[1])]);
-        }
-        this.list = built;
-        return;
-      }
-      // A record: every own enumerable key, in insertion order.
-      const keys: any = Object.keys(init);
-      const built: any = [];
-      for (let i = 0; i < __wuALen(keys); i++) {
-        const key: string = keys[i] as string;
-        built.push([__wuToString(key), __wuToString(init[key])]);
-      }
-      this.list = built;
+      this.list = __wuPairsFromInit(init);
+      return;
+    }
+    if (typeof init === "function") {
+      this.list = __wuPairsFromInit(init);
       return;
     }
     // A primitive that is not a string is stringified, as Node does.
@@ -1965,7 +1998,8 @@ function __wuCheckIter(value: any): void {
   }
 }
 
-// Engine workaround: a class with two computed `Symbol` members fails to load
+// Engine workaround (https://github.com/UrubuCode/zun/issues/124): a class
+// with two computed `Symbol` members fails to load
 // ("duplicate module export: [symbol]@0@this"), so each tag is installed on
 // the prototype after the class instead of as a `get [Symbol.toStringTag]`.
 Object.defineProperty(NodeURLSearchParamsIterator.prototype, Symbol.toStringTag, {
@@ -2301,7 +2335,8 @@ Object.defineProperty(NodeURLSearchParams.prototype, Symbol.iterator, {
 
 // `util.inspect` output, ported from Node's `lib/internal/url.js`. The methods
 // are object-literal methods so that, like Node's, they own no `prototype`;
-// the engine leaves a computed method's `name` empty, so it is set explicitly.
+// the engine leaves a computed method's `name` empty
+// (https://github.com/UrubuCode/zun/issues/125), so it is set explicitly.
 const __wuInspectSymbol: any = Symbol.for("nodejs.util.inspect.custom");
 
 function __wuInnerOptions(depth: any, options: any): any {
