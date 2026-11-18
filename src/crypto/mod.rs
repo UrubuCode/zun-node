@@ -87,6 +87,7 @@ use crate::fs::base64;
 use crate::Descriptor;
 use zun_abi::ZunTy::{Bool, I64, Str};
 
+pub(crate) mod asym;
 pub(crate) mod cipher;
 pub(crate) mod ciphers;
 pub(crate) mod hash;
@@ -1171,6 +1172,121 @@ pub(crate) const DESCRIPTORS: &[Descriptor] = &[
         params: &[Str, I64],
         ret: Bool,
         invoke: cipher_iv_ok,
+    },
+    // The asymmetric half (`asym.rs`).
+    Descriptor {
+        key: b"cryptoKeyImport\0",
+        params: &[Str, Str, Str, Str, Bool, Bool],
+        ret: Str,
+        invoke: asym::key_import,
+    },
+    Descriptor {
+        key: b"cryptoKeyImportJwk\0",
+        params: &[Str, Bool],
+        ret: Str,
+        invoke: asym::key_import_jwk,
+    },
+    Descriptor {
+        key: b"cryptoKeyDerivePublic\0",
+        params: &[Str],
+        ret: Str,
+        invoke: asym::key_derive_public,
+    },
+    Descriptor {
+        key: b"cryptoKeyInfo\0",
+        params: &[Str, Str],
+        ret: Str,
+        invoke: asym::key_info,
+    },
+    Descriptor {
+        key: b"cryptoKeyExport\0",
+        params: &[Str, Str, Str, Str, Str, Str],
+        ret: Str,
+        invoke: asym::key_export,
+    },
+    Descriptor {
+        key: b"cryptoKeyJwk\0",
+        params: &[Str, Str],
+        ret: Str,
+        invoke: asym::key_jwk,
+    },
+    Descriptor {
+        key: b"cryptoKeyGenerate\0",
+        params: &[Str, I64, I64, Str],
+        ret: Str,
+        invoke: asym::key_generate,
+    },
+    Descriptor {
+        key: b"cryptoSign\0",
+        params: &[Str, Str, Str, Str],
+        ret: Str,
+        invoke: asym::sign,
+    },
+    Descriptor {
+        key: b"cryptoVerify\0",
+        params: &[Str, Str, Str, Str, Str, Str],
+        ret: Str,
+        invoke: asym::verify,
+    },
+    Descriptor {
+        key: b"cryptoRsaCrypt\0",
+        params: &[Str, Str, Str, Str, Str],
+        ret: Str,
+        invoke: asym::rsa_crypt,
+    },
+    Descriptor {
+        key: b"cryptoEcdhKeys\0",
+        params: &[Str, Str],
+        ret: Str,
+        invoke: asym::ecdh_keys,
+    },
+    Descriptor {
+        key: b"cryptoEcdhCompute\0",
+        params: &[Str, Str, Str],
+        ret: Str,
+        invoke: asym::ecdh_compute,
+    },
+    Descriptor {
+        key: b"cryptoEcdhConvert\0",
+        params: &[Str, Str, Bool],
+        ret: Str,
+        invoke: asym::ecdh_convert,
+    },
+    Descriptor {
+        key: b"cryptoDiffieHellmanKeys\0",
+        params: &[Str, Str],
+        ret: Str,
+        invoke: asym::diffie_hellman_keys,
+    },
+    Descriptor {
+        key: b"cryptoDhGroup\0",
+        params: &[Str],
+        ret: Str,
+        invoke: asym::dh_group,
+    },
+    Descriptor {
+        key: b"cryptoModPow\0",
+        params: &[Str, Str, Str],
+        ret: Str,
+        invoke: asym::mod_pow,
+    },
+    Descriptor {
+        key: b"cryptoGeneratePrime\0",
+        params: &[I64],
+        ret: Str,
+        invoke: asym::generate_prime,
+    },
+    Descriptor {
+        key: b"cryptoDhCheck\0",
+        params: &[Str, Str],
+        ret: Str,
+        invoke: asym::dh_check,
+    },
+    Descriptor {
+        key: b"cryptoCheckPrime\0",
+        params: &[Str, I64],
+        ret: Str,
+        invoke: asym::check_prime,
     },
     // The error slots (the ABI v1 convention, see lib.rs), under `crypto`-
     // prefixed keys for the reason the module documentation gives.
