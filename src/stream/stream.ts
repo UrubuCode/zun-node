@@ -2270,7 +2270,7 @@ function __sOnceWrap(stream: any, type: any, listener: any): any {
     const count = Number(arguments.length);
     for (let i = 0; i < count; i++) passed.push(arguments[i]);
     __sReadableOff(stream, type, state.wrapFn);
-    return __evCall(listener, passed);
+    return __evCallOn(listener, stream, passed);
   };
   // Boxed, so it survives being returned, keeps one identity and can carry
   // `.listener` the way Node's wrapper does.

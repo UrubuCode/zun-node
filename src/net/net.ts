@@ -1061,6 +1061,7 @@ function __netAdopt(self: any, handle: number, options: any): void {
   const state: any = self._sockState;
   state.handle = handle;
   self._handle = __netHandleWrap(self, handle);
+  __processHandleOpened(self);
   self.connecting = false;
   if (__netIsObj(options)) {
     if (options.remote !== undefined && options.remote !== null) state.peer = options.remote;
@@ -1368,6 +1369,7 @@ function __netDestroyHook(self: any, err: any, cb: any): void {
   if (handle !== 0) {
     state.handle = 0;
     self._handle = null;
+    __processHandleClosed(self);
     __ioUnregister(handle);
   }
   __netClearTimeout(self);
@@ -1493,6 +1495,7 @@ function __netSocketConnectOptions(self: any, options: any): any {
     const handle: number = Number(__ioFields(reserved)[0]);
     state.handle = handle;
     self._handle = __netHandleWrap(self, handle);
+    __processHandleOpened(self);
     __ioRegister(handle, {
       readable(): void {
         __netOnReadable(self);
@@ -2356,6 +2359,7 @@ function __netBindNow(self: any, request: any): void {
   const handle: number = Number(parts[0]);
   state.handle = handle;
   self._handle = handle;
+  __processHandleOpened(self);
   state.address = {
     address: String(parts[1]),
     family: String(parts[3]),
@@ -2488,6 +2492,7 @@ function __netServerClose(self: any, callback: any): any {
     state.handle = 0;
     self._handle = null;
     state.listening = false;
+    __processHandleClosed(self);
     __ioUnregister(handle);
   }
   state.closing = true;

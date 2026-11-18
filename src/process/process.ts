@@ -1952,9 +1952,11 @@ const process: any = {
   // failing somewhere further in.
   dlopen(module?: any, filename?: any): void {
     __evValidateObject(module, "module");
-    const _path: any = filename;
+    // Node's message names the file (the loader's own error is about it);
+    // it is never passed through a printf-like formatter.
+    const path: string = String(filename);
     throw new ERR_DLOPEN_FAILED(
-      "process.dlopen cannot load a native addon: this runtime has no Node addon ABI",
+      path + ": cannot load a native addon: this runtime has no Node addon ABI",
     );
   },
   setSourceMapsEnabled(value?: any): void {
@@ -1996,8 +1998,12 @@ const process: any = {
   getActiveResourcesInfo(): string[] {
     return __timerActiveResources();
   },
+  // `process._getActiveHandles()` — the objects that own an open I/O handle;
+  // `node:net` sockets and servers register theirs (`__processHandleOpened`).
   _getActiveHandles(): any[] {
-    return [];
+    const out: any[] = [];
+    for (const owner of __processHandleTable.owners) out.push(owner);
+    return out;
   },
   _getActiveRequests(): any[] {
     return [];
@@ -2017,6 +2023,27 @@ const process: any = {
   stdin: __processStdin,
 };
 
+// The owners of every open I/O handle, which `_getActiveHandles()` reports.
+// A module whose objects hold a loop handle calls `__processHandleOpened` when
+// the handle is adopted and `__processHandleClosed` when it is released; both
+// are idempotent.
+const __processHandleTable: any = { owners: [] };
+
+function __processHandleOpened(owner: any): void {
+  for (const existing of __processHandleTable.owners) {
+    if (existing === owner) return;
+  }
+  __processHandleTable.owners.push(owner);
+}
+
+function __processHandleClosed(owner: any): void {
+  const kept: any[] = [];
+  for (const existing of __processHandleTable.owners) {
+    if (existing !== owner) kept.push(existing);
+  }
+  __processHandleTable.owners = kept;
+}
+
 // `process.ref(x)` / `process.unref(x)`.
 function __processRefOrUnref(maybe: any, wantRef: boolean): void {
   if (maybe === null || maybe === undefined || typeof maybe !== "object") {
@@ -2025,7 +2052,7 @@ function __processRefOrUnref(maybe: any, wantRef: boolean): void {
   const key: any = wantRef ? Symbol.for("nodejs.ref") : Symbol.for("nodejs.unref");
   const hook: any = maybe[key];
   if (__evIsFn(hook)) {
-    __evCall(hook, []);
+    hook.call(maybe);
     return;
   }
   const legacy: any = wantRef ? maybe.ref : maybe.unref;
