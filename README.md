@@ -240,7 +240,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-util:start -->
 ### Node.js v25 `util` compatibility
 
-`███████░░░░░░░░░░░░░░░░░` **30.7%** — 8 / 26 Node `test-util*` tests passing
+`██████████░░░░░░░░░░░░░░` **42.3%** — 11 / 26 Node `test-util*` tests passing
 <!-- node-util:end -->
 
 > `util` is implemented end to end — `inspect` with every option Node documents
