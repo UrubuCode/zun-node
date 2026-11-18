@@ -794,3 +794,26 @@ Object.defineProperty(fixtures, "fixturesDir", {
 // of `__node_crypto` in one program is a compile error, and the guarded blocks
 // in `test-assert-deep.js` and `test-assert-partial-deep-equal.js` now run
 // against the real thing.
+
+// `--expose-externalize-string`, which `test-fs-write.js` runs under. V8's
+// four helpers exist to force a string into its external representation; this
+// engine has one string representation, so creating and externalizing are the
+// identity and `isOneByteString` answers whether every code unit is Latin-1 --
+// which is what V8's one-byte check means for a string written this way.
+(globalThis as any).createExternalizableString = function (text: any): any {
+  return text;
+};
+(globalThis as any).createExternalizableTwoByteString = function (text: any): any {
+  return text;
+};
+(globalThis as any).externalizeString = function (text: any): any {
+  return text;
+};
+(globalThis as any).isOneByteString = function (text: any): boolean {
+  const value: string = String(text);
+  const count: number = Number(value.length);
+  for (let i = 0; i < count; i++) {
+    if (value.charCodeAt(i) > 255) return false;
+  }
+  return true;
+};

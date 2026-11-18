@@ -1241,6 +1241,14 @@ function __fsWriteSync(fd: any, data: any, a?: any, b?: any, c?: any): number {
   if (typeof data === "string") {
     let position: any = a;
     const encoding: any = b === undefined || b === null ? "utf8" : b;
+    // `validateEncoding`: an odd-length string has no hex decoding.
+    if (encoding === "hex" && Number(data.length) % 2 !== 0) {
+      throw new ERR_INVALID_ARG_VALUE(
+        "encoding",
+        encoding,
+        "is invalid for data of length " + String(data.length),
+      );
+    }
     if (position !== undefined && position !== null && typeof position === "object") {
       position = position.position;
     }
@@ -1627,11 +1635,22 @@ function __fsOpendirSync(path: any, options?: any): any {
 // `readvSync(fd, buffers, position)` / `writevSync(fd, buffers, position)` —
 // one scatter/gather call in Node, a loop here, which is observably the same
 // for a regular file.
-function __fsReadvSync(fd: any, buffers: any, position?: any): number {
-  const resolvedFd: number = __fsGetValidatedFd(fd);
+// `validateBufferArray`: an array, every element of it a byte view.
+function __fsValidateBufferArray(buffers: any): void {
   if (!Array.isArray(buffers)) {
     throw new ERR_INVALID_ARG_TYPE("buffers", "ArrayBufferView[]", buffers);
   }
+  const count = Number(buffers.length);
+  for (let i = 0; i < count; i++) {
+    if (!ArrayBuffer.isView(buffers[i])) {
+      throw new ERR_INVALID_ARG_TYPE("buffers", "ArrayBufferView[]", buffers);
+    }
+  }
+}
+
+function __fsReadvSync(fd: any, buffers: any, position?: any): number {
+  const resolvedFd: number = __fsGetValidatedFd(fd);
+  __fsValidateBufferArray(buffers);
   let at: any = position === undefined || position === null ? -1 : Number(position);
   let total = 0;
   const count = Number(buffers.length);
@@ -1649,9 +1668,7 @@ function __fsReadvSync(fd: any, buffers: any, position?: any): number {
 
 function __fsWritevSync(fd: any, buffers: any, position?: any): number {
   const resolvedFd: number = __fsGetValidatedFd(fd);
-  if (!Array.isArray(buffers)) {
-    throw new ERR_INVALID_ARG_TYPE("buffers", "ArrayBufferView[]", buffers);
-  }
+  __fsValidateBufferArray(buffers);
   let at: any = position === undefined || position === null ? -1 : Number(position);
   let total = 0;
   const count = Number(buffers.length);
