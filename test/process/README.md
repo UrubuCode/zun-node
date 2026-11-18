@@ -344,3 +344,23 @@ the constraint [zun#35](https://github.com/UrubuCode/zun/issues/35) imposes.
   compile** ([zun#115](https://github.com/UrubuCode/zun/issues/115)); the first
   of three engine blockers in `test-process-emitwarning.js` (with zun#92's
   spread arguments and zun#88's `Error.captureStackTrace`).
+
+### Worker threads and the process state
+
+Inside a `worker_threads` worker, `process.chdir()`, `process.umask(mask)`
+and `process.abort()` throw `ERR_WORKER_UNSUPPORTED_OPERATION`, as Node's
+`does_not_own_process_state.js` switch does (`__processState.isWorker`, set
+by `__wtBootWorker`). `process.umask()` without an argument still reads.
+
+### Remeasure notes (58/96)
+
+New passes: `test-process-prototype.js` (EventEmitter-derived prototype set on
+the literal), `test-process-load-env-file.js`. `test-process-ppid.js` passes
+when run alone (the launcher now passes `ZUN_NODE_PPID`); it and
+`test-process-really-exit.js` timed out in the loaded full run.
+`test-process-raw-debug.js` and `test-process-exit-code-validation.js` now get
+past the top-level `return` (wider bundler detection); the latter stops on
+`#<Object>` in the engine's delete TypeError (zun#145). Engine issues filed:
+zun#144 (`return voidCall()` in a `: void` function), zun#145, zun#146
+(function declared in a block has an empty `name`, blocks
+`test-util-callbackify.js`).
