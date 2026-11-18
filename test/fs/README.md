@@ -182,7 +182,15 @@ a round trip through a file containing NUL and invalid UTF-8 is covered by
 
 ## Results
 
-**132 of 227** (58.1%) on the current engine build (Windows, 2026-11-18),
+**139 of 227** (61.2%) on the current engine build (Windows, 2026-11-18),
+up from 132. That round: uv errors print as a plain `Error`, `mkdir -p`
+reports `ENOTDIR` under a file, `copyFile`/`stringToFlags`/`rmdir` validation
+matches Node 25, and the bundler rewrites `common.must*` in a `.then()`
+rejection-handler position. Engine blockers filed: zun#133 (getter throw
+escapes try/catch), zun#134 (prototype getter receiver), zun#118 (boxed `let`
+destructuring, blocks `readv`/`writev` promises).
+
+Previously **132 of 227** (58.1%) on the current engine build (Windows, 2026-11-18),
 up from 113 on the same build before this round. The gains: `fs.ReadStream`/
 `fs.WriteStream`/`fs.Stats` callable without `new`, `AbortSignal` on the
 whole-file operations, Node's argument validation for `read`/`write`/`readv`/
