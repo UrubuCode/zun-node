@@ -18,9 +18,9 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-util-deprecate.js` | ✅ pass | |
 | `test-util-deprecate-invalid-code.js` | ✅ pass | |
 | `test-util-emit-experimental-warning.js` | ✅ pass | |
-| `test-util-format.js` | ❌ type error | bundles/test-util-format.ts:21522:5: error: [SEM0001] 'constructor' expects 1 to 2 argument(s), found 0 |
+| `test-util-format.js` | ❌ type error | bundles/test-util-format.ts:21636:5: error: [SEM0001] 'constructor' expects 1 to 2 argument(s), found 0 |
 | `test-util-getcallsites.js` | ❌ assertion | AssertionError [==]: false == true |
-| `test-util-inherits.js` | ❌ type error | bundles/test-util-inherits.ts:21065:22: error: [SEM0001] no method 'getValue' on this type |
+| `test-util-inherits.js` | ❌ type error | bundles/test-util-inherits.ts:21179:22: error: [SEM0001] no method 'getValue' on this type |
 | `test-util-inspect.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-util-inspect.js: |
 | `test-util-inspect-getters-accessing-this.js` | ✅ pass | |
 | `test-util-inspect-long-running.js` | ❌ timeout |  |
@@ -28,7 +28,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-util-inspect-proxy.js` | ❌ runtime | zun: runtime error: unhandled exception: Error: internalBinding: util is not served by the harness |
 | `test-util-inspect-regexp.js` | ❌ parse | zun: runtime error: unhandled exception: SyntaxError: Invalid regular expression: regex parse error: |
 | `test-util-internal.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-util-internal.js: |
-| `test-util-isDeepStrictEqual.js` | ❌ type error | bundles/test-util-isDeepStrictEqual.ts:21293:69: error: [SEM0001] no field or setter 'y' on this type |
+| `test-util-isDeepStrictEqual.js` | ❌ type error | bundles/test-util-isDeepStrictEqual.ts:21407:69: error: [SEM0001] no field or setter 'y' on this type |
 | `test-util-parse-env.js` | ❌ runtime | zun: runtime error: unhandled exception: __FsUvError: ENOENT: no such file or directory, open 'C:\Users\<user> |
 | `test-util-primordial-monkeypatching.js` | ✅ pass | |
 | `test-util-promisify.js` | ❌ assertion | AssertionError [strictEqual]: Expected "actual" to be reference-equal to "expected": |
