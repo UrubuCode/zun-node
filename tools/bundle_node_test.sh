@@ -1382,6 +1382,13 @@ for shadow in setTimeout setInterval clearTimeout clearInterval queueMicrotask B
     perl -pi -e "s/(?<![.\\w\$'\"\`])$shadow\\b(?!\\s*:(?!:))/__zunShadow_$shadow/g" "$OUT"
   fi
 done
+# The rename above also hits a *class method* of the same name (`net.Socket`,
+# `http.ClientRequest`, ... declare `setTimeout(msecs, cb) { ... }`), while
+# its call sites (`socket.setTimeout(...)`) are member reads that keep the
+# original name: restore the declarations. A method declaration is an indented
+# `name(<params without parens>)[: type] {` line; a call that passes a callback
+# has a nested `(` and is left renamed.
+perl -pi -e 's/^(\s+(?:static\s+|async\s+)*)__zunShadow_(\w+)(\s*\([^()]*\)\s*(?::[^{;=]*)?\{\s*)$/$1$2$3/' "$OUT"
 
 # Any `require` left over means the test needs a module the bundler does not
 # know; fail loudly rather than letting the engine report a mystery.
