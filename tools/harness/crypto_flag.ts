@@ -16,3 +16,40 @@
 // `src/crypto/crypto.ts` made it into the file list.
 
 common.hasCrypto = true;
+
+// `process.versions.openssl`, which a build with crypto reports and several
+// corpus files probe (`/^1\.1\.0/.test(process.versions.openssl)`). There is
+// no OpenSSL here; the version is the one `crypto_common.ts`' `hasOpenSSL`
+// answers for, so the two never disagree.
+if (process.versions.openssl === undefined) {
+  (process.versions as any).openssl = "3.5.0";
+}
+
+// `fixtures.readKey(name, encoding)` and `fixtures.readSync(name, encoding)`,
+// which `test/common/fixtures.js` implements with `fs.readFileSync`. A crypto
+// bundle always runs with the extension loaded, so the `node:fs` native that
+// `src/fs/fs.ts` reads files through is reachable here even when the bundle
+// does not inline `node:fs` itself; `common.ts` cannot do this, because it is
+// inlined into bundles that must compile without `--ext`.
+import * as __cfFsNative from "node:fs";
+
+function __cfReadFixture(file: string, encoding: any): any {
+  const result: string = String(__cfFsNative.fsReadFile(file));
+  if (result.charAt(0) !== "+") {
+    const error: any = new Error("ENOENT: no such file or directory, open '" + file + "'");
+    error.code = "ENOENT";
+    throw error;
+  }
+  const bytes: Buffer = Buffer.from(result.slice(1), "base64");
+  if (encoding === undefined || encoding === null) return bytes;
+  return bytes.toString(String(encoding));
+}
+
+fixtures.readKey = function (name: any, encoding?: any): any {
+  return __cfReadFixture(path.join(__fixturesDir(), "keys", String(name)), encoding);
+};
+
+fixtures.readSync = function (name: any, encoding?: any): any {
+  const segments: any[] = Array.isArray(name) ? name : [name];
+  return __cfReadFixture(__fixturesJoin(segments), encoding);
+};

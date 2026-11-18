@@ -963,6 +963,15 @@ class ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS extends NodeError {
   }
 }
 
+class __CErrIncompatibleOptionPair extends NodeError {
+  constructor(a: string, b: string) {
+    super(
+      "ERR_INCOMPATIBLE_OPTION_PAIR",
+      'Option "' + a + '" cannot be used in combination with option "' + b + '"',
+    );
+  }
+}
+
 class KeyObject {
   type: any = "secret";
   // The bytes (secret) or the DER document (asymmetric), base64. Named with
@@ -1004,6 +1013,9 @@ class KeyObject {
       };
     }
     if (info[0] === "ec") return { namedCurve: info[3] };
+    if (info[0] === "dsa") {
+      return { modulusLength: Number(info[1]), divisorLength: Number(info[2]) };
+    }
     return {};
   }
 
@@ -1324,12 +1336,56 @@ function __cGenerateKeyPair(type: any, options: any): any {
   } else if (kind === "ec") {
     __cValidateString(opts.namedCurve, "options.namedCurve");
     curve = opts.namedCurve;
-  } else if (kind === "ed25519" || kind === "x25519") {
+  } else if (kind === "ed25519" || kind === "x25519" || kind === "ed448" || kind === "x448") {
     // No parameters.
-  } else if (
-    kind === "dsa" || kind === "dh" || kind === "ed448" || kind === "x448"
-  ) {
-    throw new ERR_CRYPTO_UNSUPPORTED_OPERATION();
+  } else if (kind === "dsa") {
+    bits = __cValidateUint32(opts.modulusLength, "options.modulusLength");
+    // The native reads divisorLength from the curve slot ("" for default).
+    if (opts.divisorLength !== undefined && opts.divisorLength !== null) {
+      const n: number = __cValidateInteger(opts.divisorLength, "options.divisorLength", 0, 2147483647);
+      curve = "" + n;
+    }
+  } else if (kind === "dh") {
+    // The native reads `prime(base64) US generator` from the curve slot.
+    const group: any = opts.group;
+    const prime: any = opts.prime;
+    const primeLength: any = opts.primeLength;
+    const generator: any = opts.generator;
+    let primeBase64: string = "";
+    let gen: number = 2;
+    if (group !== undefined && group !== null) {
+      if (prime !== undefined && prime !== null) throw new __CErrIncompatibleOptionPair("group", "prime");
+      if (primeLength !== undefined && primeLength !== null) throw new __CErrIncompatibleOptionPair("group", "primeLength");
+      if (generator !== undefined && generator !== null) throw new __CErrIncompatibleOptionPair("group", "generator");
+      __cValidateString(group, "options.group");
+      const name: string = group;
+      if (__C_DH_GROUPS.indexOf(name) < 0) {
+        throw new NodeError("ERR_CRYPTO_UNKNOWN_DH_GROUP", "Unknown DH group");
+      }
+      primeBase64 = __cPayload(__cNative.cryptoDhGroup(name));
+    } else {
+      if (prime !== undefined && prime !== null) {
+        if (primeLength !== undefined && primeLength !== null) {
+          throw new __CErrIncompatibleOptionPair("prime", "primeLength");
+        }
+        if (!__cIsByteView(prime)) {
+          throw new ERR_INVALID_ARG_TYPE("options.prime", ["Buffer", "TypedArray", "DataView"], prime);
+        }
+        primeBase64 = __cToBase64(prime, undefined, "options.prime");
+      } else if (primeLength !== undefined && primeLength !== null) {
+        const n: number = __cValidateInteger(primeLength, "options.primeLength", 0, 2147483647);
+        primeBase64 = __cPayload(__cNative.cryptoGeneratePrime(n));
+      } else {
+        throw new NodeError(
+          "ERR_MISSING_OPTION",
+          "At least one of the group, prime, or primeLength options is required",
+        );
+      }
+      if (generator !== undefined && generator !== null) {
+        gen = __cValidateInteger(generator, "options.generator", 0, 2147483647);
+      }
+    }
+    curve = primeBase64 + __C_US + gen;
   } else {
     throw new ERR_INVALID_ARG_VALUE("type", type, "must be a supported key type");
   }
@@ -1392,7 +1448,17 @@ function __cSignOptions(key: any): string {
       }
     }
   }
-  return padding + __C_US + salt + __C_US + String(p1363);
+  let context: string = "";
+  if (
+    key !== null &&
+    typeof key === "object" &&
+    !__cIsKeyObject(key) &&
+    !__cIsByteView(key) &&
+    key.context !== undefined
+  ) {
+    context = __cToBase64(key.context, undefined, "options.context");
+  }
+  return padding + __C_US + salt + __C_US + String(p1363) + __C_US + context;
 }
 
 function __cDigestName(algorithm: any): string {
@@ -1829,6 +1895,72 @@ class DiffieHellmanGroup extends __CryptoDhBase {
     this.__cPrime = __cPayload(__cNative.cryptoDhGroup(group));
     this.__cGenerator = __cIntBytes(2);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Primes (`lib/internal/crypto/random.js`)
+// ---------------------------------------------------------------------------
+
+const __C_PRIME_TYPES: string[] = ["ArrayBuffer", "TypedArray", "Buffer", "DataView", "bigint"];
+
+// A `bigint` as unsigned big-endian bytes, base64.
+function __cBigIntBase64(value: any, name: string): string {
+  if (value < 0) throw new ERR_OUT_OF_RANGE(name, ">= 0", value);
+  let hex: string = value.toString(16);
+  if (Number(hex.length) % 2 === 1) hex = "0" + hex;
+  const bytes: Buffer = Buffer.from(hex, "hex");
+  return bytes.toString("base64");
+}
+
+// A prime-shaped input (bigint or any byte container) as base64.
+function __cPrimeBytes(value: any, name: string): string {
+  if (typeof value === "bigint") return __cBigIntBase64(value, name);
+  if (value instanceof ArrayBuffer) {
+    const bytes: Buffer = Buffer.from(value);
+    return bytes.toString("base64");
+  }
+  if (__cIsByteView(value)) {
+    const view: Buffer = __cAsBuffer(value);
+    return view.toString("base64");
+  }
+  throw new ERR_INVALID_ARG_TYPE(name, __C_PRIME_TYPES, value);
+}
+
+function __cPrimeCandidate(candidate: any): string {
+  return __cPrimeBytes(candidate, "candidate");
+}
+
+function __cCheckPrime(candidate: string, options: any): boolean {
+  let opts: any = options;
+  if (opts === undefined) opts = {};
+  __cValidateObject(opts, "options");
+  let checks: number = 0;
+  if (opts.checks !== undefined) {
+    checks = __cValidateInteger(opts.checks, "options.checks", 0, 2147483647);
+  }
+  return __cPayload(__cNative.cryptoCheckPrime(candidate, checks)) === "1";
+}
+
+function __cGeneratePrime(size: number, options: any): any {
+  let opts: any = options;
+  if (opts === undefined) opts = {};
+  __cValidateObject(opts, "options");
+  const safe: any = opts.safe === undefined ? false : opts.safe;
+  const bigint: any = opts.bigint === undefined ? false : opts.bigint;
+  if (typeof safe !== "boolean") throw new ERR_INVALID_ARG_TYPE("options.safe", "boolean", safe);
+  if (typeof bigint !== "boolean") throw new ERR_INVALID_ARG_TYPE("options.bigint", "boolean", bigint);
+  const add: string = opts.add === undefined ? "" : __cPrimeBytes(opts.add, "options.add");
+  const rem: string = opts.rem === undefined ? "" : __cPrimeBytes(opts.rem, "options.rem");
+  const result: string = String(__cNative.cryptoGeneratePrimeEx(size, Boolean(safe), add, rem));
+  if (result.charAt(0) !== "+") {
+    throw new ERR_OUT_OF_RANGE("options.add", "a value smaller than 2 ** size and greater than rem", opts.add);
+  }
+  const bytes: Buffer = Buffer.from(result.slice(1), "base64");
+  if (bigint) return BigInt("0x" + bytes.toString("hex"));
+  const out: ArrayBuffer = new ArrayBuffer(Number(bytes.length));
+  const view: Uint8Array = new Uint8Array(out);
+  for (let i = 0; i < Number(bytes.length); i++) view[i] = bytes[i];
+  return out;
 }
 
 // `crypto.diffieHellman({ privateKey, publicKey })`.
@@ -2269,15 +2401,441 @@ function __cUnsupported(): any {
 }
 
 // ---------------------------------------------------------------------------
+// Certificate (SPKAC, `lib/internal/crypto/certificate.js`)
+// ---------------------------------------------------------------------------
+//
+// A plain function rather than a class, because Node allows `Certificate()`
+// without `new` and a class cannot be called that way in this engine
+// (zun#25). Every method is both static and on the prototype, as in Node.
+
+function __cSpkacInput(spkac: any, encoding: any): string {
+  if (typeof spkac === "string") {
+    const text: string = spkac;
+    const bytes: Buffer = Buffer.from(text, __cInputEncoding(encoding));
+    return bytes.toString("base64");
+  }
+  if (spkac instanceof ArrayBuffer) {
+    const bytes: Buffer = Buffer.from(spkac);
+    return bytes.toString("base64");
+  }
+  if (__cIsByteView(spkac)) {
+    const view: Buffer = __cAsBuffer(spkac);
+    if (Number(view.length) > 2147483647) {
+      throw new ERR_OUT_OF_RANGE("spkac", "<= 2147483647", Number(view.length));
+    }
+    return view.toString("base64");
+  }
+  throw new ERR_INVALID_ARG_TYPE("spkac", ["string", "ArrayBuffer", "Buffer", "TypedArray", "DataView"], spkac);
+}
+
+function __cSpkacVerify(spkac: any, encoding?: any): boolean {
+  return __cPayload(__cNative.cryptoSpkac("verify", __cSpkacInput(spkac, encoding))) === "1";
+}
+
+function __cSpkacPublicKey(spkac: any, encoding?: any): any {
+  const der: string = __cPayload(__cNative.cryptoSpkac("publicKey", __cSpkacInput(spkac, encoding)));
+  if (der === "") return "";
+  const key: any = new KeyObject("public", der);
+  return key.export({ format: "pem", type: "spki" });
+}
+
+function __cSpkacChallenge(spkac: any, encoding?: any): any {
+  const bytes: string = __cPayload(__cNative.cryptoSpkac("challenge", __cSpkacInput(spkac, encoding)));
+  if (bytes === "") return "";
+  return Buffer.from(bytes, "base64");
+}
+
+function Certificate(this: any): any {
+  if (!(this instanceof Certificate)) return new (Certificate as any)();
+  return undefined;
+}
+(Certificate as any).verifySpkac = function (this: any, spkac: any, encoding?: any): any {
+  return __cSpkacVerify(spkac, encoding);
+};
+(Certificate as any).exportPublicKey = function (this: any, spkac: any, encoding?: any): any {
+  return __cSpkacPublicKey(spkac, encoding);
+};
+(Certificate as any).exportChallenge = function (this: any, spkac: any, encoding?: any): any {
+  return __cSpkacChallenge(spkac, encoding);
+};
+// The prototype copies take `this` explicitly: a free function stored on a
+// prototype receives the instance as its first argument in this engine.
+(Certificate as any).prototype.verifySpkac = function (this: any, spkac: any, encoding?: any): any {
+  return __cSpkacVerify(spkac, encoding);
+};
+(Certificate as any).prototype.exportPublicKey = function (this: any, spkac: any, encoding?: any): any {
+  return __cSpkacPublicKey(spkac, encoding);
+};
+(Certificate as any).prototype.exportChallenge = function (this: any, spkac: any, encoding?: any): any {
+  return __cSpkacChallenge(spkac, encoding);
+};
+
+// ---------------------------------------------------------------------------
 // WebCrypto
 // ---------------------------------------------------------------------------
 //
-// `crypto.webcrypto` / `crypto.subtle` exist with `digest`, `getRandomValues`
-// and `randomUUID` only: those three need nothing but the primitives above,
-// while `encrypt`/`decrypt`/`sign`/`verify`/`importKey` need the `CryptoKey`
-// algorithm-normalisation machinery and (for most algorithms) the asymmetric
-// half this module does not have. The three that are here answer real values
-// rather than rejecting, which is what makes `subtle.digest` usable.
+// `crypto.subtle` is a thin layer over the Node-shaped functions above, the
+// same delegation Node's `lib/internal/crypto/webcrypto.js` performs onto its
+// `*Job`s: a `CryptoKey` wraps a `KeyObject`, and each operation normalises
+// its algorithm object and calls `sign`/`verify`/`publicEncrypt`/
+// `createCipheriv`/`hkdfSync`/`pbkdf2Sync`/`diffieHellman`. The algorithms
+// are RSASSA-PKCS1-v1_5, RSA-PSS, RSA-OAEP, ECDSA, ECDH, Ed25519, Ed448,
+// X25519, X448, HMAC, AES-CBC/CTR/GCM, HKDF and PBKDF2; `generateKey`,
+// `deriveKey`, `wrapKey` and `unwrapKey` still reject. Every result is
+// computed synchronously and delivered as a settled promise.
+
+class CryptoKey {
+  type: any = "secret";
+  extractable: any = false;
+  algorithm: any = undefined;
+  usages: any = undefined;
+  __cKeyObject: any = undefined;
+  constructor(keyObject: any, algorithm: any, extractable: any, usages: any) {
+    this.__cKeyObject = keyObject;
+    this.type = keyObject.type;
+    this.algorithm = algorithm;
+    this.extractable = extractable;
+    this.usages = usages;
+  }
+}
+
+function __cDomError(name: string, message: string): any {
+  const error: any = new Error(message);
+  error.name = name;
+  return error;
+}
+
+function __cToArrayBuffer(bytes: Buffer): ArrayBuffer {
+  const out: ArrayBuffer = new ArrayBuffer(Number(bytes.length));
+  const view: Uint8Array = new Uint8Array(out);
+  for (let i = 0; i < Number(bytes.length); i++) view[i] = bytes[i];
+  return out;
+}
+
+// Any BufferSource as a Buffer.
+function __cSourceBuffer(data: any, name: string): Buffer {
+  if (data instanceof ArrayBuffer) {
+    const bytes: Buffer = Buffer.from(data);
+    return bytes;
+  }
+  if (__cIsByteView(data)) return __cAsBuffer(data);
+  throw new ERR_INVALID_ARG_TYPE(name, ["ArrayBuffer", "Buffer", "TypedArray", "DataView"], data);
+}
+
+function __cAlgorithm(algorithm: any): any {
+  if (typeof algorithm === "string") return { name: algorithm };
+  if (algorithm === null || typeof algorithm !== "object") {
+    throw __cDomError("NotSupportedError", "Unrecognized algorithm name");
+  }
+  return algorithm;
+}
+
+const __C_WEB_ALGORITHMS: string[] = [
+  "RSASSA-PKCS1-v1_5", "RSA-PSS", "RSA-OAEP", "ECDSA", "ECDH", "Ed25519", "Ed448",
+  "X25519", "X448", "HMAC", "AES-CBC", "AES-CTR", "AES-GCM", "AES-KW", "HKDF", "PBKDF2",
+];
+
+function __cAlgorithmName(algorithm: any): string {
+  const name: string = String(__cAlgorithm(algorithm).name);
+  const upper: string = name.toUpperCase();
+  for (const known of __C_WEB_ALGORITHMS) {
+    if (known.toUpperCase() === upper) return known;
+  }
+  throw __cDomError("NotSupportedError", "Unrecognized algorithm name");
+}
+
+function __cHashName(hash: any): string {
+  if (hash === undefined) throw new ERR_INVALID_ARG_TYPE("algorithm.hash", "string", hash);
+  const name: any = typeof hash === "string" ? hash : hash.name;
+  const upper: string = String(name).toUpperCase();
+  if (upper === "SHA-1" || upper === "SHA-256" || upper === "SHA-384" || upper === "SHA-512") return upper;
+  throw __cDomError("NotSupportedError", "Unrecognized algorithm name");
+}
+
+// `SHA-256` as the Node digest name `sha256`.
+function __cNodeHash(webName: string): string {
+  return webName.toLowerCase().split("-").join("");
+}
+
+const __C_WEB_CURVES: string[] = ["P-256", "P-384", "P-521"];
+
+function __cWebPromise(fn: any): any {
+  return new Promise(function (resolve: any, reject: any): void {
+    let value: any = undefined;
+    try {
+      value = __cInvoke(fn, []);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    resolve(value);
+  });
+}
+
+function __cCheckUsage(key: any, usage: string): void {
+  if (!(key instanceof CryptoKey)) {
+    throw new ERR_INVALID_ARG_TYPE("key", "CryptoKey", key);
+  }
+  const held: any = key;
+  const usages: any[] = held.usages;
+  if (usages.indexOf(usage) < 0) {
+    throw __cDomError("InvalidAccessError", "The requested operation is not valid for the provided key");
+  }
+}
+
+function __cImportCryptoKey(format: any, keyData: any, algorithm: any, extractable: any, usages: any): any {
+  const alg: any = __cAlgorithm(algorithm);
+  const name: string = __cAlgorithmName(alg);
+  const fmt: string = String(format);
+  let keyObject: any = undefined;
+  if (name === "HMAC" || name.indexOf("AES-") === 0 || name === "HKDF" || name === "PBKDF2") {
+    if (fmt === "raw") {
+      keyObject = __node_crypto.createSecretKey(__cSourceBuffer(keyData, "keyData"));
+    } else if (fmt === "jwk") {
+      keyObject = __node_crypto.createSecretKey(Buffer.from(__cFromBase64Url(String(keyData.k)), "base64"));
+    } else {
+      throw __cDomError("NotSupportedError", "Unable to import " + name + " key with format " + fmt);
+    }
+  } else if (fmt === "spki") {
+    keyObject = __node_crypto.createPublicKey({ key: __cSourceBuffer(keyData, "keyData"), format: "der", type: "spki" });
+  } else if (fmt === "pkcs8") {
+    keyObject = __node_crypto.createPrivateKey({ key: __cSourceBuffer(keyData, "keyData"), format: "der", type: "pkcs8" });
+  } else if (fmt === "jwk") {
+    if (keyData.d !== undefined) {
+      keyObject = __node_crypto.createPrivateKey({ key: keyData, format: "jwk" });
+    } else {
+      keyObject = __node_crypto.createPublicKey({ key: keyData, format: "jwk" });
+    }
+  } else if (fmt === "raw" && (name === "Ed25519" || name === "X25519" || name === "Ed448" || name === "X448")) {
+    const raw: Buffer = __cSourceBuffer(keyData, "keyData");
+    keyObject = __node_crypto.createPublicKey({
+      key: { kty: "OKP", crv: name, x: __cBase64Url(raw.toString("base64")) },
+      format: "jwk",
+    });
+  } else {
+    throw __cDomError("NotSupportedError", "Unable to import " + name + " key with format " + fmt);
+  }
+  const out: any = { name: name };
+  if (name === "HMAC") {
+    out.hash = { name: __cHashName(alg.hash) };
+    out.length = Number(keyObject.symmetricKeySize) * 8;
+  } else if (name.indexOf("AES-") === 0) {
+    out.length = Number(keyObject.symmetricKeySize) * 8;
+  } else if (name.indexOf("RSA") === 0) {
+    const details: any = keyObject.asymmetricKeyDetails;
+    out.modulusLength = details.modulusLength;
+    out.publicExponent = new Uint8Array([1, 0, 1]);
+    out.hash = { name: __cHashName(alg.hash) };
+  } else if (name === "ECDSA" || name === "ECDH") {
+    const curve: any = alg.namedCurve;
+    if (__C_WEB_CURVES.indexOf(String(curve)) < 0) {
+      throw __cDomError("NotSupportedError", "Unrecognized namedCurve");
+    }
+    out.namedCurve = curve;
+  }
+  return new CryptoKey(keyObject, out, Boolean(extractable), usages === undefined ? [] : usages);
+}
+
+function __cSignOpts(alg: any, key: any): any {
+  const name: string = String(key.algorithm.name);
+  const opts: any = { key: key.__cKeyObject };
+  if (name === "RSA-PSS") {
+    opts.padding = 6;
+    opts.saltLength = alg.saltLength;
+  } else if (name === "ECDSA") {
+    opts.dsaEncoding = "ieee-p1363";
+  } else if (name === "Ed448" && alg.context !== undefined) {
+    opts.context = alg.context;
+  }
+  return opts;
+}
+
+function __cSignHash(alg: any, key: any): any {
+  const name: string = String(key.algorithm.name);
+  if (name === "Ed25519" || name === "Ed448") return null;
+  if (name === "ECDSA") return __cNodeHash(__cHashName(alg.hash));
+  return __cNodeHash(String(key.algorithm.hash.name));
+}
+
+function __cWebSign(algorithm: any, key: any, data: any): any {
+  const alg: any = __cAlgorithm(algorithm);
+  __cCheckUsage(key, "sign");
+  const bytes: Buffer = __cSourceBuffer(data, "data");
+  if (String(key.algorithm.name) === "HMAC") {
+    const mac: any = __node_crypto.createHmac(__cNodeHash(String(key.algorithm.hash.name)), key.__cKeyObject);
+    return __cToArrayBuffer(mac.update(bytes).digest());
+  }
+  return __cToArrayBuffer(__node_crypto.sign(__cSignHash(alg, key), bytes, __cSignOpts(alg, key)));
+}
+
+function __cWebVerify(algorithm: any, key: any, signature: any, data: any): any {
+  const alg: any = __cAlgorithm(algorithm);
+  __cCheckUsage(key, "verify");
+  const bytes: Buffer = __cSourceBuffer(data, "data");
+  const sig: Buffer = __cSourceBuffer(signature, "signature");
+  if (String(key.algorithm.name) === "HMAC") {
+    const mac: any = __node_crypto.createHmac(__cNodeHash(String(key.algorithm.hash.name)), key.__cKeyObject);
+    const expected: Buffer = mac.update(bytes).digest();
+    return expected.toString("hex") === sig.toString("hex");
+  }
+  if (String(key.algorithm.name) === "ECDSA") {
+    // A P1363 signature of the wrong length is simply invalid in WebCrypto.
+    const curve: string = String(key.algorithm.namedCurve);
+    const size: number = curve === "P-521" ? 132 : curve === "P-384" ? 96 : 64;
+    if (Number(sig.length) !== size) return false;
+  }
+  return __node_crypto.verify(__cSignHash(alg, key), bytes, __cSignOpts(alg, key), sig);
+}
+
+function __cAesCipher(key: any, mode: string): string {
+  const bits: number = Number(key.__cKeyObject.symmetricKeySize) * 8;
+  return "aes-" + bits + "-" + mode;
+}
+
+function __cOperationError(): any {
+  return __cDomError("OperationError", "The operation failed for an operation-specific reason");
+}
+
+function __cWebCrypt(encrypt: boolean, algorithm: any, key: any, data: any): any {
+  const alg: any = __cAlgorithm(algorithm);
+  __cCheckUsage(key, encrypt ? "encrypt" : "decrypt");
+  const bytes: Buffer = __cSourceBuffer(data, "data");
+  const name: string = String(key.algorithm.name);
+  if (name === "RSA-OAEP") {
+    const opts: any = {
+      key: key.__cKeyObject,
+      padding: 4,
+      oaepHash: __cNodeHash(String(key.algorithm.hash.name)),
+    };
+    if (alg.label !== undefined) opts.oaepLabel = __cSourceBuffer(alg.label, "algorithm.label");
+    let out: any = undefined;
+    try {
+      out = encrypt ? __node_crypto.publicEncrypt(opts, bytes) : __node_crypto.privateDecrypt(opts, bytes);
+    } catch (error) {
+      throw __cOperationError();
+    }
+    return __cToArrayBuffer(out);
+  }
+  if (name === "AES-GCM") {
+    const tagLength: number = alg.tagLength === undefined ? 128 : Number(alg.tagLength);
+    if ([32, 64, 96, 104, 112, 120, 128].indexOf(tagLength) < 0) {
+      throw __cDomError("OperationError", tagLength + " is not a valid AES-GCM tag length");
+    }
+    const tagBytes: number = tagLength / 8;
+    const iv: Buffer = __cSourceBuffer(alg.iv, "algorithm.iv");
+    const options: any = { authTagLength: tagBytes };
+    if (encrypt) {
+      const cipher: any = __node_crypto.createCipheriv(__cAesCipher(key, "gcm"), key.__cKeyObject, iv, options);
+      if (alg.additionalData !== undefined) cipher.setAAD(__cSourceBuffer(alg.additionalData, "algorithm.additionalData"));
+      const head: Buffer = cipher.update(bytes);
+      const tail: Buffer = cipher.final();
+      const tag: Buffer = cipher.getAuthTag();
+      return __cToArrayBuffer(Buffer.concat([head, tail, tag]));
+    }
+    if (Number(bytes.length) < tagBytes) {
+      throw __cDomError("OperationError", "The provided data is too small.");
+    }
+    const body: Buffer = bytes.subarray(0, Number(bytes.length) - tagBytes);
+    const tag: Buffer = bytes.subarray(Number(bytes.length) - tagBytes);
+    const decipher: any = __node_crypto.createDecipheriv(__cAesCipher(key, "gcm"), key.__cKeyObject, iv, options);
+    if (alg.additionalData !== undefined) decipher.setAAD(__cSourceBuffer(alg.additionalData, "algorithm.additionalData"));
+    decipher.setAuthTag(tag);
+    let plain: any = undefined;
+    try {
+      const head: Buffer = decipher.update(body);
+      const tail: Buffer = decipher.final();
+      plain = Buffer.concat([head, tail]);
+    } catch (error) {
+      throw __cOperationError();
+    }
+    return __cToArrayBuffer(plain);
+  }
+  if (name === "AES-CBC" || name === "AES-CTR") {
+    const mode: string = name === "AES-CBC" ? "cbc" : "ctr";
+    const iv: Buffer = __cSourceBuffer(name === "AES-CBC" ? alg.iv : alg.counter, "algorithm.iv");
+    const c: any = encrypt
+      ? __node_crypto.createCipheriv(__cAesCipher(key, mode), key.__cKeyObject, iv)
+      : __node_crypto.createDecipheriv(__cAesCipher(key, mode), key.__cKeyObject, iv);
+    let out: any = undefined;
+    try {
+      const head: Buffer = c.update(bytes);
+      const tail: Buffer = c.final();
+      out = Buffer.concat([head, tail]);
+    } catch (error) {
+      throw __cOperationError();
+    }
+    return __cToArrayBuffer(out);
+  }
+  throw __cDomError("NotSupportedError", "Unrecognized algorithm name");
+}
+
+function __cWebDeriveBits(algorithm: any, baseKey: any, length: any): any {
+  const alg: any = __cAlgorithm(algorithm);
+  const name: string = __cAlgorithmName(alg);
+  __cCheckUsage(baseKey, "deriveBits");
+  let bytes: Buffer = Buffer.alloc(0);
+  if (name === "ECDH" || name === "X25519" || name === "X448") {
+    const peer: any = alg.public;
+    if (!(peer instanceof CryptoKey)) throw new ERR_INVALID_ARG_TYPE("algorithm.public", "CryptoKey", peer);
+    bytes = __node_crypto.diffieHellman({ privateKey: baseKey.__cKeyObject, publicKey: peer.__cKeyObject });
+    if (length === undefined || length === null) return __cToArrayBuffer(bytes);
+  } else if (name === "HKDF") {
+    const out: any = __node_crypto.hkdfSync(
+      __cNodeHash(__cHashName(alg.hash)),
+      baseKey.__cKeyObject,
+      __cSourceBuffer(alg.salt, "algorithm.salt"),
+      __cSourceBuffer(alg.info, "algorithm.info"),
+      Number(length) / 8,
+    );
+    bytes = __cSourceBuffer(out, "bits");
+  } else if (name === "PBKDF2") {
+    const password: Buffer = Buffer.from(String(baseKey.__cKeyObject.__cBase64), "base64");
+    bytes = __node_crypto.pbkdf2Sync(
+      password,
+      __cSourceBuffer(alg.salt, "algorithm.salt"),
+      Number(alg.iterations),
+      Number(length) / 8,
+      __cNodeHash(__cHashName(alg.hash)),
+    );
+  } else {
+    throw __cDomError("NotSupportedError", "Unrecognized algorithm name");
+  }
+  const bits: number = Number(length);
+  const wanted: number = Math.ceil(bits / 8);
+  if (wanted > Number(bytes.length)) {
+    throw __cDomError("OperationError", "derived bit length is too large");
+  }
+  const cut: Buffer = Buffer.from(bytes.subarray(0, wanted));
+  if (bits % 8 !== 0) {
+    const last: number = Number(cut[wanted - 1]);
+    cut[wanted - 1] = last & ((0xff << (8 - (bits % 8))) & 0xff);
+  }
+  return __cToArrayBuffer(cut);
+}
+
+function __cWebExportKey(format: any, key: any): any {
+  if (!(key instanceof CryptoKey)) throw new ERR_INVALID_ARG_TYPE("key", "CryptoKey", key);
+  const held: any = key;
+  if (!held.extractable) {
+    throw __cDomError("InvalidAccessError", "key is not extractable");
+  }
+  const fmt: string = String(format);
+  const keyObject: any = held.__cKeyObject;
+  if (fmt === "raw" && String(keyObject.type) === "secret") {
+    return __cToArrayBuffer(Buffer.from(String(keyObject.__cBase64), "base64"));
+  }
+  if (fmt === "spki" || fmt === "pkcs8") {
+    return __cToArrayBuffer(keyObject.export({ format: "der", type: fmt }));
+  }
+  if (fmt === "jwk") {
+    const jwk: any = keyObject.export({ format: "jwk" });
+    jwk.ext = held.extractable;
+    jwk.key_ops = held.usages;
+    return jwk;
+  }
+  throw __cDomError("NotSupportedError", "Unable to export a key with format " + fmt);
+}
+
 const __cSubtle: any = {
   digest(algorithm: any, data: any): any {
     let name: any = algorithm;
@@ -2288,28 +2846,42 @@ const __cSubtle: any = {
     const bytes: Buffer = Buffer.from(payload, "base64");
     return Promise.resolve(bytes);
   },
-  encrypt(): any {
-    return Promise.reject(new ERR_CRYPTO_UNSUPPORTED_OPERATION());
+  importKey(format: any, keyData: any, algorithm: any, extractable: any, usages: any): any {
+    return __cWebPromise(function (): any {
+      return __cImportCryptoKey(format, keyData, algorithm, extractable, usages);
+    });
   },
-  decrypt(): any {
-    return Promise.reject(new ERR_CRYPTO_UNSUPPORTED_OPERATION());
+  exportKey(format: any, key: any): any {
+    return __cWebPromise(function (): any {
+      return __cWebExportKey(format, key);
+    });
   },
-  sign(): any {
-    return Promise.reject(new ERR_CRYPTO_UNSUPPORTED_OPERATION());
+  sign(algorithm: any, key: any, data: any): any {
+    return __cWebPromise(function (): any {
+      return __cWebSign(algorithm, key, data);
+    });
   },
-  verify(): any {
-    return Promise.reject(new ERR_CRYPTO_UNSUPPORTED_OPERATION());
+  verify(algorithm: any, key: any, signature: any, data: any): any {
+    return __cWebPromise(function (): any {
+      return __cWebVerify(algorithm, key, signature, data);
+    });
   },
-  importKey(): any {
-    return Promise.reject(new ERR_CRYPTO_UNSUPPORTED_OPERATION());
+  encrypt(algorithm: any, key: any, data: any): any {
+    return __cWebPromise(function (): any {
+      return __cWebCrypt(true, algorithm, key, data);
+    });
   },
-  exportKey(): any {
-    return Promise.reject(new ERR_CRYPTO_UNSUPPORTED_OPERATION());
+  decrypt(algorithm: any, key: any, data: any): any {
+    return __cWebPromise(function (): any {
+      return __cWebCrypt(false, algorithm, key, data);
+    });
+  },
+  deriveBits(algorithm: any, baseKey: any, length?: any): any {
+    return __cWebPromise(function (): any {
+      return __cWebDeriveBits(algorithm, baseKey, length);
+    });
   },
   generateKey(): any {
-    return Promise.reject(new ERR_CRYPTO_UNSUPPORTED_OPERATION());
-  },
-  deriveBits(): any {
     return Promise.reject(new ERR_CRYPTO_UNSUPPORTED_OPERATION());
   },
   deriveKey(): any {
@@ -2579,6 +3151,8 @@ const __node_crypto: any = {
   // ---------------------------------------------------------------------
   // The asymmetric surface
   // ---------------------------------------------------------------------
+  Certificate: Certificate,
+  CryptoKey: CryptoKey,
   Sign: Sign,
   Verify: Verify,
   ECDH: ECDH,
@@ -2595,13 +3169,23 @@ const __node_crypto: any = {
     const name: string = __cDigestName(algorithm);
     const bytes: string = __cSignData(data);
     if (key === undefined || key === null) throw new ERR_CRYPTO_SIGN_KEY_REQUIRED();
-    const signature: string = __cSignBytes(name, bytes, key);
-    const answer: Buffer = Buffer.from(signature, "base64");
     if (callback !== undefined) {
+      // Node validates and parses the key synchronously and runs the
+      // signature as a job, whose failure reaches the callback.
       __cValidateFunction(callback, "callback");
-      __cTick(callback, null, answer);
+      __cImportKey(key, true, "key");
+      let result: any = undefined;
+      try {
+        result = Buffer.from(__cSignBytes(name, bytes, key), "base64");
+      } catch (error) {
+        __cTick(callback, error);
+        return undefined;
+      }
+      __cTick(callback, null, result);
       return undefined;
     }
+    const signature: string = __cSignBytes(name, bytes, key);
+    const answer: Buffer = Buffer.from(signature, "base64");
     return answer;
   },
   verify(algorithm: any, data: any, key: any, signature: any, callback?: any): any {
@@ -2611,12 +3195,20 @@ const __node_crypto: any = {
       throw new ERR_INVALID_ARG_TYPE("signature", ["Buffer", "TypedArray", "DataView"], signature);
     }
     const sig: string = __cToBase64(signature, undefined, "signature");
-    const answer: boolean = __cVerifyBytes(name, bytes, key, sig);
     if (callback !== undefined) {
       __cValidateFunction(callback, "callback");
-      __cTick(callback, null, answer);
+      __cImportKey(key, false, "key");
+      let result: boolean = false;
+      try {
+        result = __cVerifyBytes(name, bytes, key, sig);
+      } catch (error) {
+        __cTick(callback, error);
+        return undefined;
+      }
+      __cTick(callback, null, result);
       return undefined;
     }
+    const answer: boolean = __cVerifyBytes(name, bytes, key, sig);
     return answer;
   },
   createPublicKey(key: any): any {
@@ -2675,17 +3267,38 @@ const __node_crypto: any = {
   createECDH(curve: any): any {
     return new ECDH(curve);
   },
-  checkPrime(): any {
-    return __cUnsupported();
+  checkPrime(candidate: any, options?: any, callback?: any): any {
+    let opts: any = options;
+    let cb: any = callback;
+    if (__evIsFn(opts)) {
+      cb = opts;
+      opts = undefined;
+    }
+    const prepared: string = __cPrimeCandidate(candidate);
+    __cValidateFunction(cb, "callback");
+    const result: boolean = __cCheckPrime(prepared, opts);
+    __cTick(cb, null, result);
+    return undefined;
   },
-  checkPrimeSync(): any {
-    return __cUnsupported();
+  checkPrimeSync(candidate: any, options?: any): any {
+    return __cCheckPrime(__cPrimeCandidate(candidate), options);
   },
-  generatePrime(): any {
-    return __cUnsupported();
+  generatePrime(size: any, options?: any, callback?: any): any {
+    __cValidateInteger(size, "size", 1, 2147483647);
+    let opts: any = options;
+    let cb: any = callback;
+    if (__evIsFn(opts)) {
+      cb = opts;
+      opts = undefined;
+    }
+    __cValidateFunction(cb, "callback");
+    const prime: any = __cGeneratePrime(size, opts);
+    __cTick(cb, null, prime);
+    return undefined;
   },
-  generatePrimeSync(): any {
-    return __cUnsupported();
+  generatePrimeSync(size: any, options?: any): any {
+    __cValidateInteger(size, "size", 1, 2147483647);
+    return __cGeneratePrime(size, options);
   },
 };
 
