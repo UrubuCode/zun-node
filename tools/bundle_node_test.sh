@@ -279,6 +279,10 @@ _http_common __node_http -
 _http_incoming __node_http -
 _http_outgoing __node_http -
 _http_server __node_http -
+tls __node_tls TLSSocket,SecureContext
+_tls_common __node_tls -
+_tls_wrap __node_tls -
+https __node_https -
 dgram __node_dgram -
 internal/dgram __node_internal_dgram -
 cluster __node_cluster -
@@ -572,6 +576,32 @@ _http_server src/string_decoder/string_decoder.ts
 _http_server src/stream/stream.ts
 _http_server src/net/net.ts
 _http_server src/http/http.ts
+tls src/buffer/buffer.ts
+tls src/string_decoder/string_decoder.ts
+tls src/stream/stream.ts
+tls src/net/net.ts
+tls src/crypto/crypto.ts
+tls src/tls/tls.ts
+_tls_common src/buffer/buffer.ts
+_tls_common src/string_decoder/string_decoder.ts
+_tls_common src/stream/stream.ts
+_tls_common src/net/net.ts
+_tls_common src/crypto/crypto.ts
+_tls_common src/tls/tls.ts
+_tls_wrap src/buffer/buffer.ts
+_tls_wrap src/string_decoder/string_decoder.ts
+_tls_wrap src/stream/stream.ts
+_tls_wrap src/net/net.ts
+_tls_wrap src/crypto/crypto.ts
+_tls_wrap src/tls/tls.ts
+https src/buffer/buffer.ts
+https src/string_decoder/string_decoder.ts
+https src/stream/stream.ts
+https src/net/net.ts
+https src/http/http.ts
+https src/crypto/crypto.ts
+https src/tls/tls.ts
+https src/https/https.ts
 dgram src/buffer/buffer.ts
 dgram src/string_decoder/string_decoder.ts
 dgram src/stream/stream.ts
@@ -1493,6 +1523,17 @@ trap 'rm -f "$REWRITE" "$LATE" ${ESM_SRC:+"$ESM_SRC"}' EXIT
       printf '%s\n' "s#\\(^\\|[^.A-Za-z0-9_\$ ]\\|[^.A-Za-z0-9_\$] \\)$ctor(#\\1new $ctor(#g"
     done
   fi
+
+  # The reverse case for `Server`: `http`, `https` and `tls` publish it as a
+  # factory (Node lets it be called without `new`, and a class cannot be called
+  # here), and `new <object>.<method>()` does not construct through an
+  # object-literal method ("value is not a constructor"). The factory already
+  # answers a new instance, so the `new` is dropped.
+  for mod in http https tls; do
+    if requires_module "$mod"; then
+      printf '%s\n' "s#\bnew \($mod\.Server\)(#\1(#g"
+    fi
+  done
 
   # Engine workaround (https://github.com/UrubuCode/zun/issues/20): five of
   # `events`' module statics share a name with an `EventEmitter` *instance*

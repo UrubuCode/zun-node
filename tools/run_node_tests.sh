@@ -222,6 +222,12 @@ case "$MODULE" in
   # because the sockets underneath are the I/O loop's. The corpus is
   # `test-http-*`, which does not select `test-http2-*` or `test-https-*`.
   http)   KIND="zun-ts+ext"; PATTERNS="test-http-";                        PATTERN="test-http-";;
+  # `tls` is Zun TypeScript over `net` and the rustls engine in src/tls/mod.rs
+  # (a memory-BIO session per socket); `https` is `http` over `tls`, with no
+  # natives of its own. Both corpora read Node's key fixtures, listed in
+  # test/<module>/NODE_FIXTURES.txt.
+  tls)    KIND="zun-ts+ext"; PATTERNS="test-tls-";                         PATTERN="test-tls-";;
+  https)  KIND="zun-ts+ext"; PATTERNS="test-https-";                       PATTERN="test-https-";;
   # `dgram` is the second consumer of the shared I/O loop (`src/io/`), which
   # grew the datagram verbs in `src/io/udp.rs`; `src/dgram/dgram.ts` is the
   # module Node exposes: `Socket` as an `EventEmitter` over a UDP handle.
