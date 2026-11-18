@@ -323,11 +323,12 @@ if [ -f "$FIXTURES" ]; then
     [ -n "$fixture" ] || continue
     case "$fixture" in \#*) continue;; esac
     mkdir -p "$(dirname "$WORK/$fixture")"
-    if ! curl -fsSL --max-time "$TIMEOUT" \
-      "https://raw.githubusercontent.com/nodejs/node/$TAG/$fixture" -o "$WORK/$fixture"; then
-      echo "warning: could not download fixture $fixture" >&2
-    fi
+    # Fetched concurrently: `crypto` lists over a hundred key files.
+    ( curl -fsSL --max-time "$TIMEOUT" \
+        "https://raw.githubusercontent.com/nodejs/node/$TAG/$fixture" -o "$WORK/$fixture" \
+        || echo "warning: could not download fixture $fixture" >&2 ) &
   done < "$FIXTURES"
+  wait
 fi
 # The engine reports the native form of the path it was given, so the scratch
 # directory is stripped from failure notes in both spellings.

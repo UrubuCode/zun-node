@@ -9,11 +9,13 @@ we write. `crypto` is **not finished** until it passes 100% of Node's
 `NODE_TESTS.txt` is the full inventory of Node 25's corpus for this module —
 115 files under the single `test-crypto` prefix, which includes `test-crypto.js`
 itself. Each file is fetched verbatim from `nodejs/node` at tag `v25.0.0`;
-nothing is vendored here. `NODE_FIXTURES.txt` lists the two `test/fixtures/*`
-files the reachable part of the corpus opens (`sample.png`, whose SHA-1
-`test-crypto-hash.js` asserts, and `utf8_test_text.txt`, which
-`test-crypto-oneshot-hash.js` hashes with every algorithm), which the tracker
-downloads next to the test file so the harness's
+nothing is vendored here. `NODE_FIXTURES.txt` lists the `test/fixtures/*`
+files the reachable part of the corpus opens — `sample.png` (whose SHA-1
+`test-crypto-hash.js` asserts), `utf8_test_text.txt` (which
+`test-crypto-oneshot-hash.js` hashes with every algorithm), the two vector
+files `fixtures.readSync` loads, and the ~115 key, certificate and SPKAC files
+under `test/fixtures/keys/` that `fixtures.readKey` loads. The tracker
+downloads them (concurrently) next to the test file so the harness's
 `path.join(__dirname, "..", "fixtures")` finds them.
 
 ## How they run
@@ -43,7 +45,12 @@ Two harness files belong to this module:
   between the OpenSSL 1.1 and OpenSSL 3 error text and IV-length limits.
 * `tools/harness/crypto_flag.ts` sets `common.hasCrypto = true`, and the
   bundler appends it *after* `tools/harness/common.ts` exactly when
-  `src/crypto/crypto.ts` made it into the file list. The flag has to track what
+  `src/crypto/crypto.ts` made it into the file list. It also installs
+  `fixtures.readKey(name, encoding)` and `fixtures.readSync(name, encoding)`
+  over the `node:fs` native `fsReadFile` (a crypto bundle always runs with the
+  extension, so the native is there even when `node:fs` is not inlined), and
+  sets `process.versions.openssl` to the version `hasOpenSSL` answers for —
+  several files probe it with a regular expression. The flag has to track what
   the bundle contains rather than what the library can do: a `path` bundle has
   no crypto in it. The throwing `__node_crypto` stub that used to live in
   `common.ts` is gone — the two `assert` tests that guarded on `hasCrypto` now
@@ -111,27 +118,49 @@ published vectors — see **Verified outside the corpus** below.
 PKCS#8 (PBES2) and RFC 1421 encrypted PEM (`Proc-Type: 4,ENCRYPTED`) both
 ways; `export()` in every format; `asymmetricKeyType` / `asymmetricKeyDetails`.
 Key types: RSA, RSA-PSS (with the `RSASSA-PSS-params` restriction), EC over
-`prime256v1`, `secp384r1`, `secp521r1` and `secp256k1`, Ed25519, X25519.
-`generateKeyPair` / `generateKeyPairSync` for those types (with
-`promisify.custom`), `sign` / `verify` and `Sign` / `Verify` (PKCS#1 v1.5, PSS
-with every salt-length constant, ECDSA in DER and IEEE P1363, Ed25519),
+`prime256v1`, `secp384r1`, `secp521r1` and `secp256k1`, Ed25519, Ed448,
+X25519, X448, DSA (any `modulusLength`/`divisorLength`, including the 1025-bit
+fixture keys, and the traditional `DSA PRIVATE KEY` PEM) and X9.42 `dh` keys.
+`generateKeyPair` / `generateKeyPairSync` for all of those types (with
+`promisify.custom`; `dh` takes `group`, `prime` or `primeLength` plus
+`generator`), `sign` / `verify` and `Sign` / `Verify` (PKCS#1 v1.5, PSS
+with every salt-length constant, ECDSA and DSA in DER and IEEE P1363, Ed25519,
+Ed448 with its `context` option; in the callback form an operation failure
+reaches the callback, as Node's job does),
 `publicEncrypt` / `privateDecrypt` / `privateEncrypt` / `publicDecrypt`
 (PKCS#1 v1.5, OAEP with `oaepHash`/`oaepLabel`, raw), `createECDH` / `ECDH`
 with `convertKey` and all three point formats, `createDiffieHellman` /
 `DiffieHellmanGroup` (the RFC 2409/3526 MODP primes, derived from pi rather
 than transcribed, and OpenSSL's `DH_check` flags as `verifyError`), and the
-stateless `diffieHellman` for EC and X25519 keys. RustCrypto again: `rsa`,
-`p256`/`p384`/`p521`/`k256`, `ed25519-dalek`, `x25519-dalek`, `pkcs8`, `spki`,
-`cbc`, `num-bigint-dig`. A key crosses the boundary as one canonical DER
-document (PKCS#8 or SPKI), so there is no key handle table.
+stateless `diffieHellman` for EC, X25519, X448 and `dh` keys (with OpenSSL's
+`ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS` and
+`ERR_OSSL_FAILED_DURING_DERIVATION`). `checkPrime` / `checkPrimeSync` and
+`generatePrime` / `generatePrimeSync` (with `add`, `rem`, `safe` and
+`bigint`), `Certificate` (SPKAC `verifySpkac` / `exportPublicKey` /
+`exportChallenge`, callable without `new`). RustCrypto again: `rsa`,
+`p256`/`p384`/`p521`/`k256`, `ed25519-dalek`, `x25519-dalek`,
+`ed448-goldilocks-plus` (Ed448), `pkcs8`, `spki`, `cbc`, `num-bigint-dig`;
+DSA, the `dh` documents and the X448 ladder (RFC 7748) are written out in
+`src/crypto/ff.rs` over `num-bigint-dig`, pinned by the RFC 7748 / RFC 8032
+vectors. A key crosses the boundary as one canonical DER document (PKCS#8 or
+SPKI), so there is no key handle table.
+
+**WebCrypto** (`crypto.subtle` / `crypto.webcrypto.subtle`): `CryptoKey`,
+`importKey` (`raw`, `spki`, `pkcs8`, `jwk`), `exportKey`, `sign` / `verify`
+(RSASSA-PKCS1-v1_5, RSA-PSS, ECDSA, Ed25519, Ed448, HMAC), `encrypt` /
+`decrypt` (RSA-OAEP, AES-CBC, AES-CTR, AES-GCM), `deriveBits` (ECDH, X25519,
+X448, HKDF, PBKDF2) and `digest` — each a thin layer over the Node-shaped
+functions, as Node's own `webcrypto.js` is over its jobs. `KeyObject.from`
+unwraps a `CryptoKey`.
 
 ## What is not implemented
 
-**The rest of the asymmetric surface**: DSA, Ed448/X448, `dh` KeyObjects
-(`generateKeyPair('dh')`), `X509Certificate`, `Certificate` (SPKAC),
-`checkPrime` / `generatePrime`, the post-quantum families and the KEM API.
-`fixtures.readKey` is not in the harness: every file that calls it also needs
-DSA, Ed448 or WebCrypto. A generated DH prime is prime but not a safe prime.
+**The rest of the asymmetric surface**: `X509Certificate` (its one corpus
+file also needs `require('internal/crypto/x509')`), `KeyObject.toCryptoKey`,
+the post-quantum families (ML-DSA, ML-KEM, SLH-DSA) and the KEM API. A
+DH prime generated by `createDiffieHellman(bits)` is prime but not a safe
+prime, so its `verifyError` is `DH_NOT_SAFE_PRIME` where OpenSSL's is 0
+(`test-crypto-dh.js`).
 
 **The symmetric gaps**: the CCM, OCB, XTS and key-wrap modes, and the legacy
 block ciphers (DES/3DES, Camellia, ARIA, SM4, RC4, Blowfish). `getCiphers()`
@@ -140,10 +169,11 @@ because those two functions describe algorithms rather than capability — which
 is also what lets `test-crypto-getcipherinfo.js` pass. `createCipheriv` of one
 answers `ERR_CRYPTO_UNSUPPORTED_OPERATION`.
 
-**The WebCrypto surface** beyond `subtle.digest`, `getRandomValues` and
-`randomUUID`: `importKey`, `encrypt`, `decrypt`, `sign`, `verify`,
-`deriveBits`, `wrapKey` and the `CryptoKey` algorithm-normalisation machinery
-they stand on. **FIPS**: this build is not FIPS-capable, which is the shape
+**The rest of WebCrypto**: `generateKey`, `deriveKey`, `wrapKey`,
+`unwrapKey`, AES-KW, ChaCha20-Poly1305 and the full WebIDL dictionary
+validation. Most corpus files that use `subtle` reach it as
+`globalThis.crypto.subtle`, which is the engine's prelude `crypto`, not this
+module. **FIPS**: this build is not FIPS-capable, which is the shape
 Node reports for a non-FIPS OpenSSL (`getFips()` is 0, `setFips(true)` throws).
 **The secure heap** is an OpenSSL allocator feature with nothing behind it
 here, so `secureHeapUsed()` reports a zero-sized one. **argon2**, which Node 25
@@ -154,8 +184,15 @@ asserts the absence — passes.
 
 Two things cap this corpus, and neither is the cryptography.
 
-**The asymmetric half is partly written** (above): DSA, Ed448/X448, X.509 and WebCrypto still stop
-most of the remaining asymmetric files (see the table).
+**Engine defects** stop most of the remaining asymmetric files (see the
+table): a class called without `new` (zun#25 — `Sign('SHA256')` in
+`test-crypto-sign-verify.js`, `Hmac(...)`), `u32 % number` not compiling
+(zun#135 — `test-crypto-prime.js`), and spread arguments
+(`test-crypto-random.js`, `test-crypto-scrypt.js`). In
+`test-crypto-async-sign-verify.js` a block-scoped
+`const { privateKey } = generateKeyPairSync(...)` reads the *previous*
+block's `privateKey` object; it does not reproduce outside the bundle yet, so
+it is not filed.
 
 **zun#38 — a typed array is opaque through an `any` binding**: no `length`, no
 indexing, no `toString`. Every `Buffer` this module hands back reaches a Node

@@ -127,6 +127,7 @@ spki = { version = "0.7", default-features = false, features = ["std", "pem"] }
 cbc = { version = "0.1", default-features = false, features = ["std"] }
 num-bigint-dig = { version = "0.8", default-features = false, features = ["std", "prime", "rand"] }
 rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
+ed448-goldilocks-plus = "0.16"
 
 
 # ---------------------------------------------------------------------------

@@ -90,6 +90,7 @@ use zun_abi::ZunTy::{Bool, I64, Str};
 pub(crate) mod asym;
 pub(crate) mod cipher;
 pub(crate) mod ciphers;
+pub(crate) mod ff;
 pub(crate) mod hash;
 pub(crate) mod kdf;
 pub(crate) mod mac;
@@ -1175,6 +1176,12 @@ pub(crate) const DESCRIPTORS: &[Descriptor] = &[
     },
     // The asymmetric half (`asym.rs`).
     Descriptor {
+        key: b"cryptoSpkac\0",
+        params: &[Str, Str],
+        ret: Str,
+        invoke: asym::spkac,
+    },
+    Descriptor {
         key: b"cryptoKeyImport\0",
         params: &[Str, Str, Str, Str, Bool, Bool],
         ret: Str,
@@ -1287,6 +1294,12 @@ pub(crate) const DESCRIPTORS: &[Descriptor] = &[
         params: &[Str, I64],
         ret: Str,
         invoke: asym::check_prime,
+    },
+    Descriptor {
+        key: b"cryptoGeneratePrimeEx\0",
+        params: &[I64, Bool, Str, Str],
+        ret: Str,
+        invoke: asym::generate_prime_ex,
     },
     // The error slots (the ABI v1 convention, see lib.rs), under `crypto`-
     // prefixed keys for the reason the module documentation gives.

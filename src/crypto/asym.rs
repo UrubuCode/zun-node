@@ -22,15 +22,16 @@
 //! # Algorithms
 //!
 //! RSA (PKCS#1 v1.5 and PSS signatures; PKCS#1 v1.5, OAEP and raw
-//! encryption), ECDSA and ECDH over `prime256v1`, `secp384r1` and `secp256k1`,
-//! Ed25519 and X25519. RSA-PSS-restricted keys, DSA, X448/Ed448 and the
-//! post-quantum families are not implemented and answer
-//! `ERR_CRYPTO_UNSUPPORTED_OPERATION`-shaped errors.
+//! encryption), RSA-PSS-restricted keys, ECDSA and ECDH over `prime256v1`,
+//! `secp384r1`, `secp521r1` and `secp256k1`, Ed25519, Ed448, X25519, X448,
+//! DSA and X9.42 `dh` keys (the last three through `ff.rs`), plus the SPKAC
+//! parser behind `crypto.Certificate`. The post-quantum families are not
+//! implemented and answer `ERR_CRYPTO_UNSUPPORTED_OPERATION`-shaped errors.
 //!
 //! Failure is reported in band, with the `(code, message)` convention
 //! `mod.rs` documents.
 
-use num_bigint_dig::{BigUint, RandPrime};
+use num_bigint_dig::{BigUint, RandBigInt, RandPrime};
 use rand_core::{OsRng, RngCore};
 use rsa::pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey, EncodeRsaPrivateKey, EncodeRsaPublicKey};
 use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
@@ -38,6 +39,7 @@ use rsa::traits::{PrivateKeyParts, PublicKeyParts};
 use rsa::{Oaep, Pkcs1v15Encrypt, Pkcs1v15Sign, Pss, RsaPrivateKey, RsaPublicKey};
 use zun_abi::ZunValue;
 
+use super::ff::{self, DsaParams};
 use super::hash::Alg;
 use super::{fail, US};
 use crate::abi::{arg_bool, arg_i64, arg_str, ret_str};
@@ -226,6 +228,10 @@ const OID_RSA: &str = "1.2.840.113549.1.1.1";
 const OID_EC: &str = "1.2.840.10045.2.1";
 const OID_ED25519: &str = "1.3.101.112";
 const OID_X25519: &str = "1.3.101.110";
+const OID_X448: &str = "1.3.101.111";
+const OID_ED448: &str = "1.3.101.113";
+const OID_DSA: &str = "1.2.840.10040.4.1";
+const OID_DH: &str = "1.2.840.113549.1.3.1";
 
 impl Crv {
     fn from_name(name: &str) -> Option<Crv> {
@@ -414,6 +420,12 @@ enum Private {
     Ec(Crv, Vec<u8>),
     Ed25519([u8; 32]),
     X25519([u8; 32]),
+    Ed448([u8; 57]),
+    X448([u8; 56]),
+    /// Domain parameters and `x`.
+    Dsa(Box<DsaParams>, BigUint),
+    /// X9.42 / PKCS#3 `dhKeyAgreement`: `p`, `g` and `x`.
+    Dh(BigUint, BigUint, BigUint),
 }
 
 /// A public key, parsed from its SPKI document.
@@ -424,6 +436,12 @@ enum Public {
     Ec(Crv, Vec<u8>),
     Ed25519([u8; 32]),
     X25519([u8; 32]),
+    Ed448([u8; 57]),
+    X448([u8; 56]),
+    /// Domain parameters and `y`.
+    Dsa(Box<DsaParams>, BigUint),
+    /// `p`, `g` and `y`.
+    Dh(BigUint, BigUint, BigUint),
 }
 
 /// The `RSASSA-PSS-params` restriction of an `id-RSASSA-PSS` key (RFC 4055
@@ -610,6 +628,64 @@ fn okp_spki(oid_byte: u8, raw: &[u8; 32]) -> Vec<u8> {
     out
 }
 
+/// RFC 8410 framings for the 448 curves (the raw key is not 32 bytes).
+fn okp_pkcs8_any(oid_byte: u8, raw: &[u8]) -> Vec<u8> {
+    let mut body = vec![0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, oid_byte];
+    body.extend(ff::tlv_bytes(0x04, &ff::tlv_bytes(0x04, raw)));
+    ff::tlv_bytes(0x30, &body)
+}
+
+fn okp_spki_any(oid_byte: u8, raw: &[u8]) -> Vec<u8> {
+    let mut bits = vec![0u8];
+    bits.extend_from_slice(raw);
+    let mut body = vec![0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, oid_byte];
+    body.extend(ff::tlv_bytes(0x03, &bits));
+    ff::tlv_bytes(0x30, &body)
+}
+
+/// `AlgorithmIdentifier { oid, SEQUENCE { ints } }` for DSA and DH.
+fn ff_alg_id(oid_der: &[u8], params: &[&BigUint]) -> Vec<u8> {
+    let mut body = oid_der.to_vec();
+    body.extend(ff::seq_of(params));
+    ff::tlv_bytes(0x30, &body)
+}
+
+fn ff_pkcs8(oid_der: &[u8], params: &[&BigUint], secret: &BigUint) -> Vec<u8> {
+    let mut body = vec![0x02, 0x01, 0x00];
+    body.extend(ff_alg_id(oid_der, params));
+    body.extend(ff::tlv_bytes(0x04, &ff::der_uint(secret)));
+    ff::tlv_bytes(0x30, &body)
+}
+
+fn ff_spki(oid_der: &[u8], params: &[&BigUint], public: &BigUint) -> Vec<u8> {
+    let mut bits = vec![0u8];
+    bits.extend(ff::der_uint(public));
+    let mut body = ff_alg_id(oid_der, params);
+    body.extend(ff::tlv_bytes(0x03, &bits));
+    ff::tlv_bytes(0x30, &body)
+}
+
+/// The integers of an `AlgorithmIdentifier`'s `SEQUENCE` parameters.
+fn alg_param_ints(params: Option<spki::der::asn1::AnyRef<'_>>) -> Res<Vec<BigUint>> {
+    let Some(any) = params else { return invalid_key() };
+    ff::ints(any.value()).map_or_else(invalid_key, Ok)
+}
+
+/// One DER `INTEGER` that is the whole of `der`.
+fn single_int(der: &[u8]) -> Res<BigUint> {
+    match ff::tlv(der, 0) {
+        Some((0x02, start, end)) if end == der.len() => Ok(BigUint::from_bytes_be(&der[start..end])),
+        _ => invalid_key(),
+    }
+}
+
+fn dsa_params(v: &[BigUint]) -> Res<Box<DsaParams>> {
+    if v.len() != 3 {
+        return invalid_key();
+    }
+    Ok(Box::new(DsaParams { p: v[0].clone(), q: v[1].clone(), g: v[2].clone() }))
+}
+
 impl Private {
     fn from_pkcs8(der: &[u8]) -> Res<Private> {
         let info = pkcs8::PrivateKeyInfo::try_from(der).or_else(|_| invalid_key())?;
@@ -644,6 +720,30 @@ impl Private {
                     Private::X25519(raw)
                 })
             }
+            OID_ED448 | OID_X448 => {
+                let inner = info.private_key;
+                let size = if oid == OID_ED448 { 57 } else { 56 };
+                if inner.len() != size + 2 || inner[0] != 0x04 || inner[1] as usize != size {
+                    return invalid_key();
+                }
+                let raw = &inner[2..];
+                Ok(if oid == OID_ED448 {
+                    Private::Ed448(raw.try_into().or_else(|_| invalid_key())?)
+                } else {
+                    Private::X448(raw.try_into().or_else(|_| invalid_key())?)
+                })
+            }
+            OID_DSA => {
+                let params = dsa_params(&alg_param_ints(info.algorithm.parameters)?)?;
+                Ok(Private::Dsa(params, single_int(info.private_key)?))
+            }
+            OID_DH => {
+                let v = alg_param_ints(info.algorithm.parameters)?;
+                if v.len() < 2 {
+                    return invalid_key();
+                }
+                Ok(Private::Dh(v[0].clone(), v[1].clone(), single_int(info.private_key)?))
+            }
             _ => unsupported(),
         }
     }
@@ -665,6 +765,10 @@ impl Private {
             Private::Ec(crv, raw) => on_curve!(*crv, to_pkcs8(raw)),
             Private::Ed25519(raw) => Ok(okp_pkcs8(0x70, raw)),
             Private::X25519(raw) => Ok(okp_pkcs8(0x6e, raw)),
+            Private::Ed448(raw) => Ok(okp_pkcs8_any(0x71, raw)),
+            Private::X448(raw) => Ok(okp_pkcs8_any(0x6f, raw)),
+            Private::Dsa(params, x) => Ok(ff_pkcs8(ff::DSA_OID_DER, &[&params.p, &params.q, &params.g], x)),
+            Private::Dh(p, g, x) => Ok(ff_pkcs8(ff::DH_OID_DER, &[p, g], x)),
         }
     }
 
@@ -681,6 +785,10 @@ impl Private {
             Private::X25519(raw) => Public::X25519(
                 x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(*raw)).to_bytes(),
             ),
+            Private::Ed448(raw) => Public::Ed448(ff::ed448_public(raw)),
+            Private::X448(raw) => Public::X448(ff::x448_public(raw)),
+            Private::Dsa(params, x) => Public::Dsa(params.clone(), ff::dsa_public(params, x)),
+            Private::Dh(p, g, x) => Public::Dh(p.clone(), g.clone(), g.modpow(x, p)),
         })
     }
 }
@@ -717,6 +825,23 @@ impl Public {
                     Public::X25519(raw)
                 })
             }
+            OID_ED448 => Ok(Public::Ed448(
+                info.subject_public_key.raw_bytes().try_into().or_else(|_| invalid_key())?,
+            )),
+            OID_X448 => Ok(Public::X448(
+                info.subject_public_key.raw_bytes().try_into().or_else(|_| invalid_key())?,
+            )),
+            OID_DSA => {
+                let params = dsa_params(&alg_param_ints(info.algorithm.parameters)?)?;
+                Ok(Public::Dsa(params, single_int(info.subject_public_key.raw_bytes())?))
+            }
+            OID_DH => {
+                let v = alg_param_ints(info.algorithm.parameters)?;
+                if v.len() < 2 {
+                    return invalid_key();
+                }
+                Ok(Public::Dh(v[0].clone(), v[1].clone(), single_int(info.subject_public_key.raw_bytes())?))
+            }
             _ => unsupported(),
         }
     }
@@ -739,6 +864,10 @@ impl Public {
             Public::Ec(crv, point) => on_curve!(*crv, to_spki(point)),
             Public::Ed25519(raw) => Ok(okp_spki(0x70, raw)),
             Public::X25519(raw) => Ok(okp_spki(0x6e, raw)),
+            Public::Ed448(raw) => Ok(okp_spki_any(0x71, raw)),
+            Public::X448(raw) => Ok(okp_spki_any(0x6f, raw)),
+            Public::Dsa(params, y) => Ok(ff_spki(ff::DSA_OID_DER, &[&params.p, &params.q, &params.g], y)),
+            Public::Dh(p, g, y) => Ok(ff_spki(ff::DH_OID_DER, &[p, g], y)),
         }
     }
 }
@@ -1066,6 +1195,17 @@ fn import_pem(text: &str, pass: Option<&[u8]>) -> Res<Imported> {
             let der = pem_legacy_decrypt(&pem, pass)?;
             Ok(Imported::Private(ec_from_sec1(&der)?))
         }
+        // The traditional `DSAPrivateKey ::= SEQUENCE { 0, p, q, g, y, x }`.
+        "DSA PRIVATE KEY" => {
+            let der = pem_legacy_decrypt(&pem, pass)?;
+            match ff::seq_ints(&der) {
+                Some(v) if v.len() == 6 => Ok(Imported::Private(Private::Dsa(
+                    dsa_params(&v[1..4])?,
+                    v[5].clone(),
+                ))),
+                _ => bad_decrypt(),
+            }
+        }
         "CERTIFICATE" => Ok(Imported::Public(Public::from_spki(&cert_spki(&pem.body)?)?)),
         _ => unsupported(),
     }
@@ -1265,6 +1405,18 @@ native!(
                     "X25519" => {
                         Imported::Public(Public::X25519(arr32(&raw_x).or_else(|_| err("ERR_CRYPTO_INVALID_JWK", "Invalid JWK data"))?))
                     }
+                    "Ed448" if want_private && has_d => Imported::Private(Private::Ed448(
+                        raw_d.as_slice().try_into().or_else(|_| err("ERR_CRYPTO_INVALID_JWK", "Invalid JWK data"))?,
+                    )),
+                    "Ed448" => Imported::Public(Public::Ed448(
+                        raw_x.as_slice().try_into().or_else(|_| err("ERR_CRYPTO_INVALID_JWK", "Invalid JWK data"))?,
+                    )),
+                    "X448" if want_private && has_d => Imported::Private(Private::X448(
+                        raw_d.as_slice().try_into().or_else(|_| err("ERR_CRYPTO_INVALID_JWK", "Invalid JWK data"))?,
+                    )),
+                    "X448" => Imported::Public(Public::X448(
+                        raw_x.as_slice().try_into().or_else(|_| err("ERR_CRYPTO_INVALID_JWK", "Invalid JWK data"))?,
+                    )),
                     _ => return unsupported(),
                 }
             }
@@ -1323,6 +1475,19 @@ native!(
             Public::Ec(crv, _) => ["ec".into(), none(), none(), crv.name().into(), none(), none(), none()],
             Public::Ed25519(_) => ["ed25519".into(), none(), none(), none(), none(), none(), none()],
             Public::X25519(_) => ["x25519".into(), none(), none(), none(), none(), none(), none()],
+            Public::Ed448(_) => ["ed448".into(), none(), none(), none(), none(), none(), none()],
+            Public::X448(_) => ["x448".into(), none(), none(), none(), none(), none(), none()],
+            // DSA: modulusLength, then divisorLength in the exponent slot.
+            Public::Dsa(params, _) => [
+                "dsa".into(),
+                params.p.bits().to_string(),
+                params.q.bits().to_string(),
+                none(),
+                none(),
+                none(),
+                none(),
+            ],
+            Public::Dh(p, _, _) => ["dh".into(), p.bits().to_string(), none(), none(), none(), none(), none()],
         };
         ok_fields(&fields)
     }
@@ -1447,8 +1612,21 @@ native!(
         if matches!(public, Public::RsaPss(..)) {
             return err("ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE", "Unsupported JWK Key Type.");
         }
+        if matches!(public, Public::Dsa(..) | Public::Dh(..)) {
+            return err("ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE", "Unsupported JWK Key Type.");
+        }
         match &public {
-            Public::RsaPss(..) => {}
+            Public::RsaPss(..) | Public::Dsa(..) | Public::Dh(..) => {}
+            Public::Ed448(raw) => {
+                f[0] = "OKP".into();
+                f[1] = "Ed448".into();
+                f[10] = b64url(raw);
+            }
+            Public::X448(raw) => {
+                f[0] = "OKP".into();
+                f[1] = "X448".into();
+                f[10] = b64url(raw);
+            }
             Public::Rsa(key) => {
                 f[0] = "RSA".into();
                 f[2] = b64url(&key.n().to_bytes_be());
@@ -1492,6 +1670,9 @@ native!(
             Some(Private::RsaPss(..)) => {}
             Some(Private::Ec(_, raw)) => f[4] = b64url(raw),
             Some(Private::Ed25519(raw)) | Some(Private::X25519(raw)) => f[4] = b64url(raw),
+            Some(Private::Ed448(raw)) => f[4] = b64url(raw),
+            Some(Private::X448(raw)) => f[4] = b64url(raw),
+            Some(Private::Dsa(..)) | Some(Private::Dh(..)) => {}
             None => {}
         }
         ok_fields(&f)
@@ -1564,6 +1745,42 @@ native!(
             }
             "ed25519" => Private::Ed25519(random32()),
             "x25519" => Private::X25519(random32()),
+            "ed448" => {
+                let mut raw = [0u8; 57];
+                OsRng.fill_bytes(&mut raw);
+                Private::Ed448(raw)
+            }
+            "x448" => {
+                let mut raw = [0u8; 56];
+                OsRng.fill_bytes(&mut raw);
+                Private::X448(raw)
+            }
+            // `bits` is modulusLength; `curve` carries divisorLength (or "").
+            "dsa" => {
+                let l = bits as usize;
+                let n = match curve.parse::<usize>() {
+                    Ok(n) => n,
+                    Err(_) => if l >= 2048 { 256 } else { 160 },
+                };
+                if !(512..=16384).contains(&l) || !(160..=512).contains(&n) || n >= l || n % 8 != 0 {
+                    return err("ERR_OSSL_DSA_BAD_FFC_PARAMETERS", "error:0A000101:dsa routines::bad ffc parameters");
+                }
+                let params = ff::dsa_generate(l, n);
+                let x = ff::random_private(&params.q);
+                Private::Dsa(Box::new(params), x)
+            }
+            // `curve` carries `prime(base64) US generator(decimal)`; the TS
+            // layer resolves `group` and `primeLength` to a prime first.
+            "dh" => {
+                let f: Vec<&str> = curve.split(US).collect();
+                let p = big(&base64::decode(f.first().copied().unwrap_or("")));
+                let g = BigUint::from(f.get(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(2));
+                if p.bits() < 2 {
+                    return invalid_key();
+                }
+                let x = ff::random_private(&(&p - BigUint::from(1u8)));
+                Private::Dh(p, g, x)
+            }
             _ => return unsupported(),
         };
         let spki = private.public()?.to_spki()?;
@@ -1590,6 +1807,8 @@ struct SigOpts {
     p1363: bool,
     explicit_padding: bool,
     explicit_salt: bool,
+    /// The Ed448 `context` (empty when not given).
+    context: Vec<u8>,
 }
 
 fn sig_opts(text: &str) -> SigOpts {
@@ -1601,6 +1820,7 @@ fn sig_opts(text: &str) -> SigOpts {
         p1363: get(2) == Some(1),
         explicit_padding: get(0).is_some(),
         explicit_salt: get(1).is_some(),
+        context: base64::decode(f.get(3).copied().unwrap_or("")),
     }
 }
 
@@ -1632,6 +1852,7 @@ fn pss_key_opts(o: &SigOpts, params: &PssParams, alg: Option<Alg>) -> Res<(SigOp
             p1363: o.p1363,
             explicit_padding: true,
             explicit_salt: true,
+            context: o.context.clone(),
         },
         alg.or(params.hash),
     ))
@@ -1713,7 +1934,18 @@ native!(
                 }
                 ed25519_dalek::SigningKey::from_bytes(raw).sign(&data).to_bytes().to_vec()
             }
-            Private::X25519(_) => {
+            Private::Ed448(raw) => {
+                if alg.is_some() {
+                    return err("ERR_OSSL_EVP_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE", "error:1C8000B3:Provider routines::invalid digest");
+                }
+                let Some(sig) = ff::ed448_sign(raw, &data, &o.context) else { return unsupported() };
+                sig
+            }
+            Private::Dsa(params, x) => {
+                let hashed = alg.unwrap_or(Alg::Sha256).digest(&data);
+                ff::dsa_sign(params, x, &hashed, o.p1363)
+            }
+            Private::X25519(_) | Private::X448(_) | Private::Dh(..) => {
                 return err(
                     "ERR_OSSL_EVP_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE",
                     "error:03000096:digital envelope routines::operation not supported for this keytype",
@@ -1755,7 +1987,12 @@ native!(
                     Err(_) => false,
                 }
             }
-            Public::X25519(_) => {
+            Public::Ed448(raw) => ff::ed448_verify(raw, &data, &sig, &o.context),
+            Public::Dsa(params, y) => {
+                let hashed = alg.unwrap_or(Alg::Sha256).digest(&data);
+                ff::dsa_verify(params, y, &hashed, &sig, o.p1363)
+            }
+            Public::X25519(_) | Public::X448(_) | Public::Dh(..) => {
                 return err(
                     "ERR_OSSL_EVP_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE",
                     "error:03000096:digital envelope routines::operation not supported for this keytype",
@@ -1934,6 +2171,11 @@ native!(
     }
 );
 
+/// A small-order peer point: the shared secret is all zeroes.
+fn failed_derivation<T>() -> Res<T> {
+    err("ERR_OSSL_FAILED_DURING_DERIVATION", "error:1C80006D:Provider routines::failed during derivation")
+}
+
 native!(
     /// `cryptoDiffieHellmanKeys(pkcs8, spki)` → `+<secret>`, the stateless
     /// `crypto.diffieHellman({ privateKey, publicKey })`.
@@ -1945,10 +2187,24 @@ native!(
             (Private::Ec(c1, raw), Public::Ec(c2, point)) if c1 == c2 => on_curve!(*c1, ecdh(raw, point))?,
             (Private::X25519(raw), Public::X25519(peer)) => {
                 let secret = x25519_dalek::StaticSecret::from(*raw);
-                secret.diffie_hellman(&x25519_dalek::PublicKey::from(*peer)).to_bytes().to_vec()
+                let out = secret.diffie_hellman(&x25519_dalek::PublicKey::from(*peer)).to_bytes();
+                if out.iter().all(|b| *b == 0) {
+                    return failed_derivation();
+                }
+                out.to_vec()
             }
-            (Private::Ec(..), Public::Ec(..)) => {
-                return err("ERR_CRYPTO_INCOMPATIBLE_KEY", "Incompatible key types for Diffie-Hellman: The keys must be of the same type.")
+            (Private::X448(raw), Public::X448(peer)) => {
+                let out = ff::x448(raw, peer);
+                if out.iter().all(|b| *b == 0) {
+                    return failed_derivation();
+                }
+                out.to_vec()
+            }
+            (Private::Dh(p1, g1, x), Public::Dh(p2, g2, y)) if p1 == p2 && g1 == g2 => {
+                pad_to(y.modpow(x, p1).to_bytes_be(), p1.bits().div_ceil(8))
+            }
+            (Private::Ec(..), Public::Ec(..)) | (Private::Dh(..), Public::Dh(..)) => {
+                return err("ERR_OSSL_MISMATCHING_DOMAIN_PARAMETERS", "error:1C800071:Provider routines::mismatching domain parameters")
             }
             _ => return err("ERR_CRYPTO_INCOMPATIBLE_KEY", "Incompatible key types for Diffie-Hellman: The keys must be of the same type."),
         };
@@ -2050,6 +2306,58 @@ native!(
 );
 
 native!(
+    /// `cryptoGeneratePrimeEx(bits, safe, add, rem)` → `+<prime>`: Node's
+    /// `generatePrime(size, { safe, add, rem })`. `add`/`rem` are base64
+    /// big-endian, empty when absent; `rem` defaults to 1 (3 for a safe
+    /// prime), as in OpenSSL's `BN_generate_prime_ex`.
+    generate_prime_ex,
+    |a| {
+        let bits = a.i(0);
+        let safe = a.b(1);
+        let add = a.bytes(2)?;
+        let rem = a.bytes(3)?;
+        if !(2..=16384).contains(&bits) {
+            return err("ERR_OUT_OF_RANGE", "invalid prime size");
+        }
+        let bits = bits as usize;
+        let one = BigUint::from(1u8);
+        let add = if add.is_empty() { None } else { Some(big(&add)) };
+        let rem = if rem.is_empty() {
+            BigUint::from(if safe && add.is_some() { 3u8 } else { 1u8 })
+        } else {
+            big(&rem)
+        };
+        if let Some(add) = &add {
+            if add.bits() > bits || &rem >= add {
+                return err("ERR_OUT_OF_RANGE", "invalid options.add");
+            }
+        }
+        if add.is_none() && !safe {
+            let prime: BigUint = OsRng.gen_prime(bits);
+            return ok_fields(&[b64(&prime.to_bytes_be())]);
+        }
+        for _ in 0..1_000_000 {
+            let mut p = OsRng.gen_biguint(bits);
+            p |= &one << (bits - 1);
+            match &add {
+                Some(add) => {
+                    p = &p - (&p % add) + &rem;
+                }
+                None => p |= one.clone(),
+            }
+            if p.bits() != bits || !num_bigint_dig::prime::probably_prime(&p, 20) {
+                continue;
+            }
+            if safe && !num_bigint_dig::prime::probably_prime(&((&p - &one) >> 1), 20) {
+                continue;
+            }
+            return ok_fields(&[b64(&p.to_bytes_be())]);
+        }
+        err("ERR_OSSL_BN_NO_PRIME_CANDIDATE", "no prime candidate")
+    }
+);
+
+native!(
     /// `cryptoCheckPrime(candidate, checks)` → `+1` / `+0`.
     check_prime,
     |a| {
@@ -2080,6 +2388,95 @@ native!(
             flags |= 8;
         }
         ok_fields(&[flags.to_string()])
+    }
+);
+
+// ---------------------------------------------------------------------------
+// SPKAC (`crypto.Certificate`)
+// ---------------------------------------------------------------------------
+
+/// The pieces of a Netscape `SignedPublicKeyAndChallenge`:
+/// `(publicKeyAndChallenge DER, spki DER, challenge, signature algorithm OID
+/// DER content, signature)`.
+fn parse_spkac(der: &[u8]) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>)> {
+    let (tag, outer, outer_end) = ff::tlv(der, 0)?;
+    if tag != 0x30 {
+        return None;
+    }
+    let (tag, pkac_start, pkac_end) = ff::tlv(der, outer)?;
+    if tag != 0x30 {
+        return None;
+    }
+    let pkac = der[outer..pkac_end].to_vec();
+    let (_, _, spki_end) = ff::tlv(der, pkac_start)?;
+    let spki = der[pkac_start..spki_end].to_vec();
+    let (tag, ch_start, ch_end) = ff::tlv(der, spki_end)?;
+    if tag != 0x16 {
+        return None;
+    }
+    let challenge = der[ch_start..ch_end].to_vec();
+    let (tag, alg_start, alg_end) = ff::tlv(der, pkac_end)?;
+    if tag != 0x30 {
+        return None;
+    }
+    let (tag, oid_start, oid_end) = ff::tlv(der, alg_start)?;
+    if tag != 0x06 {
+        return None;
+    }
+    let oid = der[oid_start..oid_end].to_vec();
+    let (tag, sig_start, sig_end) = ff::tlv(der, alg_end)?;
+    if tag != 0x03 || sig_end > outer_end || sig_start >= sig_end {
+        return None;
+    }
+    let sig = der[sig_start + 1..sig_end].to_vec();
+    Some((pkac, spki, challenge, oid, sig))
+}
+
+/// The digest of a `*WithRSAEncryption` signature algorithm OID.
+fn rsa_sig_alg(oid: &[u8]) -> Option<Alg> {
+    let prefix = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01];
+    if oid.len() != 9 || oid[..8] != prefix {
+        return None;
+    }
+    Some(match oid[8] {
+        4 => Alg::Md5,
+        5 => Alg::Sha1,
+        11 => Alg::Sha256,
+        12 => Alg::Sha384,
+        13 => Alg::Sha512,
+        14 => Alg::Sha224,
+        _ => return None,
+    })
+}
+
+native!(
+    /// `cryptoSpkac(op, data)` with `data` the base64 of the SPKAC text
+    /// (itself base64). `op` is `verify` (→ `+1`/`+0`), `publicKey` (→ the
+    /// SPKI, base64) or `challenge` (→ its bytes, base64); a malformed SPKAC
+    /// answers `+` with an empty field.
+    spkac,
+    |a| {
+        let op = a.s(0)?;
+        let text = a.bytes(1)?;
+        let cleaned: String = String::from_utf8_lossy(&text).chars().filter(|c| !c.is_whitespace()).collect();
+        let der = base64::decode(&cleaned);
+        let Some((pkac, spki, challenge, oid, sig)) = parse_spkac(&der) else {
+            return ok_fields(&[if op == "verify" { "0".into() } else { String::new() }]);
+        };
+        match op.as_str() {
+            "verify" => {
+                let good = match (Public::from_spki(&spki), rsa_sig_alg(&oid)) {
+                    (Ok(Public::Rsa(key)), Some(alg)) => rsa_verify(&key, Some(alg), &pkac, &sig, &sig_opts("")),
+                    _ => false,
+                };
+                ok_fields(&[if good { "1".into() } else { "0".into() }])
+            }
+            "publicKey" => match Public::from_spki(&spki) {
+                Ok(_) => ok_fields(&[b64(&spki)]),
+                Err(_) => ok_fields(&[String::new()]),
+            },
+            _ => ok_fields(&[b64(&challenge)]),
+        }
     }
 );
 

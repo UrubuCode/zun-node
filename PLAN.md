@@ -1051,19 +1051,22 @@ gets deleted; nothing else in the tracker changes.
   no threadpool, so a KDF callback is computed now and delivered on the next
   tick.
   **The asymmetric half** is `src/crypto/asym.rs` over `rsa`,
-  `p256`/`p384`/`p521`/`k256`, `ed25519-dalek`, `x25519-dalek`, `pkcs8`,
-  `spki`: RSA, RSA-PSS, EC, Ed25519 and X25519 KeyObjects in every
-  PEM/DER/JWK encoding (encrypted ones included), `generateKeyPair`,
-  sign/verify, RSA encryption, ECDH, classic DH and the stateless
-  `diffieHellman`. A key crosses the ABI as one canonical PKCS#8/SPKI
-  document, so it needs no handle table. Corpus: 59/115 (was 26).
-  **Still not here:** DSA, Ed448/X448, `dh` KeyObjects, X.509, primes, the
-  post-quantum families, each raising `ERR_CRYPTO_UNSUPPORTED_OPERATION`. The CCM/OCB/XTS/key-wrap modes
+  `p256`/`p384`/`p521`/`k256`, `ed25519-dalek`, `x25519-dalek`,
+  `ed448-goldilocks-plus`, `pkcs8`, `spki`, plus `src/crypto/ff.rs` (DSA, X9.42
+  `dh` documents and the RFC 7748 X448 ladder over `num-bigint-dig`): RSA,
+  RSA-PSS, EC, Ed25519, Ed448, X25519, X448, DSA and `dh` KeyObjects in every
+  PEM/DER/JWK encoding (encrypted ones included), `generateKeyPair` for all of
+  them, sign/verify, RSA encryption, ECDH, classic DH and the stateless
+  `diffieHellman`, `checkPrime`/`generatePrime`, `Certificate` (SPKAC), and
+  `subtle` importKey/exportKey/sign/verify/encrypt/decrypt/deriveBits over
+  those natives. A key crosses the ABI as one canonical PKCS#8/SPKI document,
+  so it needs no handle table. The harness gained `fixtures.readKey` /
+  `readSync`. Corpus: 73/115 (was 59).
+  **Still not here:** X.509, `toCryptoKey`, the post-quantum families,
+  `subtle.generateKey`/`deriveKey`/`wrapKey`. The CCM/OCB/XTS/key-wrap modes
   and the legacy block ciphers (DES, Camellia, ARIA, SM4), which
   `getCiphers()`/`getCipherInfo()` still *list* with OpenSSL's real NIDs and
   sizes because those two functions describe algorithms rather than capability.
-  And WebCrypto beyond `subtle.digest`, which needs the `CryptoKey`
-  normalisation machinery the asymmetric half would bring with it.
   Two engine gaps shape the corpus result: a typed array is opaque through an
   `any` binding (zun#38), so a `Buffer` this module returns is unreadable in a
   test even when its bytes are right — verified instead by 24 Rust vector tests
