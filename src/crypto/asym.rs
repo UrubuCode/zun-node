@@ -408,6 +408,8 @@ macro_rules! on_curve {
 /// A private key, parsed from its PKCS#8 document.
 enum Private {
     Rsa(Box<RsaPrivateKey>),
+    /// An `id-RSASSA-PSS` key, restricted to PSS signatures.
+    RsaPss(Box<RsaPrivateKey>, PssParams),
     /// The raw scalar, big-endian.
     Ec(Crv, Vec<u8>),
     Ed25519([u8; 32]),
@@ -417,10 +419,173 @@ enum Private {
 /// A public key, parsed from its SPKI document.
 enum Public {
     Rsa(Box<RsaPublicKey>),
+    RsaPss(Box<RsaPublicKey>, PssParams),
     /// The uncompressed SEC1 point.
     Ec(Crv, Vec<u8>),
     Ed25519([u8; 32]),
     X25519([u8; 32]),
+}
+
+/// The `RSASSA-PSS-params` restriction of an `id-RSASSA-PSS` key (RFC 4055
+/// §3.1). `None` throughout is an unrestricted key, written with no
+/// parameters at all.
+#[derive(Clone, Copy, Default)]
+struct PssParams {
+    hash: Option<Alg>,
+    mgf1: Option<Alg>,
+    salt: Option<u32>,
+}
+
+const OID_RSA_PSS: &str = "1.2.840.113549.1.1.10";
+const OID_RSA_PSS_DER: &[u8] = &[0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a];
+const OID_MGF1_DER: &[u8] = &[0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x08];
+
+fn hash_oid_der(alg: Alg) -> Option<Vec<u8>> {
+    let tail: u8 = match alg {
+        Alg::Sha1 => return Some(vec![0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a]),
+        Alg::Sha256 => 1,
+        Alg::Sha384 => 2,
+        Alg::Sha512 => 3,
+        Alg::Sha224 => 4,
+        Alg::Sha512_224 => 5,
+        Alg::Sha512_256 => 6,
+        _ => return None,
+    };
+    Some(vec![0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, tail])
+}
+
+fn hash_from_oid_der(oid: &[u8]) -> Option<Alg> {
+    [
+        Alg::Sha1,
+        Alg::Sha256,
+        Alg::Sha384,
+        Alg::Sha512,
+        Alg::Sha224,
+        Alg::Sha512_224,
+        Alg::Sha512_256,
+    ]
+    .into_iter()
+    .find(|alg| hash_oid_der(*alg).as_deref() == Some(oid))
+}
+
+/// The Node name of a digest, as `asymmetricKeyDetails` reports it.
+fn hash_name(alg: Alg) -> &'static str {
+    match alg {
+        Alg::Sha1 => "sha1",
+        Alg::Sha224 => "sha224",
+        Alg::Sha256 => "sha256",
+        Alg::Sha384 => "sha384",
+        Alg::Sha512 => "sha512",
+        Alg::Sha512_224 => "sha512-224",
+        Alg::Sha512_256 => "sha512-256",
+        _ => "",
+    }
+}
+
+fn der_tlv(tag: u8, body: &[u8]) -> Vec<u8> {
+    let mut out = vec![tag];
+    out.extend(der_len(body.len()));
+    out.extend_from_slice(body);
+    out
+}
+
+/// `AlgorithmIdentifier { hash, NULL }`.
+fn hash_alg_id(alg: Alg) -> Vec<u8> {
+    let mut body = hash_oid_der(alg).unwrap_or_default();
+    body.extend_from_slice(&[0x05, 0x00]);
+    der_tlv(0x30, &body)
+}
+
+impl PssParams {
+    fn restricted(&self) -> bool {
+        self.hash.is_some() || self.mgf1.is_some() || self.salt.is_some()
+    }
+
+    /// The key's `AlgorithmIdentifier`.
+    fn alg_id(&self) -> Vec<u8> {
+        let mut body = OID_RSA_PSS_DER.to_vec();
+        if self.restricted() {
+            let mut params = Vec::new();
+            let hash = self.hash.unwrap_or(Alg::Sha1);
+            if hash != Alg::Sha1 {
+                params.extend(der_tlv(0xa0, &hash_alg_id(hash)));
+            }
+            let mgf1 = self.mgf1.unwrap_or(hash);
+            if mgf1 != Alg::Sha1 {
+                let mut mgf = OID_MGF1_DER.to_vec();
+                mgf.extend(hash_alg_id(mgf1));
+                params.extend(der_tlv(0xa1, &der_tlv(0x30, &mgf)));
+            }
+            let salt = self.salt.unwrap_or(20);
+            if salt != 20 {
+                let mut int = salt.to_be_bytes().to_vec();
+                while int.len() > 1 && int[0] == 0 && int[1] & 0x80 == 0 {
+                    int.remove(0);
+                }
+                if int[0] & 0x80 != 0 {
+                    int.insert(0, 0);
+                }
+                params.extend(der_tlv(0xa2, &der_tlv(0x02, &int)));
+            }
+            body.extend(der_tlv(0x30, &params));
+        }
+        der_tlv(0x30, &body)
+    }
+
+    /// Parse the *content* of an `RSASSA-PSS-params` SEQUENCE.
+    fn parse(content: &[u8]) -> PssParams {
+        let mut out = PssParams {
+            hash: Some(Alg::Sha1),
+            mgf1: Some(Alg::Sha1),
+            salt: Some(20),
+        };
+        let mut at = 0;
+        while let Some((tag, start, end)) = tlv(content, at) {
+            let field = &content[start..end];
+            match tag {
+                0xa0 => {
+                    if let Some((_, s, _)) = tlv(field, 0) {
+                        if let Some((_, os, oe)) = tlv(field, s) {
+                            out.hash = hash_from_oid_der(&field[s..oe]).or(out.hash);
+                            let _ = os;
+                        }
+                    }
+                    out.mgf1 = out.hash;
+                }
+                0xa1 => {
+                    // SEQUENCE { mgf1 OID, AlgorithmIdentifier { hash } }
+                    if let Some((_, s, _)) = tlv(field, 0) {
+                        if let Some((_, _, oid_end)) = tlv(field, s) {
+                            if let Some((_, hs, _)) = tlv(field, oid_end) {
+                                if let Some((_, _, he)) = tlv(field, hs) {
+                                    out.mgf1 = hash_from_oid_der(&field[hs..he]).or(out.mgf1);
+                                }
+                            }
+                        }
+                    }
+                }
+                0xa2 => {
+                    if let Some((_, s, e)) = tlv(field, 0) {
+                        let mut salt = 0u32;
+                        for byte in &field[s..e] {
+                            salt = (salt << 8) | *byte as u32;
+                        }
+                        out.salt = Some(salt);
+                    }
+                }
+                _ => {}
+            }
+            at = end;
+        }
+        out
+    }
+
+    fn from_alg_params(params: Option<pkcs8::der::asn1::AnyRef<'_>>) -> PssParams {
+        match params {
+            Some(any) => PssParams::parse(any.value()),
+            None => PssParams::default(),
+        }
+    }
 }
 
 fn arr32(bytes: &[u8]) -> Res<[u8; 32]> {
@@ -450,6 +615,10 @@ impl Private {
         let info = pkcs8::PrivateKeyInfo::try_from(der).or_else(|_| invalid_key())?;
         let oid = info.algorithm.oid.to_string();
         match oid.as_str() {
+            OID_RSA_PSS => Ok(Private::RsaPss(
+                Box::new(RsaPrivateKey::from_pkcs1_der(info.private_key).or_else(|_| invalid_key())?),
+                PssParams::from_alg_params(info.algorithm.parameters),
+            )),
             OID_RSA => Ok(Private::Rsa(Box::new(
                 RsaPrivateKey::from_pkcs8_der(der).or_else(|_| invalid_key())?,
             ))),
@@ -486,6 +655,13 @@ impl Private {
                 .or_else(|_| invalid_key())?
                 .as_bytes()
                 .to_vec()),
+            Private::RsaPss(key, params) => {
+                let body = key.to_pkcs1_der().or_else(|_| invalid_key())?.as_bytes().to_vec();
+                let mut seq = vec![0x02, 0x01, 0x00];
+                seq.extend(params.alg_id());
+                seq.extend(der_tlv(0x04, &body));
+                Ok(der_tlv(0x30, &seq))
+            }
             Private::Ec(crv, raw) => on_curve!(*crv, to_pkcs8(raw)),
             Private::Ed25519(raw) => Ok(okp_pkcs8(0x70, raw)),
             Private::X25519(raw) => Ok(okp_pkcs8(0x6e, raw)),
@@ -495,6 +671,7 @@ impl Private {
     fn public(&self) -> Res<Public> {
         Ok(match self {
             Private::Rsa(key) => Public::Rsa(Box::new(key.to_public_key())),
+            Private::RsaPss(key, params) => Public::RsaPss(Box::new(key.to_public_key()), *params),
             Private::Ec(crv, raw) => Public::Ec(*crv, on_curve!(*crv, public_of(raw, false))?),
             Private::Ed25519(raw) => Public::Ed25519(
                 ed25519_dalek::SigningKey::from_bytes(raw)
@@ -513,6 +690,13 @@ impl Public {
         let info = spki::SubjectPublicKeyInfoRef::try_from(der).or_else(|_| invalid_key())?;
         let oid = info.algorithm.oid.to_string();
         match oid.as_str() {
+            OID_RSA_PSS => Ok(Public::RsaPss(
+                Box::new(
+                    RsaPublicKey::from_pkcs1_der(info.subject_public_key.raw_bytes())
+                        .or_else(|_| invalid_key())?,
+                ),
+                PssParams::from_alg_params(info.algorithm.parameters),
+            )),
             OID_RSA => Ok(Public::Rsa(Box::new(
                 RsaPublicKey::from_public_key_der(der).or_else(|_| invalid_key())?,
             ))),
@@ -544,6 +728,14 @@ impl Public {
                 .or_else(|_| invalid_key())?
                 .as_bytes()
                 .to_vec()),
+            Public::RsaPss(key, params) => {
+                let body = key.to_pkcs1_der().or_else(|_| invalid_key())?.as_bytes().to_vec();
+                let mut bits = vec![0u8];
+                bits.extend(body);
+                let mut seq = params.alg_id();
+                seq.extend(der_tlv(0x03, &bits));
+                Ok(der_tlv(0x30, &seq))
+            }
             Public::Ec(crv, point) => on_curve!(*crv, to_spki(point)),
             Public::Ed25519(raw) => Ok(okp_spki(0x70, raw)),
             Public::X25519(raw) => Ok(okp_spki(0x6e, raw)),
@@ -624,7 +816,7 @@ fn to_pem(label: &str, headers: &[(String, String)], der: &[u8]) -> String {
 
 fn missing_passphrase<T>() -> Res<T> {
     err(
-        "ERR_MISSING_PASSPHRASE",
+        "ERR_OSSL_CRYPTO_INTERRUPTED_OR_CANCELLED",
         "error:07880109:common libcrypto routines::interrupted or cancelled",
     )
 }
@@ -1094,22 +1286,43 @@ native!(
 
 native!(
     /// `cryptoKeyInfo(kind, der)` → `+<asymmetricKeyType> US <modulusLength>
-    /// US <publicExponent, decimal> US <namedCurve>`.
+    /// US <publicExponent, decimal> US <namedCurve> US <hashAlgorithm> US
+    /// <mgf1HashAlgorithm> US <saltLength>` (the last three for a restricted
+    /// RSA-PSS key only).
     key_info,
     |a| {
         let kind = a.s(0)?;
         let der = a.bytes(1)?;
         let public = public_of(&kind, &der)?;
-        let fields: [String; 4] = match public {
+        let none = String::new;
+        let fields: [String; 7] = match public {
             Public::Rsa(key) => [
                 "rsa".into(),
                 key.n().bits().to_string(),
                 key.e().to_string(),
-                String::new(),
+                none(),
+                none(),
+                none(),
+                none(),
             ],
-            Public::Ec(crv, _) => ["ec".into(), String::new(), String::new(), crv.name().into()],
-            Public::Ed25519(_) => ["ed25519".into(), String::new(), String::new(), String::new()],
-            Public::X25519(_) => ["x25519".into(), String::new(), String::new(), String::new()],
+            Public::RsaPss(key, params) => {
+                let restricted = params.restricted();
+                let name = |alg: Option<Alg>| {
+                    if restricted { hash_name(alg.unwrap_or(Alg::Sha1)).to_owned() } else { String::new() }
+                };
+                [
+                    "rsa-pss".into(),
+                    key.n().bits().to_string(),
+                    key.e().to_string(),
+                    none(),
+                    name(params.hash),
+                    name(params.mgf1.or(params.hash)),
+                    if restricted { params.salt.unwrap_or(20).to_string() } else { none() },
+                ]
+            }
+            Public::Ec(crv, _) => ["ec".into(), none(), none(), crv.name().into(), none(), none(), none()],
+            Public::Ed25519(_) => ["ed25519".into(), none(), none(), none(), none(), none(), none()],
+            Public::X25519(_) => ["x25519".into(), none(), none(), none(), none(), none(), none()],
         };
         ok_fields(&fields)
     }
@@ -1231,7 +1444,11 @@ native!(
             Some(key) => key.public()?,
             None => Public::from_spki(&der)?,
         };
+        if matches!(public, Public::RsaPss(..)) {
+            return err("ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE", "Unsupported JWK Key Type.");
+        }
         match &public {
+            Public::RsaPss(..) => {}
             Public::Rsa(key) => {
                 f[0] = "RSA".into();
                 f[2] = b64url(&key.n().to_bytes_be());
@@ -1272,6 +1489,7 @@ native!(
                     }
                 }
             }
+            Some(Private::RsaPss(..)) => {}
             Some(Private::Ec(_, raw)) => f[4] = b64url(raw),
             Some(Private::Ed25519(raw)) | Some(Private::X25519(raw)) => f[4] = b64url(raw),
             None => {}
@@ -1300,7 +1518,7 @@ native!(
         let exponent = a.i(2);
         let curve = a.s(3)?;
         let private = match typ.as_str() {
-            "rsa" => {
+            "rsa" | "rsa-pss" => {
                 if !(512..=16384).contains(&bits) || exponent < 3 || exponent % 2 == 0 {
                     return err("ERR_OSSL_BN_BITS_TOO_SMALL", "error:1C80006B:Provider routines::invalid key length");
                 }
@@ -1310,7 +1528,33 @@ native!(
                     &BigUint::from(exponent as u64),
                 )
                 .or_else(|_| err("ERR_OSSL_RSA_KEY_SIZE_TOO_SMALL", "key size too small"))?;
-                Private::Rsa(Box::new(key))
+                if typ == "rsa" {
+                    Private::Rsa(Box::new(key))
+                } else {
+                    // `curve` carries `hash US mgf1 US saltLength` (each may
+                    // be empty) for an RSA-PSS key.
+                    let f: Vec<&str> = curve.split(US).collect();
+                    let alg = |i: usize| -> Res<Option<Alg>> {
+                        match f.get(i).copied().unwrap_or("") {
+                            "" => Ok(None),
+                            name => match Alg::resolve(name) {
+                                Some(alg) if hash_oid_der(alg).is_some() => Ok(Some(alg)),
+                                _ => err("ERR_CRYPTO_INVALID_DIGEST", &format!("Invalid MGF1 digest: {name}")),
+                            },
+                        }
+                    };
+                    let hash = alg(0)?;
+                    let mgf1 = alg(1)?;
+                    let salt = f.get(2).and_then(|s| s.parse::<u32>().ok());
+                    let mut params = PssParams { hash, mgf1, salt };
+                    if params.restricted() {
+                        let h = params.hash.unwrap_or(Alg::Sha1);
+                        params.hash = Some(h);
+                        params.mgf1 = Some(params.mgf1.unwrap_or(h));
+                        params.salt = Some(params.salt.unwrap_or(h.output_size() as u32));
+                    }
+                    Private::RsaPss(Box::new(key), params)
+                }
             }
             "ec" => {
                 let Some(crv) = Crv::from_name(&curve) else {
@@ -1339,20 +1583,58 @@ const RSA_PSS_SALTLEN_DIGEST: i64 = -1;
 const RSA_PSS_SALTLEN_MAX_SIGN: i64 = -2;
 
 /// `padding US saltLength US dsaEncoding(0 = der, 1 = ieee-p1363)`.
+/// An empty field means "not given".
 struct SigOpts {
     padding: i64,
     salt: i64,
     p1363: bool,
+    explicit_padding: bool,
+    explicit_salt: bool,
 }
 
 fn sig_opts(text: &str) -> SigOpts {
     let f: Vec<&str> = text.split(US).collect();
-    let num = |i: usize, d: i64| f.get(i).and_then(|s| s.parse::<i64>().ok()).unwrap_or(d);
+    let get = |i: usize| f.get(i).and_then(|s| s.parse::<i64>().ok());
     SigOpts {
-        padding: num(0, RSA_PKCS1_PADDING),
-        salt: num(1, RSA_PSS_SALTLEN_MAX_SIGN),
-        p1363: num(2, 0) == 1,
+        padding: get(0).unwrap_or(RSA_PKCS1_PADDING),
+        salt: get(1).unwrap_or(RSA_PSS_SALTLEN_MAX_SIGN),
+        p1363: get(2) == Some(1),
+        explicit_padding: get(0).is_some(),
+        explicit_salt: get(1).is_some(),
     }
+}
+
+fn keytype_unsupported<T>() -> Res<T> {
+    err(
+        "ERR_OSSL_EVP_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE",
+        "error:03000096:digital envelope routines::operation not supported for this keytype",
+    )
+}
+
+/// The effective options of a signature with an RSA-PSS key: PSS padding
+/// always, and the key's own digest and salt length unless overridden.
+fn pss_key_opts(o: &SigOpts, params: &PssParams, alg: Option<Alg>) -> Res<(SigOpts, Option<Alg>)> {
+    if o.explicit_padding && o.padding != RSA_PKCS1_PSS_PADDING {
+        return err(
+            "ERR_OSSL_ILLEGAL_OR_UNSUPPORTED_PADDING_MODE",
+            "error:1C8000A5:Provider routines::illegal or unsupported padding mode",
+        );
+    }
+    let salt = if o.explicit_salt {
+        o.salt
+    } else {
+        params.salt.map_or(RSA_PSS_SALTLEN_MAX_SIGN, |s| s as i64)
+    };
+    Ok((
+        SigOpts {
+            padding: RSA_PKCS1_PSS_PADDING,
+            salt,
+            p1363: o.p1363,
+            explicit_padding: true,
+            explicit_salt: true,
+        },
+        alg.or(params.hash),
+    ))
 }
 
 fn pss_max_salt(key: &RsaPublicKey, hash_len: usize) -> usize {
@@ -1416,6 +1698,10 @@ native!(
         let key = Private::from_pkcs8(&der)?;
         let sig = match &key {
             Private::Rsa(rsa) => rsa_sign(rsa, alg, &data, &o)?,
+            Private::RsaPss(rsa, params) => {
+                let (o, alg) = pss_key_opts(&o, params, alg)?;
+                rsa_sign(rsa, alg, &data, &o)?
+            }
             Private::Ec(crv, raw) => {
                 let hashed = alg.unwrap_or(Alg::Sha256).digest(&data);
                 on_curve!(*crv, sign(raw, &hashed, o.p1363))?
@@ -1451,6 +1737,10 @@ native!(
         let key = public_of(&kind, &der)?;
         let good = match &key {
             Public::Rsa(rsa) => rsa_verify(rsa, alg, &data, &sig, &o),
+            Public::RsaPss(rsa, params) => {
+                let (o, alg) = pss_key_opts(&o, params, alg)?;
+                rsa_verify(rsa, alg, &data, &sig, &o)
+            }
             Public::Ec(crv, point) => {
                 let hashed = alg.unwrap_or(Alg::Sha256).digest(&data);
                 on_curve!(*crv, verify(point, &hashed, &sig, o.p1363))
@@ -1534,7 +1824,7 @@ native!(
         let failed_decrypt = || err::<Vec<u8>>("ERR_OSSL_RSA_PADDING_CHECK_FAILED", "error:02000079:rsa routines::oaep decoding error");
         let out = match op.as_str() {
             "publicEncrypt" => {
-                let Public::Rsa(key) = public_of(&kind, &der)? else { return unsupported() };
+                let Public::Rsa(key) = public_of(&kind, &der)? else { return keytype_unsupported() };
                 match padding {
                     RSA_NO_PADDING => {
                         if data.len() != key.size() {
@@ -1549,7 +1839,7 @@ native!(
                 }
             }
             "privateDecrypt" => {
-                let Private::Rsa(key) = Private::from_pkcs8(&der)? else { return unsupported() };
+                let Private::Rsa(key) = Private::from_pkcs8(&der)? else { return keytype_unsupported() };
                 match padding {
                     RSA_NO_PADDING => rsa_raw(&data, key.d(), key.n())?,
                     RSA_PKCS1_OAEP_PADDING => key.decrypt(oaep(hash, &label)?, &data).or_else(|_| failed_decrypt())?,
@@ -1559,14 +1849,14 @@ native!(
                 }
             }
             "privateEncrypt" => {
-                let Private::Rsa(key) = Private::from_pkcs8(&der)? else { return unsupported() };
+                let Private::Rsa(key) = Private::from_pkcs8(&der)? else { return keytype_unsupported() };
                 match padding {
                     RSA_NO_PADDING => rsa_raw(&data, key.d(), key.n())?,
                     _ => key.sign(Pkcs1v15Sign::new_unprefixed(), &data).or_else(|_| data_too_large())?,
                 }
             }
             "publicDecrypt" => {
-                let Public::Rsa(key) = public_of(&kind, &der)? else { return unsupported() };
+                let Public::Rsa(key) = public_of(&kind, &der)? else { return keytype_unsupported() };
                 let raw = rsa_raw(&data, key.e(), key.n())?;
                 if padding == RSA_NO_PADDING {
                     raw
@@ -1827,7 +2117,7 @@ mod tests {
         let private = Private::Rsa(Box::new(key));
         let der = private.to_pkcs8().unwrap();
         let back = Private::from_pkcs8(&der).unwrap();
-        let o = SigOpts { padding: 1, salt: -2, p1363: false };
+        let o = sig_opts("1");
         let Private::Rsa(rsa) = &back else { panic!() };
         let sig = rsa_sign(rsa, Some(Alg::Sha256), b"hi", &o).unwrap();
         assert!(rsa_verify(&rsa.to_public_key(), Some(Alg::Sha256), b"hi", &sig, &o));

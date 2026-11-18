@@ -988,10 +988,19 @@ class KeyObject {
   get asymmetricKeyDetails(): any {
     if (String(this.type) === "secret") return undefined;
     const info: string[] = __cKeyInfo(this);
-    if (info[0] === "rsa") {
+    if (info[0] === "rsa" || (info[0] === "rsa-pss" && info[4] === "")) {
       return {
         modulusLength: Number(info[1]),
         publicExponent: __cBigInt(info[2]),
+      };
+    }
+    if (info[0] === "rsa-pss") {
+      return {
+        modulusLength: Number(info[1]),
+        publicExponent: __cBigInt(info[2]),
+        hashAlgorithm: info[4],
+        mgf1HashAlgorithm: info[5],
+        saltLength: Number(info[6]),
       };
     }
     if (info[0] === "ec") return { namedCurve: info[3] };
@@ -1288,10 +1297,29 @@ function __cGenerateKeyPair(type: any, options: any): any {
   let bits: number = 0;
   let exponent: number = 65537;
   let curve: string = "";
-  if (kind === "rsa") {
+  if (kind === "rsa" || kind === "rsa-pss") {
     bits = __cValidateUint32(opts.modulusLength, "options.modulusLength");
     if (opts.publicExponent !== undefined) {
       exponent = __cValidateUint32(opts.publicExponent, "options.publicExponent");
+    }
+    if (kind === "rsa-pss") {
+      // The native reads `hash US mgf1 US saltLength` from the curve slot.
+      let hash: string = "";
+      let mgf1: string = "";
+      let saltLength: string = "";
+      if (opts.hashAlgorithm !== undefined) {
+        __cValidateString(opts.hashAlgorithm, "options.hashAlgorithm");
+        hash = opts.hashAlgorithm;
+      }
+      if (opts.mgf1HashAlgorithm !== undefined) {
+        __cValidateString(opts.mgf1HashAlgorithm, "options.mgf1HashAlgorithm");
+        mgf1 = opts.mgf1HashAlgorithm;
+      }
+      if (opts.saltLength !== undefined) {
+        const n: number = __cValidateInt32(opts.saltLength, "options.saltLength");
+        saltLength = "" + n;
+      }
+      curve = hash + __C_US + mgf1 + __C_US + saltLength;
     }
   } else if (kind === "ec") {
     __cValidateString(opts.namedCurve, "options.namedCurve");
@@ -1299,7 +1327,7 @@ function __cGenerateKeyPair(type: any, options: any): any {
   } else if (kind === "ed25519" || kind === "x25519") {
     // No parameters.
   } else if (
-    kind === "rsa-pss" || kind === "dsa" || kind === "dh" || kind === "ed448" || kind === "x448"
+    kind === "dsa" || kind === "dh" || kind === "ed448" || kind === "x448"
   ) {
     throw new ERR_CRYPTO_UNSUPPORTED_OPERATION();
   } else {
@@ -1307,6 +1335,16 @@ function __cGenerateKeyPair(type: any, options: any): any {
   }
   const publicEncoding: any = __cKeyEncoding(opts, "publicKeyEncoding", "public");
   const privateEncoding: any = __cKeyEncoding(opts, "privateKeyEncoding", "private");
+  // JWK names only four Weierstrass curves; any other is refused at export.
+  if (
+    kind === "ec" &&
+    ((publicEncoding !== undefined && publicEncoding.format === "jwk") ||
+      (privateEncoding !== undefined && privateEncoding.format === "jwk")) &&
+    ["prime256v1", "P-256", "secp256r1", "secp384r1", "P-384", "secp521r1", "P-521", "secp256k1"]
+      .indexOf(curve) < 0
+  ) {
+    throw new NodeError("ERR_CRYPTO_JWK_UNSUPPORTED_CURVE", "Unsupported JWK EC curve: " + curve + ".");
+  }
   const payload: string = __cPayload(__cNative.cryptoKeyGenerate(kind, bits, exponent, curve));
   const parts: string[] = payload.split(__C_US);
   const privateKey: any = new KeyObject("private", parts[0]);
@@ -1326,17 +1364,25 @@ function __cGenerateKeyPair(type: any, options: any): any {
 
 // `padding US saltLength US dsaEncoding`, from a key options object.
 function __cSignOptions(key: any): string {
-  let padding: number = 1;
-  let salt: number = -2;
+  let padding: string = "";
+  let salt: string = "";
   let p1363: number = 0;
+
+
   if (
     key !== null &&
     typeof key === "object" &&
     !__cIsKeyObject(key) &&
     !__cIsByteView(key)
   ) {
-    if (key.padding !== undefined) padding = __cValidateInt32(key.padding, "key.padding");
-    if (key.saltLength !== undefined) salt = __cValidateInt32(key.saltLength, "key.saltLength");
+    if (key.padding !== undefined) {
+      const n: number = __cValidateInt32(key.padding, "key.padding");
+      padding = "" + n;
+    }
+    if (key.saltLength !== undefined) {
+      const n: number = __cValidateInt32(key.saltLength, "key.saltLength");
+      salt = "" + n;
+    }
     const encoding: any = key.dsaEncoding;
     if (encoding !== undefined) {
       if (encoding === "ieee-p1363") {
@@ -1346,7 +1392,7 @@ function __cSignOptions(key: any): string {
       }
     }
   }
-  return String(padding) + __C_US + String(salt) + __C_US + String(p1363);
+  return padding + __C_US + salt + __C_US + String(p1363);
 }
 
 function __cDigestName(algorithm: any): string {
@@ -1486,7 +1532,10 @@ function __cRsaCrypt(op: string, key: any, buffer: any, defaultPadding: number):
     !__cIsKeyObject(key) &&
     !__cIsByteView(key)
   ) {
-    if (key.padding !== undefined) padding = __cValidateInt32(key.padding, "key.padding");
+    if (key.padding !== undefined) {
+      const n: number = __cValidateInt32(key.padding, "key.padding");
+      padding = "" + n;
+    }
     if (key.oaepHash !== undefined) {
       __cValidateString(key.oaepHash, "key.oaepHash");
       hash = key.oaepHash;
@@ -1559,6 +1608,14 @@ class ECDH {
   }
   computeSecret(key: any, inputEncoding?: any, outputEncoding?: any): any {
     const peer: string = __cToBase64(key, inputEncoding, "key");
+    // OpenSSL's `EC_KEY_check_key`: a public key set by `setPublicKey` must
+    // still belong to the private key.
+    if (this.__cPrivate !== "") {
+      const own: string[] = __cPayload(
+        __cNative.cryptoEcdhKeys(this.__cCurve, this.__cPrivate),
+      ).split(__C_US);
+      if (own[1] !== this.__cPublic) throw new Error("Invalid key pair");
+    }
     const secret: string = __cPayload(
       __cNative.cryptoEcdhCompute(this.__cCurve, this.__cPrivate, peer),
     );
@@ -1566,14 +1623,14 @@ class ECDH {
   }
   getPublicKey(encoding?: any, format?: any): any {
     if (this.__cPublic === "") {
-      throw new NodeError("ERR_CRYPTO_INVALID_STATE", "Failed to get ECDH public key");
+      throw new Error("Failed to get ECDH public key");
     }
     const point: string = __cEcdhPoint(this.__cCurve, this.__cPublic, __cEcdhFormat(format));
     return __cFromBase64(point, encoding);
   }
   getPrivateKey(encoding?: any): any {
     if (this.__cPrivate === "") {
-      throw new NodeError("ERR_CRYPTO_INVALID_STATE", "Failed to get ECDH private key");
+      throw new Error("Failed to get ECDH private key");
     }
     return __cFromBase64(this.__cPrivate, encoding);
   }
@@ -1587,7 +1644,11 @@ class ECDH {
   setPublicKey(key: any, encoding?: any): any {
     __cEmitWarning("DEP0031", "ecdh.setPublicKey() is deprecated.");
     const point: string = __cToBase64(key, encoding, "key");
-    this.__cPublic = __cPayload(__cNative.cryptoEcdhConvert(this.__cCurve, point, false));
+    const converted: any = __cMaybePayload(__cNative.cryptoEcdhConvert(this.__cCurve, point, false));
+    if (converted === undefined) {
+      throw new NodeError("ERR_CRYPTO_OPERATION_FAILED", "Failed to convert Buffer to EC_POINT");
+    }
+    this.__cPublic = converted;
     return this;
   }
   static convertKey(key: any, curve: any, inEnc?: any, outEnc?: any, format?: any): any {
@@ -1662,13 +1723,13 @@ class __CryptoDhBase {
   }
   getPublicKey(encoding?: any): any {
     if (this.__cPublic === "") {
-      throw new NodeError("ERR_CRYPTO_INVALID_STATE", "No public key - did you forget to generate one?");
+      throw new Error("No public key - did you forget to generate one?");
     }
     return __cFromBase64(this.__cPublic, encoding);
   }
   getPrivateKey(encoding?: any): any {
     if (this.__cPrivate === "") {
-      throw new NodeError("ERR_CRYPTO_INVALID_STATE", "No private key - did you forget to generate one?");
+      throw new Error("No private key - did you forget to generate one?");
     }
     return __cFromBase64(this.__cPrivate, encoding);
   }
@@ -2629,6 +2690,25 @@ const __node_crypto: any = {
 };
 
 // `constants` is a read-only property in Node, as in `node:zlib`.
+// `util.promisify(generateKeyPair)` resolves `{ publicKey, privateKey }`
+// rather than the callback's first value, through `promisify.custom`.
+const __cGenerateKeyPairFn: any = __node_crypto.generateKeyPair;
+__cGenerateKeyPairFn[Symbol.for("nodejs.util.promisify.custom")] = function (
+  type: any,
+  options: any,
+): any {
+  return new Promise(function (resolve: any, reject: any): void {
+    let pair: any = undefined;
+    try {
+      pair = __cGenerateKeyPair(type, options);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    resolve(pair);
+  });
+};
+
 Object.defineProperty(__node_crypto, "constants", {
   configurable: false,
   enumerable: true,
