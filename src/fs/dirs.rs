@@ -68,17 +68,26 @@ fn create_dir(path: &Path, mode: i64) -> io::Result<()> {
 /// reason: `create_dir_all` answers `()`, and recovering "the topmost missing
 /// ancestor" afterwards would be a second, racy pass.
 fn create_dir_all(path: &Path, mode: i64) -> io::Result<String> {
+    create_dir_chain(path, mode, true)
+}
+
+/// One step of [`create_dir_all`]. `target` is whether `path` is the directory
+/// asked for rather than one of its ancestors: Node's `MKDirpSync` reports an
+/// existing non-directory as `EEXIST` only for the target itself, and as
+/// `ENOTDIR` when it sits somewhere above it (`test-fs-mkdir.js`).
+fn create_dir_chain(path: &Path, mode: i64, target: bool) -> io::Result<String> {
     if path.as_os_str().is_empty() {
         return Err(io::Error::from_raw_os_error(enoent()));
     }
     match fs::metadata(path) {
         Ok(metadata) if metadata.is_dir() => return Ok(String::new()),
         // An existing non-directory is `EEXIST`, as `mkdir(2)` reports.
-        Ok(_) => return Err(io::Error::new(io::ErrorKind::AlreadyExists, "exists")),
+        Ok(_) if target => return Err(io::Error::new(io::ErrorKind::AlreadyExists, "exists")),
+        Ok(_) => return Err(io::Error::from_raw_os_error(enotdir())),
         Err(_) => {}
     }
     let first = match path.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => create_dir_all(parent, mode)?,
+        Some(parent) if !parent.as_os_str().is_empty() => create_dir_chain(parent, mode, false)?,
         _ => String::new(),
     };
     match create_dir(path, mode) {
@@ -88,6 +97,19 @@ fn create_dir_all(path: &Path, mode: i64) -> io::Result<String> {
         Err(err) => return Err(err),
     }
     Ok(if first.is_empty() { path.to_string_lossy().into_owned() } else { first })
+}
+
+/// `ENOTDIR`'s number on this platform: `ERROR_DIRECTORY` on Windows, which the
+/// uv translation maps to `ENOTDIR`.
+const fn enotdir() -> i32 {
+    #[cfg(windows)]
+    {
+        267 // ERROR_DIRECTORY
+    }
+    #[cfg(not(windows))]
+    {
+        libc::ENOTDIR
+    }
 }
 
 /// `ENOENT`'s number on this platform, for the one error raised without a
@@ -392,15 +414,14 @@ mod tests {
     }
 
     #[test]
-    fn recursive_mkdir_over_a_file_is_eexist() {
+    fn recursive_mkdir_over_a_file_is_eexist_and_under_one_enotdir() {
         let root = scratch("mkdir-file");
         let file = root.join("f");
         fs::write(&file, b"x").unwrap();
-        let err = create_dir_all(&file.join("deeper"), 0o777).unwrap_err();
-        assert!(matches!(
-            err.kind(),
-            io::ErrorKind::AlreadyExists | io::ErrorKind::NotADirectory | io::ErrorKind::Other
-        ));
+        let err = create_dir_all(&file, 0o777).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        let err = create_dir_all(&file.join("a").join("b"), 0o777).unwrap_err();
+        assert_eq!(super::super::sys::uv_code_of(&err), "ENOTDIR");
         fs::remove_dir_all(&root).ok();
     }
 

@@ -135,6 +135,12 @@ class __FsUvError extends NodeError {
       configurable: true,
     });
   }
+  // A uv exception prints as a plain `Error` (`"Error: ENOTDIR: ..."`), not
+  // with `NodeError`'s `"Error [CODE]: ..."` form: `test-fs-readdir.js`
+  // matches `String(err)` against `/Error: ENOTDIR: not a directory/`.
+  toString(): string {
+    return this.name + ": " + this.message;
+  }
 }
 
 function __fsUvMessage(
@@ -559,8 +565,10 @@ function __fsStringToFlags(value: any, name?: string): number {
     return Number(value);
   }
   if (value === undefined || value === null) return __FS_O_RDONLY;
+  // Node's `stringToFlags` reports any other non-string as an invalid
+  // *value*, not a wrong type (`test-fs-open-flags.js`).
   if (typeof value !== "string") {
-    throw new ERR_INVALID_ARG_TYPE(label, ["string", "number"], value);
+    throw new ERR_INVALID_ARG_VALUE(label, value, "is invalid");
   }
   switch (value) {
     case "r": return __FS_O_RDONLY;
@@ -940,8 +948,20 @@ class Dirent {
 // cursor; this one reads the whole listing at `opendir` time and serves it,
 // which is observably the same for everything except a directory changing
 // mid-iteration.
+// `Dir.prototype.path` read off the prototype itself is `ERR_INVALID_THIS`
+// in Node (the getter checks its receiver), `test-fs-opendir.js`.
+class __FsErrInvalidThis extends NodeTypeError {
+  constructor(type: string) {
+    super("ERR_INVALID_THIS", 'Value of "this" must be of type ' + type);
+  }
+}
+
 class Dir {
-  path: any = "";
+  __dirPath: any = "";
+  get path(): any {
+    if (!(this instanceof Dir)) throw new __FsErrInvalidThis("Dir");
+    return this.__dirPath;
+  }
   entries: any[] = [];
   index: number = 0;
   closed: boolean = false;
@@ -951,7 +971,7 @@ class Dir {
   // compile error in this engine instead.
   constructor(path?: any, entries?: any[]) {
     if (path === undefined) throw new ERR_MISSING_ARGS("handle");
-    this.path = path;
+    this.__dirPath = path;
     this.entries = entries === undefined ? [] : entries;
   }
   readSync(): any {
@@ -1462,8 +1482,22 @@ function __fsMkdirSync(path: any, options?: any): any {
   return created === "" ? undefined : created;
 }
 
+// Node 25 removed `rmdir`'s `recursive` option and throws, rather than
+// ignoring it, when one is passed (`test-fs-rmdir-recursive-error.js`).
+function __fsRejectRmdirRecursive(options: any): void {
+  if (options === undefined || options === null || typeof options !== "object") return;
+  if (options.recursive !== undefined) {
+    throw new ERR_INVALID_ARG_VALUE(
+      "options.recursive",
+      options.recursive,
+      "is no longer supported",
+    );
+  }
+}
+
 function __fsRmdirSync(path: any, options?: any): void {
   const resolved: string = __fsGetValidatedPath(path);
+  __fsRejectRmdirRecursive(options);
   if (options !== undefined && options !== null) __fsValidateObject(options, "options");
   __fsVoid(__fsNative.fsRmdir(resolved));
 }
@@ -1630,9 +1664,11 @@ function __fsRenameSync(from: any, to: any): void {
 function __fsCopyFileSync(src: any, dest: any, mode?: any): void {
   const source: string = __fsGetValidatedPath(src, "src");
   const target: string = __fsGetValidatedPath(dest, "dest");
-  const resolvedMode: number = mode === undefined || mode === null ? 0 : Number(mode);
-  __fsValidateInteger(resolvedMode, "mode", 0, 7);
-  __fsVoid(__fsNative.fsCopyFile(source, target, resolvedMode));
+  // Node's `getValidMode` validates the raw value, so a string mode is a
+  // type error rather than a NaN out of range.
+  const raw: any = mode === undefined || mode === null ? 0 : mode;
+  __fsValidateInteger(raw, "mode", 0, 7);
+  __fsVoid(__fsNative.fsCopyFile(source, target, Number(raw)));
 }
 
 function __fsLinkSync(existing: any, target: any): void {
@@ -2431,6 +2467,7 @@ const fs: any = {
   },
   rmdir(path: any, options?: any, callback?: any): void {
     const tail: any[] = __fsTail(options, callback);
+    __fsRejectRmdirRecursive(tail[0]);
     __fsRunAsync(tail[1], function (): any {
       __fsRmdirSync(path, tail[0]);
       return undefined;
