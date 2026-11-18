@@ -226,6 +226,10 @@ case "$MODULE" in
   # grew the datagram verbs in `src/io/udp.rs`; `src/dgram/dgram.ts` is the
   # module Node exposes: `Socket` as an `EventEmitter` over a UDP handle.
   dgram)  KIND="zun-ts+ext"; PATTERNS="test-dgram-";                       PATTERN="test-dgram-";;
+  # `node:test` (src/test). `+ext` because a third of the files spawn a child
+  # `node --test <fixture>` through child_process, and the rest read fs.
+  test_runner)
+          KIND="zun-ts+ext"; PATTERNS="test-runner-";                      PATTERN="test-runner-";;
 
   # `worker_threads`' corpus is four prefixes: `test-worker-` (the bulk, which
   # also selects `test-worker.js` itself), plus `test-messagechannel`,

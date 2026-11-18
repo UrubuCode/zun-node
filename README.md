@@ -1399,3 +1399,9 @@ target/debug/zun run /tmp/bundle.ts
 > compile time or need `https`/`tls`/`cluster`. Deviations, repros and the
 > blocker table: [`test/http/README.md`](test/http/README.md); per-test
 > breakdown: [`test/http/RESULTS.md`](test/http/RESULTS.md).
+
+<!-- node-test_runner:start -->
+### Node.js v25 `test_runner` compatibility
+
+`█████░░░░░░░░░░░░░░░░░░░` **21.4%** — 9 / 42 Node `test-runner-*` tests passing
+<!-- node-test_runner:end -->
