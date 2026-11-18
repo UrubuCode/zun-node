@@ -1414,9 +1414,12 @@ class BroadcastChannel extends EventTarget {
   __wtRefed: boolean = true;
   __wtDrainArmed: boolean = false;
 
-  constructor(name: any = __WT_MISSING) {
+  // A rest parameter, not a defaulted one: `new BroadcastChannel(undefined)`
+  // is legal (name "undefined") and only a missing argument throws.
+  constructor(...args: any[]) {
     super();
-    if (name === __WT_MISSING) {
+    const name: any = args[0];
+    if (Number(args.length) === 0) {
       throw new NodeTypeError("ERR_MISSING_ARGS", 'The "name" argument must be specified');
     }
     this.__wtEntries = [];
