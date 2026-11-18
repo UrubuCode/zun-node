@@ -262,7 +262,8 @@ function __evReceived(value: any): string {
   // a string comes out single-quoted (`'foo'`), which `JSON.stringify` cannot
   // produce. A differential run of `os` against Node caught the difference in
   // every `ERR_INVALID_ARG_TYPE` whose argument was a string.
-  let shown = kind === "string" ? __evInspect(value) : String(value);
+  // `util.inspect(2n)` is `2n`.
+  let shown = kind === "string" ? __evInspect(value) : kind === "bigint" ? String(value) + "n" : String(value);
   if (Number(shown.length) > 28) shown = shown.slice(0, 25) + "...";
   return " Received type " + kind + " (" + shown + ")";
 }

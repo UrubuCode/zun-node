@@ -419,6 +419,8 @@ function __cpNormalizeSpawn(fileArg: any, argsArg: any, optionsArg: any): any {
     const key: string = String(keys[i]);
     const value: any = sourceEnv[key];
     if (value === undefined) continue;
+    // Set afresh below for a re-execution, never inherited (see there).
+    if (key === "ZUN_NODE_PPID") continue;
     const folded: string = __cpIsWindows ? key.toUpperCase() : key;
     if (seen[folded] === true) continue;
     seen[folded] = true;
@@ -437,6 +439,10 @@ function __cpNormalizeSpawn(fileArg: any, argsArg: any, optionsArg: any): any {
       seen[folded] = true;
       pairs.push(name + "=" + String(value));
     }
+    // The launcher runs the child through `bash` and `zun`, so the OS parent of
+    // the child's `zun` is not this process. `process.ppid` in the child reads
+    // this instead (`__processInstallNative`).
+    pairs.push("ZUN_NODE_PPID=" + String(process.pid));
   }
 
   return {

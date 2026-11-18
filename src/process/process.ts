@@ -76,11 +76,9 @@
 // same time in this engine, and `process.emit(type, ...args)` needs both. The
 // emitter side is delegated to one `EventEmitter` instance.
 //
-// The consequence is the one deliberate gap in this module's *shape*:
-// `Object.getPrototypeOf(process)` is `Object.prototype`, not an
-// `EventEmitter`-derived prototype with a `constructor` descriptor on it, which
-// is what `test-process-prototype.js` reads. A class would fix that and break
-// `emit`; the emitter semantics are worth more than the prototype chain.
+// The `EventEmitter`-derived prototype Node gives `process` (with its own
+// `constructor` descriptor, which `test-process-prototype.js` reads) is set on
+// the literal afterwards with `Object.setPrototypeOf` (`__processProto`).
 //
 // ---------------------------------------------------------------------------
 // Engine workarounds in this file, each tied to an open zun issue
@@ -2046,6 +2044,20 @@ const process: any = {
   stdin: __processStdin,
 };
 
+// Node's `process` is an instance of a `process` class derived from
+// `EventEmitter`, whose prototype carries a non-enumerable `constructor`
+// (`test-process-prototype.js`). The object stays a literal (see the header:
+// `emit` needs a rest parameter), and gets that prototype chain afterwards.
+class __ProcessCtor extends EventEmitter {}
+const __processProto: any = Object.create(__ProcessCtor.prototype);
+Object.defineProperty(__processProto, "constructor", {
+  value: __ProcessCtor,
+  writable: true,
+  enumerable: false,
+  configurable: true,
+});
+Object.setPrototypeOf(process, __processProto);
+
 // The owners of every open I/O handle, which `_getActiveHandles()` reports.
 // A module whose objects hold a loop handle calls `__processHandleOpened` when
 // the handle is adopted and `__processHandleClosed` when it is released; both
@@ -2181,6 +2193,12 @@ function __processInstallNative(ops: any): void {
     if (Number(row.length) >= 5) {
       process.pid = Number(row[0]);
       process.ppid = Number(row[1]);
+      // A re-execution of `process.execPath` goes through the launcher, so the
+      // spawning process names itself (src/child_process/child_process.ts).
+      if (host.envHas("ZUN_NODE_PPID")) {
+        const named: number = Number(host.envGet("ZUN_NODE_PPID"));
+        if (named > 0) process.ppid = named;
+      }
       process.platform = String(row[2]);
       process.arch = String(row[3]);
       process.execPath = String(row[4]);
