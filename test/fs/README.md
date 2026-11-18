@@ -182,6 +182,28 @@ a round trip through a file containing NUL and invalid UTF-8 is covered by
 
 ## Results
 
+**132 of 227** (58.1%) on the current engine build (Windows, 2026-11-18),
+up from 113 on the same build before this round. The gains: `fs.ReadStream`/
+`fs.WriteStream`/`fs.Stats` callable without `new`, `AbortSignal` on the
+whole-file operations, Node's argument validation for `read`/`write`/`readv`/
+`writev`/`truncate`/`access`/`mkdtemp`, `realpathSync`'s `lstat`-shaped error,
+and harness fixes (`common.skipIf32Bits`, `common.runWithInvalidFD`,
+`fixtures.utf8TestText`, the externalize-string globals). Two engine bugs found
+along the way are worked around or blocked:
+[zun#116](https://github.com/UrubuCode/zun/issues/116) (a reaction that reads
+`this` and `arguments` gets no arguments, which emptied every
+`.then(common.mustCall(v => …))`) and
+[zun#119](https://github.com/UrubuCode/zun/issues/119) (`instance.constructor`
+ignores a redefined `prototype.constructor`);
+[zun#118](https://github.com/UrubuCode/zun/issues/118) (a reassigned `let`
+destructuring from `await` reads its box) still blocks
+`test-fs-{readv,writev}-promises.js`, and
+[zun#103](https://github.com/UrubuCode/zun/issues/103) blocks
+`test-fs-watchfile.js`. Many of the remaining Windows failures are `EPERM` on
+`symlink` (no symlink privilege), which do not happen on the Linux CI runner.
+
+The breakdown below is from an earlier measurement:
+
 **96 of 227** of Node 25's `test-fs-*` files pass
 (`tools/run_node_tests.sh --module fs`, Windows). What stops the other 131:
 
