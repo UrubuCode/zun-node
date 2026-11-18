@@ -634,10 +634,63 @@ function __timerShutdown(): void {
 }
 
 // ---------------------------------------------------------------------------
+// The mock-timers hook (`node:test`'s `mock.timers`, src/test/mock_timers.ts)
+// ---------------------------------------------------------------------------
+//
+// A bundle's bare `setTimeout(...)` is a call to the top-level function below,
+// not a read of a mutable global, so `MockTimers.enable()` cannot replace it by
+// assignment the way Node replaces `globalThis.setTimeout`. Each public entry
+// point therefore asks this table first: `hooks` is `null` until mock timers
+// are enabled, and then holds the replacement for every mocked API name. The
+// `__timerReal*` functions are the unhooked originals, which the test runner's
+// own scheduling (timeouts, `waitFor`, plan waits) uses so that a test that
+// mocks the clock cannot freeze its own runner -- the role primordials play
+// in Node's `lib/internal/test_runner`.
+const __timerMock: any = { hooks: null };
+
+function __timerMockFor(name: string): any {
+  const hooks: any = __timerMock.hooks;
+  if (hooks === null || hooks === undefined) return undefined;
+  return hooks[name];
+}
+
+function __timerCallMock(fn: any, head: any[], rest: any[]): any {
+  const all: any[] = [];
+  for (const v of head) all.push(v);
+  const n: number = Number(rest.length);
+  for (let i = 0; i < n; i++) all.push(rest[i]);
+  return fn.apply(undefined, all);
+}
+
+function __timerRealSetTimeout(callback: any, after?: any, ...args: any[]): any {
+  __timerValidateCallback(callback);
+  const forwarded: any = Number(args.length) > 0 ? __timerRest(args) : undefined;
+  const timeout = new Timeout(callback, after, forwarded, false, true);
+  __timerEnrol(timeout);
+  __timerArm(timeout);
+  return timeout;
+}
+
+function __timerRealSetImmediate(callback: any, ...args: any[]): any {
+  __timerValidateCallback(callback);
+  const forwarded: any = Number(args.length) > 0 ? __timerRest(args) : undefined;
+  const immediate = new Immediate(callback, forwarded);
+  __timerEnrol(immediate);
+  __timerArmImmediate(immediate);
+  return immediate;
+}
+
+function __timerRealClearTimeout(timer?: any): void {
+  __timerClearTimeout(timer);
+}
+
+// ---------------------------------------------------------------------------
 // The globals (and `node:timers`' exports — in Node they are the same functions)
 // ---------------------------------------------------------------------------
 
 function setTimeout(callback: any, after?: any, ...args: any[]): any {
+  const __mocked: any = __timerMockFor("setTimeout");
+  if (__mocked !== undefined) return __timerCallMock(__mocked, [callback, after], args);
   __timerValidateCallback(callback);
   const forwarded: any = Number(args.length) > 0 ? __timerRest(args) : undefined;
   const timeout = new Timeout(callback, after, forwarded, false, true);
@@ -647,6 +700,8 @@ function setTimeout(callback: any, after?: any, ...args: any[]): any {
 }
 
 function setInterval(callback: any, repeat?: any, ...args: any[]): any {
+  const __mocked: any = __timerMockFor("setInterval");
+  if (__mocked !== undefined) return __timerCallMock(__mocked, [callback, repeat], args);
   __timerValidateCallback(callback);
   const forwarded: any = Number(args.length) > 0 ? __timerRest(args) : undefined;
   const timeout = new Timeout(callback, repeat, forwarded, true, true);
@@ -656,6 +711,8 @@ function setInterval(callback: any, repeat?: any, ...args: any[]): any {
 }
 
 function setImmediate(callback: any, ...args: any[]): any {
+  const __mocked: any = __timerMockFor("setImmediate");
+  if (__mocked !== undefined) return __timerCallMock(__mocked, [callback], args);
   __timerValidateCallback(callback);
   const forwarded: any = Number(args.length) > 0 ? __timerRest(args) : undefined;
   const immediate = new Immediate(callback, forwarded);
@@ -703,12 +760,22 @@ function __timerClearTimeout(timer: any): void {
 }
 
 function clearTimeout(timer?: any): void {
+  const __mocked: any = __timerMockFor("clearTimeout");
+  if (__mocked !== undefined) {
+    __mocked(timer);
+    return;
+  }
   __timerClearTimeout(timer);
 }
 
 // `clearInterval` is `clearTimeout`: the HTML Living Standard makes the two
 // interchangeable, and Node implements it as a direct call.
 function clearInterval(timer?: any): void {
+  const __mocked: any = __timerMockFor("clearInterval");
+  if (__mocked !== undefined) {
+    __mocked(timer);
+    return;
+  }
   __timerClearTimeout(timer);
 }
 
@@ -729,6 +796,11 @@ function __timerClearImmediate(immediate: any): void {
 }
 
 function clearImmediate(immediate?: any): void {
+  const __mocked: any = __timerMockFor("clearImmediate");
+  if (__mocked !== undefined) {
+    __mocked(immediate);
+    return;
+  }
   __timerClearImmediate(immediate);
 }
 
@@ -1094,4 +1166,9 @@ const __node_timers: any = {
     __timerEnrol(timeout);
     __timerArm(timeout);
   },
+};
+
+// `internal/timers`, reduced to the one constant Node's own tests read from it.
+const __node_internal_timers: any = {
+  TIMEOUT_MAX: __TIMEOUT_MAX,
 };

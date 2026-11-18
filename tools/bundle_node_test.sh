@@ -59,13 +59,11 @@
 #     `pendingDeprecate`, `customPromisifyArgs`), which lives in
 #     `src/util/util.ts` for the same reason it lives in `lib/internal/util.js`
 #     in Node: it is the same module.
-#   * `test` is the other canonical-binding case, and the only entry that is
-#     *harness* code rather than library code: `node:test` is not a module
-#     zun-node implements, it is the language several of Node's newer test files
-#     are written in (`tools/harness/node_test.ts`). Its binding is the function
-#     `test`, because those files spell both `const test = require('node:test')`
-#     — where the module object is itself callable — and
-#     `const { test } = require('node:test')`.
+#   * `test` is the other canonical-binding case: `node:test` (src/test/) is
+#     callable, and Node's files spell both `const test = require('node:test')`
+#     -- where the module object is itself the function -- and
+#     `const { test } = require('node:test')`, so the binding is the function
+#     `test`, which carries `describe`/`it`/`mock`/`run`/... as properties.
 #
 # Anything else (`internal/event_target`, `net`, `v8`, `inspector`, ...) is
 # reported as an unresolved module and the bundle fails, so a missing harness
@@ -228,6 +226,9 @@ vm __node_vm Script,compileFunction,createContext
 crypto __node_crypto Hash,Hmac,Cipheriv,Decipheriv,KeyObject,Sign,Verify,ECDH,DiffieHellman,DiffieHellmanGroup
 [.][.]/common/crypto __node_harness_crypto -
 test __node_test test
+test/reporters __node_test_reporters -
+internal/test_runner/utils __node_internal_test_runner_utils -
+internal/timers __node_internal_timers -
 v8 __node_v8 Serializer,Deserializer,DefaultSerializer,DefaultDeserializer,GCProfiler
 tty __node_tty ReadStream,WriteStream
 internal/tty __node_internal_tty -
@@ -410,7 +411,12 @@ zlib src/buffer/buffer.ts
 zlib src/string_decoder/string_decoder.ts
 zlib src/stream/stream.ts
 zlib src/zlib/zlib.ts
-test tools/harness/node_test.ts
+test src/test/test.ts
+test src/test/mock.ts
+test/reporters src/test/test.ts
+test/reporters src/test/mock.ts
+internal/test_runner/utils src/test/test.ts
+internal/test_runner/utils src/test/mock.ts
 vm src/vm/vm.ts
 punycode src/punycode/deprecation.ts
 fs src/buffer/buffer.ts
@@ -562,15 +568,13 @@ module src/module/module.ts
 
 # The harness, which stands on everything above it.
 #
-# `tools/harness/node_test.ts` is *not* here: it declares a top-level
+# `src/test/test.ts` (`node:test`) is *not* here: it declares a top-level
 # `function test(...)`, which is the name several of Node's own test files give
 # their local helper (`test-buffer-tostring-rangeerror.js`,
 # `test-buffer-constructor-node-modules-paths.js`, `test-string-decoder.js`),
 # and two top-level declarations of one name are a compile error in a single
-# Zun program. Inlining it unconditionally therefore reported "duplicate
-# function declaration" for tests whose real blocker is something else
-# entirely. It is in CONDITIONAL_FILES above instead, under the one name it
-# provides (`test`), so only a test that actually requires it gets it.
+# Zun program. It is in CONDITIONAL_FILES above instead, under the names it
+# provides, so only a test that actually requires it gets it.
 HARNESS_FILES="
 tools/harness/common.ts
 "
@@ -745,6 +749,28 @@ done <<EOF_CONDITIONAL
 $CONDITIONAL_FILES
 EOF_CONDITIONAL
 
+# `node:test`'s `run()` (src/test/run.ts) stands on `child_process` (one child
+# per test file) and `fs` (default file discovery), which a bundle that only
+# declares tests should not pay for. It is appended when the bundle carries
+# src/test/test.ts and the test names `run` at all -- the destructured
+# `const { run } = require('node:test')` and the member read `test.run` both
+# match -- with the same append-once rule as the loop.
+case "
+$FILES" in *"
+src/test/test.ts
+"*)
+  if printf '%s' "$SRC_TEXT" | grep -Eq '(^|[^A-Za-z0-9_$.])run([^A-Za-z0-9_$]|$)|[.]run[(]'; then
+    for required in src/buffer/buffer.ts src/string_decoder/string_decoder.ts src/stream/stream.ts         src/child_process/child_process.ts src/fs/fs.ts src/fs/streams.ts src/fs/watchers.ts src/test/run.ts; do
+      case "
+$FILES" in *"
+$required
+"*) continue;; esac
+      FILES="$FILES$required
+"
+    done
+  fi;;
+esac
+
 # The `module` corpus always carries the resolver and the file system under it,
 # whether or not the test in hand spells `require('module')`; see
 # ZUN_NODE_REQUIRE above. The append-once rule is the loop's.
@@ -818,7 +844,7 @@ fi
 # methods (and a call to any other is a compile error, not a missing method), so
 # every bundle needs the real one. The two bindings that shadow the prelude are
 # in `src/console/global.ts`, split off for the same reason
-# `tools/harness/node_test.ts` is conditional: `test-console-table.js` and
+# `src/test/test.ts` is conditional: `test-console-table.js` and
 # `test-console-log-throw-primitive.js` declare their own top-level
 # `const console = new Console(...)`, and two top-level declarations of one name
 # are a compile error in a single Zun program. Such a test keeps its own
