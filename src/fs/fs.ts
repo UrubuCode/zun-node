@@ -1210,17 +1210,47 @@ function __fsReadSync(fd: any, buffer: any, offset?: any, length?: any, position
     resolvedLength = offset.length;
     resolvedPosition = offset.position;
   }
-  if (resolvedOffset === undefined || resolvedOffset === null) resolvedOffset = 0;
-  if (resolvedLength === undefined || resolvedLength === null) {
-    // zun#38: `buffer.length` through an `any` is `undefined`, so the view is
-    // re-typed before its room is measured.
-    resolvedLength = Number(__fsAsBuffer(buffer).length) - Number(resolvedOffset);
+  // `lib/fs.js`' `readSync` order from here: an integer offset >= 0, the
+  // length truncated to int32, an early 0 for an empty read, then the buffer,
+  // offset/length and position checks.
+  if (resolvedOffset === undefined || resolvedOffset === null) {
+    resolvedOffset = 0;
+  } else {
+    __fsValidateInteger(resolvedOffset, "offset", 0, 9007199254740991);
   }
-  if (resolvedPosition === undefined || resolvedPosition === null) resolvedPosition = -1;
-  if (typeof resolvedPosition === "bigint") resolvedPosition = Number(resolvedPosition);
-
-  const count: number = Number(resolvedLength);
+  // zun#38: `buffer.length` through an `any` is `undefined`, so the view is
+  // re-typed before its room is measured.
+  const byteLength: number = Number(__fsAsBuffer(buffer).length);
+  if (resolvedLength === undefined || resolvedLength === null) {
+    resolvedLength = byteLength - Number(resolvedOffset);
+  }
+  const count: number = Number(resolvedLength) | 0;
   if (count === 0) return 0;
+  if (byteLength === 0) {
+    throw new ERR_INVALID_ARG_VALUE("buffer", buffer, "is empty and cannot be written");
+  }
+  if (count < 0) throw new ERR_OUT_OF_RANGE("length", ">= 0", count);
+  if (Number(resolvedOffset) + count > byteLength) {
+    throw new ERR_OUT_OF_RANGE("length", "<= " + String(byteLength - Number(resolvedOffset)), count);
+  }
+  if (resolvedPosition === undefined || resolvedPosition === null) {
+    resolvedPosition = -1;
+  } else if (typeof resolvedPosition === "number") {
+    __fsValidateInteger(resolvedPosition, "position", -1, 9007199254740991);
+  } else if (typeof resolvedPosition === "bigint") {
+    // `validatePosition`'s bigint range, `-1n ..= 2n ** 63n - 1n - length`.
+    // Both sides are typed `bigint` locals (zun#105: arithmetic with an `any`
+    // BigInt operand throws).
+    const big: bigint = BigInt(resolvedPosition);
+    const maxPosition: bigint = BigInt(2) ** BigInt(63) - BigInt(1) - BigInt(count);
+    if (big < BigInt(-1) || big > maxPosition) {
+      throw new ERR_OUT_OF_RANGE("position", ">= -1 && <= " + String(maxPosition), resolvedPosition);
+    }
+    resolvedPosition = Number(big);
+  } else {
+    throw new ERR_INVALID_ARG_TYPE("position", ["integer", "bigint"], resolvedPosition);
+  }
+
   const piece: Buffer = __fsBufferOf(
     __fsOne(__fsNative.fsRead(resolvedFd, count, Number(resolvedPosition))),
   );
@@ -2267,6 +2297,8 @@ const fs: any = {
   read(fd: any, buffer?: any, offset?: any, length?: any, position?: any, callback?: any): void {
     // Node accepts `(fd, buffer, offset, length, position, cb)`,
     // `(fd, buffer, options, cb)`, `(fd, options, cb)` and `(fd, cb)`.
+    // The descriptor is validated before anything else, as Node's is.
+    __fsGetValidatedFd(fd);
     let target: any = callback;
     let resolvedBuffer: any = buffer;
     let resolvedOffset: any = offset;
@@ -2283,10 +2315,9 @@ const fs: any = {
       if (!__fsIsUint8Array(buffer)) {
         // `(fd, options, cb)`.
         const settings: any = buffer === undefined || buffer === null ? {} : buffer;
-        resolvedBuffer =
-          settings.buffer === undefined || settings.buffer === null
-            ? Buffer.alloc(16384)
-            : settings.buffer;
+        // Only a missing `buffer` defaults; an explicit `null` is then
+        // rejected by the buffer check, as Node's destructuring default does.
+        resolvedBuffer = settings.buffer === undefined ? Buffer.alloc(16384) : settings.buffer;
         resolvedOffset = settings.offset;
         resolvedLength = settings.length;
         resolvedPosition = settings.position;
@@ -2301,7 +2332,7 @@ const fs: any = {
       resolvedOffset = settings.offset;
       resolvedLength = settings.length;
       resolvedPosition = settings.position;
-    } else if (__evIsFn(position)) {
+    } else if (__evIsFn(position) && callback === undefined) {
       target = position;
       resolvedPosition = null;
     }
