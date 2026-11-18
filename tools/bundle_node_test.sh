@@ -47,6 +47,13 @@
 #     reach a constructor in this engine (zun#18), so the member read through
 #     the module alias becomes the top-level class name.
 #
+#   * `util`'s canonical column lists the functions src/util/util.ts declares
+#     at top level under their exported name (`callbackify`, `inspect`, ...).
+#     A test's `const { callbackify } = require('util')` would otherwise
+#     declare a second top-level `callbackify`, and the module object's own
+#     `{ callbackify }` shorthand then resolves to the test's still-unassigned
+#     const -- so `util.callbackify` reads `undefined`. Dropping the binding
+#     leaves the name bound to the function itself.
 #   * `util/types` is the *same object* as `util.types`, and `internal/util` is
 #     `util`'s own implementation surface (`sleep`, `emitExperimentalWarning`,
 #     `pendingDeprecate`, `customPromisifyArgs`), which lives in
@@ -170,7 +177,7 @@ json_string() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"
 # `zun run --ext <lib> <bundle.ts>`; see tools/run_node_tests.sh's `zun-ts+ext`.
 # ---------------------------------------------------------------------------
 MODULE_SPECS="
-util __node_util -
+util __node_util callbackify,promisify,inspect,format,formatWithOptions,inherits,deprecate,isDeepStrictEqual,styleText,stripVTControlCharacters,parseEnv,getCallSites,debuglog
 util/types __node_util_types -
 internal/util __node_internal_util -
 events __node_events EventEmitter

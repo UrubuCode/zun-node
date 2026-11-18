@@ -2547,9 +2547,11 @@ function callbackify(original: any): any {
   const callbackified: any = function (...passed: any[]): any {
     const maybeCb: any = passed.pop();
     __utilValidateFunction(maybeCb, "last argument");
-    const produced: any = __utilCall(state.original, passed);
+    const self: any = this;
+    const cb: any = maybeCb.bind(self);
+    const produced: any = Reflect.apply(state.original, self, passed);
     const onResolved: any = function (ret: any): any {
-      process.nextTick(__utilBox(maybeCb), null, ret);
+      process.nextTick(cb, null, ret);
       return undefined;
     };
     const onRejected: any = function (reason: any): any {
@@ -2557,12 +2559,31 @@ function callbackify(original: any): any {
       if (error === undefined || error === null || error === false || error === 0 || error === "") {
         error = new ERR_FALSY_VALUE_REJECTION(reason);
       }
-      process.nextTick(__utilBox(maybeCb), error);
+      process.nextTick(cb, error);
       return undefined;
     };
     produced.then(onResolved, onRejected);
     return undefined;
   };
+  // Node copies every own descriptor of `original`, with `length` one larger
+  // (the callback) and `name` suffixed `Callbackified`. The descriptors are
+  // read one name at a time: `Object.getOwnPropertyDescriptors` throws on a
+  // function (zun#121).
+  const descriptors: any = {};
+  for (const key of Object.getOwnPropertyNames(original)) {
+    descriptors[key] = Object.getOwnPropertyDescriptor(original, key);
+  }
+  if (descriptors.length !== undefined && typeof descriptors.length.value === "number") {
+    descriptors.length.value = descriptors.length.value + 1;
+  }
+  if (descriptors.name !== undefined && typeof descriptors.name.value === "string") {
+    descriptors.name.value = descriptors.name.value + "Callbackified";
+  }
+  // One `defineProperty` per key: `Object.defineProperties` also throws on a
+  // function target (zun#121).
+  for (const key of Object.keys(descriptors)) {
+    Object.defineProperty(callbackified, key, descriptors[key]);
+  }
   return __utilBox(callbackified);
 }
 
