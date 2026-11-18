@@ -6,7 +6,7 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-worker*|test-messagechannel*|t
 <!-- node-worker_threads:start -->
 ### Node.js v25 `worker_threads` compatibility
 
-`█████░░░░░░░░░░░░░░░░░░░` **24.1%** — 34 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
+`████████░░░░░░░░░░░░░░░░` **36.1%** — 51 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
 <!-- node-worker_threads:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
@@ -16,53 +16,53 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-broadcastchannel-custom-inspect.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-messagechannel.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-messageport-hasref.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: undefined is not a function |
-| `test-worker-abort-on-uncaught-exception-terminate.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-0fe7a59af23dd6 |
-| `test-worker-abort-on-uncaught-exception.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-145880b667d462 |
-| `test-worker-arraybuffer-zerofill.js` | ❌ timeout | not ok - ...should not affect zero-fill in other threads: Cannot read properties of undefined (reading 'fn') |
-| `test-worker-beforeexit-throw-exit.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-476c7114411681 |
+| `test-worker-abort-on-uncaught-exception-terminate.js` | ❌ timeout | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-worker-abort-on-uncaught-exception.js` | ✅ pass | |
+| `test-worker-arraybuffer-zerofill.js` | ❌ runtime | not ok - ...should not affect zero-fill in other threads: Cannot read properties of undefined (reading 'fn') |
+| `test-worker-beforeexit-throw-exit.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-worker-broadcastchannel-wpt.js` | ✅ pass | |
 | `test-worker-broadcastchannel.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-worker-cjs-workerdata.js` | ❌ parse | zun-node-run: cannot read script: O sistema não pode encontrar o arquivo especificado. (os error 2) |
-| `test-worker-cleanexit-with-js.js` | ❌ parse | ReferenceError: __node_v8 is not defined |
+| `test-worker-cjs-workerdata.js` | ✅ pass | |
+| `test-worker-cleanexit-with-js.js` | ❌ parse | SyntaxError: EvalError: code generation from strings disallowed |
 | `test-worker-cleanexit-with-moduleload.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-cleanexit-with-moduleload.js: |
-| `test-worker-cleanup-handles.js` | ❌ parse | Uncaught TypeError: Cannot read properties of null (reading 'fd') |
+| `test-worker-cleanup-handles.js` | ❌ parse | TypeError: Cannot read properties of null (reading 'fd') |
 | `test-worker-cli-options.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-cli-options.js: |
 | `test-worker-console-listeners.js` | ✅ pass | |
-| `test-worker-cpu-profile.js` | ❌ type error | bundles/test-worker-cpu-profile.ts:34085:33: error: [SEM0001] no method 'startCpuProfile' on this type |
-| `test-worker-cpu-usage.js` | ❌ type error | bundles/test-worker-cpu-usage.ts:34121:18: error: [SEM0001] no method 'cpuUsage' on this type |
+| `test-worker-cpu-profile.js` | ❌ type error | bundles/test-worker-cpu-profile.ts:34256:33: error: [SEM0001] no method 'startCpuProfile' on this type |
+| `test-worker-cpu-usage.js` | ❌ type error | bundles/test-worker-cpu-usage.ts:34292:18: error: [SEM0001] no method 'cpuUsage' on this type |
 | `test-worker-crypto-sign-transfer-result.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-crypto-sign-transfer-result.js: |
-| `test-worker-data-url.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_INVALID_ARG_TYPE: The "filename" argument must be of type string  |
+| `test-worker-data-url.js` | ❌ assertion | zun: runtime error: malformed bytecode: async turn went idle with the entry point still suspended at <main> [8 |
 | `test-worker-debug.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-debug.js: |
 | `test-worker-dns-terminate-during-query.js` | ❌ runtime | bundles/test-worker-dns-terminate-during-query.ts: error: parse error: "A 'return' statement can only be used  |
-| `test-worker-dns-terminate.js` | ❌ parse | ReferenceError: __node_dns is not defined |
+| `test-worker-dns-terminate.js` | ✅ pass | |
 | `test-worker-environmentdata.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-environmentdata.js: |
 | `test-worker-error-stack-getter-throws.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-worker-esm-exit.js` | ❌ assertion | zun-node-run: cannot read script: O sistema não pode encontrar o caminho especificado. (os error 3) |
+| `test-worker-esm-exit.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-worker-esm-missing-main.js` | ❌ parse | zun-node-run: cannot read script: O sistema não pode encontrar o arquivo especificado. (os error 2) |
-| `test-worker-esmodule.js` | ❌ parse | zun-node-run: cannot read script: O sistema não pode encontrar o arquivo especificado. (os error 2) |
+| `test-worker-esmodule.js` | ❌ parse | ReferenceError: worker is not defined |
 | `test-worker-eval-typescript.js` | ✅ pass | |
-| `test-worker-event.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-worker-event.js` | ✅ pass | |
 | `test-worker-execargv-invalid.js` | ✅ pass | |
-| `test-worker-execargv.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: Cannot read properties of null (reading 'on') |
+| `test-worker-execargv.js` | ❌ assertion | (zun-node) Warning: some warning |
 | `test-worker-exit-code.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-exit-code.js: |
 | `test-worker-exit-event-error.js` | ✅ pass | |
 | `test-worker-exit-from-uncaught-exception.js` | ❌ parse | Uncaught Error: Unhandled error. ('Error') |
 | `test-worker-exit-heapsnapshot.js` | ✅ pass | |
 | `test-worker-fs-stat-watcher.js` | ✅ pass | |
 | `test-worker-hasref.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: undefined is not a function |
-| `test-worker-heap-profile.js` | ❌ type error | bundles/test-worker-heap-profile.ts:34090:33: error: [SEM0001] no method 'startHeapProfile' on this type |
+| `test-worker-heap-profile.js` | ❌ type error | bundles/test-worker-heap-profile.ts:34256:33: error: [SEM0001] no method 'startHeapProfile' on this type |
 | `test-worker-heap-snapshot.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-worker-heap-statistics.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: skipIfInspectorDisabled is not a function |
-| `test-worker-heapdump-failure.js` | ❌ type error | bundles/test-worker-heapdump-failure.ts:34099:25: error: [SEM0001] 'getHeapSnapshot' expects 0 to 0 argument(s |
+| `test-worker-heapdump-failure.js` | ❌ type error | bundles/test-worker-heapdump-failure.ts:34265:25: error: [SEM0001] 'getHeapSnapshot' expects 0 to 0 argument(s |
 | `test-worker-http2-generic-streams-terminate.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-http2-generic-streams-terminate.js: |
 | `test-worker-http2-stream-terminate.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-http2-stream-terminate.js: |
 | `test-worker-init-failure.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-init-failure.js: |
 | `test-worker-invalid-workerdata.js` | ✅ pass | |
 | `test-worker-load-file-with-extension-other-than-js.js` | ✅ pass | |
 | `test-worker-memory.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-memory.js: |
-| `test-worker-message-channel-sharedarraybuffer.js` | ❌ parse | Uncaught ReferenceError: __node_worker_threads is not defined |
+| `test-worker-message-channel-sharedarraybuffer.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-worker-message-channel.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-worker-message-event.js` | ❌ type error | bundles/test-worker-message-event.ts:34129:33: error: [SEM0001] spread arguments are not lowered yet |
+| `test-worker-message-event.js` | ❌ type error | bundles/test-worker-message-event.ts:34295:33: error: [SEM0001] spread arguments are not lowered yet |
 | `test-worker-message-mark-as-uncloneable.js` | ❌ assertion | AssertionError [throws]: Should throw DataCloneError when posting uncloneables |
 | `test-worker-message-not-serializable.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-message-not-serializable.js: |
 | `test-worker-message-port-arraybuffer.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
@@ -73,9 +73,9 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-worker-message-port-infinite-message-loop.js` | ✅ pass | |
 | `test-worker-message-port-inspect-during-init-hook.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: createHook is not a function |
 | `test-worker-message-port-jstransferable-nested-untransferable.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-message-port-jstransferable-nested-untransferable.js: |
-| `test-worker-message-port-message-before-close.js` | ❌ parse | Uncaught ReferenceError: __node_worker_threads is not defined |
+| `test-worker-message-port-message-before-close.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-worker-message-port-message-port-transferring.js` | ✅ pass | |
-| `test-worker-message-port-move.js` | ❌ type error | bundles/test-worker-message-port-move.ts:35629:17: error: [SEM0001] cannot add String and Function(4294967295) |
+| `test-worker-message-port-move.js` | ❌ type error | bundles/test-worker-message-port-move.ts:35795:17: error: [SEM0001] cannot add String and Function(4294967295) |
 | `test-worker-message-port-multiple-sharedarraybuffers.js` | ✅ pass | |
 | `test-worker-message-port-receive-message.js` | ✅ pass | |
 | `test-worker-message-port-terminate-transfer-list.js` | ❌ timeout | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
@@ -87,70 +87,70 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-worker-message-port-transfer-native.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (DataCloneError). |
 | `test-worker-message-port-transfer-self.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-message-port-transfer-self.js: |
 | `test-worker-message-port-transfer-target.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-worker-message-port-transfer-terminate.js` | ❌ timeout |  |
+| `test-worker-message-port-transfer-terminate.js` | ✅ pass | |
 | `test-worker-message-port-wasm-module.js` | ❌ type error | zun: runtime error: unhandled exception: ReferenceError: WebAssembly is not defined |
-| `test-worker-message-port-wasm-threads.js` | ❌ type error | bundles/test-worker-message-port-wasm-threads.ts:34131:12: error: [SEM0001] no field or setter 'buf' on this t |
+| `test-worker-message-port-wasm-threads.js` | ❌ type error | bundles/test-worker-message-port-wasm-threads.ts:34292:12: error: [SEM0001] no field or setter 'buf' on this t |
 | `test-worker-message-port.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-worker-message-transfer-port-mark-as-untransferable.js` | ✅ pass | |
-| `test-worker-message-type-unknown.js` | ❌ timeout |  |
+| `test-worker-message-type-unknown.js` | ❌ assertion | AssertionError [==]: Expected error not found in: (zun-node) internal/test/binding: These APIs are for interna |
 | `test-worker-messageport-hasref.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: undefined is not a function |
 | `test-worker-messaging-errors-handler.js` | ✅ pass | |
 | `test-worker-messaging-errors-invalid.js` | ✅ pass | |
 | `test-worker-messaging-errors-timeout.js` | ✅ pass | |
 | `test-worker-messaging.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-worker-mjs-workerdata.js` | ❌ parse | zun-node-run: cannot read script: O sistema não pode encontrar o arquivo especificado. (os error 2) |
+| `test-worker-mjs-workerdata.js` | ❌ parse | ReferenceError: parentPort is not defined |
 | `test-worker-name.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: skipIfInspectorDisabled is not a function |
 | `test-worker-nearheaplimit-deadlock.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-worker-nested-on-process-exit.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-0994758f05262f |
-| `test-worker-nested-uncaught.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-0f54adcb01c138 |
-| `test-worker-nexttick-terminate.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-68874100b37f92 |
+| `test-worker-nested-on-process-exit.js` | ✅ pass | |
+| `test-worker-nested-uncaught.js` | ✅ pass | |
+| `test-worker-nexttick-terminate.js` | ❌ timeout | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-worker-no-sab.js` | ✅ pass | |
-| `test-worker-no-stdin-stdout-interaction.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: Cannot read properties of null (reading 'on') |
+| `test-worker-no-stdin-stdout-interaction.js` | ❌ assertion | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-worker-node-options.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-node-options.js: |
-| `test-worker-non-fatal-uncaught-exception.js` | ❌ parse | Uncaught TypeError: _fatalException is not a function |
-| `test-worker-on-process-exit.js` | ❌ timeout |  |
+| `test-worker-non-fatal-uncaught-exception.js` | ❌ parse | TypeError: _fatalException is not a function |
+| `test-worker-on-process-exit.js` | ✅ pass | |
 | `test-worker-onmessage-not-a-function.js` | ✅ pass | |
 | `test-worker-onmessage.js` | ✅ pass | |
-| `test-worker-parent-port-ref.js` | ❌ type error | bundles/test-worker-parent-port-ref.ts:34097:5: error: [SEM0001] 'on' expects 2 to 2 argument(s), found 3 |
-| `test-worker-process-argv.js` | ❌ timeout | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
+| `test-worker-parent-port-ref.js` | ✅ pass | |
+| `test-worker-process-argv.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-worker-process-cwd.js` | ❌ assertion | AssertionError [match]: The input did not match the regular expression /AtomicsLoad/. Input: |
 | `test-worker-process-env-shared.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-worker-process-env.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
-| `test-worker-process-exit-async-module.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_INVALID_ARG_TYPE: The "filename" argument must be of type string  |
+| `test-worker-process-exit-async-module.js` | ✅ pass | |
 | `test-worker-ref-onexit.js` | ✅ pass | |
-| `test-worker-ref.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-20fcea81ddecc3 |
+| `test-worker-ref.js` | ✅ pass | |
 | `test-worker-relative-path-double-dot.js` | ✅ pass | |
 | `test-worker-relative-path.js` | ✅ pass | |
 | `test-worker-resource-limits.js` | ❌ timeout | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-worker-safe-getters.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-worker-sharedarraybuffer-from-worker-thread.js` | ❌ parse | ReferenceError: __node_worker_threads is not defined |
-| `test-worker-stack-overflow-stack-size.js` | ❌ timeout | AssertionError [==]: w1stack = 0, w2stack = 0 are too far apart |
-| `test-worker-stack-overflow.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-40f223d7df4274 |
+| `test-worker-sharedarraybuffer-from-worker-thread.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-worker-stack-overflow-stack-size.js` | ❌ assertion | AssertionError [==]: w1stack = 0, w2stack = 0 are too far apart |
+| `test-worker-stack-overflow.js` | ✅ pass | |
 | `test-worker-stdio-flush-inflight.js` | ✅ pass | |
 | `test-worker-stdio-flush.js` | ✅ pass | |
 | `test-worker-stdio-from-preload-module.js` | ❌ unsupported import/require | zun: runtime error: unhandled exception: ERR_WORKER_INVALID_EXEC_ARGV: Initiated Worker with invalid execArgv  |
-| `test-worker-stdio.js` | ❌ type error | bundles/test-worker-stdio.ts:38768:10: error: [SEM0001] no field or setter 'chunks' on this type |
-| `test-worker-syntax-error-file.js` | ❌ parse | zun-node-run: cannot read script: O sistema não pode encontrar o caminho especificado. (os error 3) |
-| `test-worker-syntax-error.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-d6516bc521e816 |
+| `test-worker-stdio.js` | ❌ type error | bundles/test-worker-stdio.ts:38918:10: error: [SEM0001] no field or setter 'chunks' on this type |
+| `test-worker-syntax-error-file.js` | ❌ parse | C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\ec20c1f8288a6942.ts: error: parse error: "Expected a sem |
+| `test-worker-syntax-error.js` | ❌ parse | C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\1cc529473b8bdf71.ts: error: parse error: "Expected a sem |
 | `test-worker-terminate-http2-respond-with-file.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-terminate-http2-respond-with-file.js: |
-| `test-worker-terminate-microtask-loop.js` | ❌ timeout |       0 [main] bash 1541320 dofork: child -1 - forked process 1676 died unexpectedly, retry 0, exit code 0x… |
-| `test-worker-terminate-nested.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-9b79d907c3cd5b |
-| `test-worker-terminate-null-handler.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-12834df70d9a9f |
-| `test-worker-terminate-ref-public-port.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-fa9a26f2eecd82 |
+| `test-worker-terminate-microtask-loop.js` | ❌ timeout | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-worker-terminate-nested.js` | ✅ pass | |
+| `test-worker-terminate-null-handler.js` | ✅ pass | |
+| `test-worker-terminate-ref-public-port.js` | ❌ timeout |  |
 | `test-worker-terminate-source-map.js` | ✅ pass | |
-| `test-worker-terminate-timers.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-9f1543e4455592 |
-| `test-worker-terminate-unrefed.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-0c361476898bd2 |
-| `test-worker-thread-name.js` | ❌ type error | bundles/test-worker-thread-name.ts:34107:24: error: [SEM0001] no field or getter 'threadName' on this type |
+| `test-worker-terminate-timers.js` | ❌ timeout | Mismatched function call: <anonymous> called 0 times, expected at least 1 |
+| `test-worker-terminate-unrefed.js` | ✅ pass | |
+| `test-worker-thread-name.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-worker-track-unmanaged-fds.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-track-unmanaged-fds.js: |
 | `test-worker-type-check.js` | ✅ pass | |
-| `test-worker-uncaught-exception-async.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-worker-uncaught-exception-async.js` | ✅ pass | |
 | `test-worker-uncaught-exception.js` | ✅ pass | |
-| `test-worker-unref-from-message-during-exit.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-21b36be9826a4b |
+| `test-worker-unref-from-message-during-exit.js` | ✅ pass | |
 | `test-worker-unsupported-path.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
 | `test-worker-unsupported-things.js` | ❌ assertion | AssertionError [throws]: Missing expected exception. |
 | `test-worker-vm-context-terminate.js` | ❌ parse | Mismatched function call: function should not have been called |
 | `test-worker-voluntarily-exit-followed-by-addition.js` | ✅ pass | |
 | `test-worker-voluntarily-exit-followed-by-throw.js` | ✅ pass | |
 | `test-worker-workerdata-messageport.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-worker-workerdata-sharedarraybuffer.js` | ❌ parse | Uncaught ReferenceError: __node_worker_threads is not defined |
+| `test-worker-workerdata-sharedarraybuffer.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-worker.js` | ✅ pass | |

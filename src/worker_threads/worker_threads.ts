@@ -26,14 +26,9 @@
 //      without reference to a second thread. That is what this file is, and it
 //      is complete.
 //
-//   2. **`Worker`** — a second JavaScript realm running on a second thread.
-//      The Zun VM has one thread and one realm, so there is nothing here for a
-//      `Worker` to run *in*. The constructor below is therefore the real
-//      Node constructor down to the last validation — every `ERR_*` a bad
-//      `filename`, `execArgv`, `env`, `name`, `resourceLimits` or `workerData`
-//      raises is raised here, in Node's order — and then it reports the one
-//      honest failure left: there is no thread. See the `Worker` section for
-//      the design of the child-process form and what it still needs.
+//   2. **`Worker`** — a second JavaScript realm. The Zun VM has one thread
+//      and one realm, so a worker is a child Zun process linked to this one
+//      over a loopback socket; see "The Worker process" below.
 //
 // Unlike `path`, this module is not pure computation: a port delivers its
 // messages on a later loop turn. The capability it needs for that — the
@@ -1665,55 +1660,7 @@ const __wtResourceLimits: any = {};
 //      construction time, which is the behavior `test-worker-invalid-workerdata.js`
 //      exists to pin down.
 //
-// Then it reports the one thing left: there is no second thread.
-//
-// ---------------------------------------------------------------------------
-// The design for a real `Worker`, and what it still needs
-// ---------------------------------------------------------------------------
-//
-// A `Worker` here cannot be a thread — the VM has one — so it has to be a
-// **child Zun process**, which is the same trade `child_process.fork` makes and
-// which keeps every observable fact a worker has *except* the shared heap:
-//
-//   * **The script.** The child runs a bundle produced by the same
-//     `tools/bundle_node_test.sh` machinery the tests go through, so the worker
-//     script gets this library inlined exactly as the parent did. `eval: true`
-//     bundles the string instead of a file.
-//   * **The handshake.** `isMainThread === false`, `threadId`, `workerData`,
-//     `environmentData` and `resourceLimits` are the *first* frame the parent
-//     writes to the child's stdin; the child's prologue reads it before running
-//     the script and installs `parentPort` as a `MessagePort` whose sibling is
-//     the pipe rather than another in-process port. That is the one place the
-//     class above needs a seam, and it already has it: a port with
-//     `__wtSibling === null` delivers nothing, so a pipe-backed port is a
-//     subclass that overrides `postMessage` and pushes onto `__wtQueue` from
-//     the reader.
-//   * **The framing.** `src/v8/v8.ts` is V8's value-serialization wire format
-//     over a `Buffer`, which is exactly what Node puts on a worker's message
-//     channel (`advanced` serialization in `child_process` terms). A frame is a
-//     4-byte length plus a `v8.serialize` payload, so a message is self
-//     delimiting and the structured-clone rules above are reused rather than
-//     re-derived.
-//   * **The events.** `online` fires when the child's prologue acknowledges the
-//     handshake; `message` per inbound frame; `error` for a frame carrying a
-//     serialized exception; `exit` with the child's exit code. `terminate()`
-//     kills the child and resolves with `1`. `stdout`/`stderr` are the child's
-//     pipes wrapped as `Readable`s, which `src/stream/stream.ts` already gives.
-//   * **What differs, and is documented rather than hidden**: a worker has its
-//     own heap, so a `SharedArrayBuffer` cannot be shared (the engine has none
-//     either); `process.exit()` in a worker ends only the worker, which a child
-//     process gives for free; and `process.env` is a copy unless `SHARE_ENV`,
-//     where a child process can only ever be a copy — `SHARE_ENV` is therefore
-//     a gap that needs a shared store, not a pipe.
-//
-// **The missing piece is a non-blocking read of the child's stdout.** The
-// parent must notice an inbound frame without blocking, which needs a
-// poll-based event loop over the pipe; `src/child_process/*.rs` has
-// `std::process::Command` and a blocking read, and the loop is being built on
-// another branch (`feat/net`, `src/io/`, not merged). This file deliberately
-// does **not** grow a socket loop of its own: when `src/io/` lands, `Worker`
-// needs the reader above and nothing else, because every rule a message obeys
-// on the way in and out is already here.
+// Then it starts the worker -- see "The Worker process" below.
 
 // The `execArgv` entries Node accepts for a worker: the per-isolate options.
 // Anything else — an unknown flag, or a per-*process* option such as `--title`
