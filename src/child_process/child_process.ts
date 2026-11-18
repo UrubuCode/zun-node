@@ -1779,6 +1779,9 @@ const __node_child_process: any = {
   },
 };
 
+// For tools/harness/common.ts' `common.spawnPromisified` (see src/io/io.ts).
+__libModules.child_process = __node_child_process;
+
 // `process.execPath` — the running interpreter. `process.ts` has no extension of
 // its own and has to keep compiling without `--ext`, so the field is filled in
 // here, the way `os.ts` fills in `process.pid`: whenever `child_process` is in

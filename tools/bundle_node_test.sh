@@ -59,13 +59,11 @@
 #     `pendingDeprecate`, `customPromisifyArgs`), which lives in
 #     `src/util/util.ts` for the same reason it lives in `lib/internal/util.js`
 #     in Node: it is the same module.
-#   * `test` is the other canonical-binding case, and the only entry that is
-#     *harness* code rather than library code: `node:test` is not a module
-#     zun-node implements, it is the language several of Node's newer test files
-#     are written in (`tools/harness/node_test.ts`). Its binding is the function
-#     `test`, because those files spell both `const test = require('node:test')`
-#     — where the module object is itself callable — and
-#     `const { test } = require('node:test')`.
+#   * `test` is the other canonical-binding case: `node:test` (src/test/) is
+#     callable, and Node's files spell both `const test = require('node:test')`
+#     -- where the module object is itself the function -- and
+#     `const { test } = require('node:test')`, so the binding is the function
+#     `test`, which carries `describe`/`it`/`mock`/`run`/... as properties.
 #
 # Anything else (`internal/event_target`, `net`, `v8`, `inspector`, ...) is
 # reported as an unresolved module and the bundle fails, so a missing harness
@@ -128,6 +126,41 @@ if command -v cygpath >/dev/null 2>&1; then TEST_PATH="$(cygpath -w "$TEST_PATH"
 TEST_DIR="$(dirname "$TEST_PATH")"
 if command -v cygpath >/dev/null 2>&1; then TEST_DIR="$(cygpath -w "$(dirname "$(cygpath -u "$TEST_PATH")")")"; fi
 json_string() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$/"/'; }
+
+# ES modules.
+#
+# A `.mjs` file (a test fixture `node --test` discovers, a file `run()` is
+# handed) is lowered to the CommonJS spelling the rest of this bundler
+# understands, one static `import` declaration per line:
+#
+#   import X from 'm';            ->  const X = require('m');
+#   import * as X from 'm';       ->  const X = require('m');
+#   import { a, b as c } from 'm' ->  const { a, b: c } = require('m');
+#   import X, { a } from 'm';     ->  const X = require('m'); const { a } = require('m');
+#   import 'm';                   ->  require('m');
+#
+# and a leading `export ` is dropped. Anything else ESM-only (`import.meta`,
+# top-level `await`, minified multi-import lines) is left as written. The
+# lowered copy is a temporary file; `__filename`, `__dirname` and the fixture
+# directory were taken from the original above.
+SRC_DIR="$(dirname "$SRC")"
+case "$SRC" in
+  *.mjs)
+    ESM_SRC="$(mktemp)"
+    perl -pe '
+      if (/^\s*import\s/) {
+        s/^(\s*)import\s+\*\s+as\s+([A-Za-z_\$][\w\$]*)\s+from\s+(["\x27][^"\x27]+["\x27])\s*;?/$1const $2 = require($3);/
+        or s/^(\s*)import\s+([A-Za-z_\$][\w\$]*)\s*,\s*\{([^}]*)\}\s*from\s+(["\x27][^"\x27]+["\x27])\s*;?/my ($i,$d,$n,$m)=($1,$2,$3,$4); $n =~ s#\bas\b#:#g; "${i}const $d = require($m); const {$n} = require($m);"/e
+        or s/^(\s*)import\s+\{([^}]*)\}\s*from\s+(["\x27][^"\x27]+["\x27])\s*;?/my ($i,$n,$m)=($1,$2,$3); $n =~ s#\bas\b#:#g; "${i}const {$n} = require($m);"/e
+        or s/^(\s*)import\s+([A-Za-z_\$][\w\$]*)\s+from\s+(["\x27][^"\x27]+["\x27])\s*;?/$1const $2 = require($3);/
+        or s/^(\s*)import\s+(["\x27][^"\x27]+["\x27])\s*;?/$1require($2);/;
+        s/require\("([^"]*)"\)/require(\x27$1\x27)/g;
+      }
+      s/^(\s*)export\s+default\s+/$1module.exports = /;
+      s/^(\s*)export\s+(?=(const|let|var|function|class|async)\b)/$1/;
+    ' "$SRC" > "$ESM_SRC"
+    SRC="$ESM_SRC";;
+esac
 
 # ---------------------------------------------------------------------------
 # The module table: <specifier> <module object> <canonical binding>
@@ -228,6 +261,9 @@ vm __node_vm Script,compileFunction,createContext
 crypto __node_crypto Hash,Hmac,Cipheriv,Decipheriv,KeyObject,Sign,Verify,ECDH,DiffieHellman,DiffieHellmanGroup
 [.][.]/common/crypto __node_harness_crypto -
 test __node_test test
+test/reporters __node_test_reporters -
+internal/test_runner/utils __node_internal_test_runner_utils -
+internal/timers __node_internal_timers -
 v8 __node_v8 Serializer,Deserializer,DefaultSerializer,DefaultDeserializer,GCProfiler
 tty __node_tty ReadStream,WriteStream
 internal/tty __node_internal_tty -
@@ -410,7 +446,12 @@ zlib src/buffer/buffer.ts
 zlib src/string_decoder/string_decoder.ts
 zlib src/stream/stream.ts
 zlib src/zlib/zlib.ts
-test tools/harness/node_test.ts
+test src/test/test.ts
+test src/test/mock.ts
+test/reporters src/test/test.ts
+test/reporters src/test/mock.ts
+internal/test_runner/utils src/test/test.ts
+internal/test_runner/utils src/test/mock.ts
 vm src/vm/vm.ts
 punycode src/punycode/deprecation.ts
 fs src/buffer/buffer.ts
@@ -562,15 +603,13 @@ module src/module/module.ts
 
 # The harness, which stands on everything above it.
 #
-# `tools/harness/node_test.ts` is *not* here: it declares a top-level
+# `src/test/test.ts` (`node:test`) is *not* here: it declares a top-level
 # `function test(...)`, which is the name several of Node's own test files give
 # their local helper (`test-buffer-tostring-rangeerror.js`,
 # `test-buffer-constructor-node-modules-paths.js`, `test-string-decoder.js`),
 # and two top-level declarations of one name are a compile error in a single
-# Zun program. Inlining it unconditionally therefore reported "duplicate
-# function declaration" for tests whose real blocker is something else
-# entirely. It is in CONDITIONAL_FILES above instead, under the one name it
-# provides (`test`), so only a test that actually requires it gets it.
+# Zun program. It is in CONDITIONAL_FILES above instead, under the names it
+# provides, so only a test that actually requires it gets it.
 HARNESS_FILES="
 tools/harness/common.ts
 "
@@ -823,6 +862,43 @@ done <<EOF_CONDITIONAL
 $CONDITIONAL_FILES
 EOF_CONDITIONAL
 
+# `node:test`'s `run()` (src/test/run.ts) stands on `child_process` (one child
+# per test file) and `fs` (default file discovery), which a bundle that only
+# declares tests should not pay for. It is appended when the bundle carries
+# src/test/test.ts and the test names `run` at all -- the destructured
+# `const { run } = require('node:test')` and the member read `test.run` both
+# match -- with the same append-once rule as the loop.
+case "
+$FILES" in *"
+src/test/test.ts
+"*)
+  if printf '%s' "$SRC_TEXT" | grep -Eq '(^|[^A-Za-z0-9_$.])run([^A-Za-z0-9_$]|$)|[.]run[(]'; then
+    for required in src/buffer/buffer.ts src/string_decoder/string_decoder.ts src/stream/stream.ts         src/child_process/child_process.ts src/fs/fs.ts src/fs/streams.ts src/fs/watchers.ts src/test/run.ts; do
+      case "
+$FILES" in *"
+$required
+"*) continue;; esac
+      FILES="$FILES$required
+"
+    done
+  fi;;
+esac
+
+# `common.spawnPromisified` (tools/harness/common.ts) spawns through
+# `child_process`, which a test calling only that helper never requires: the
+# module is appended for any test that names it, with the append-once rule.
+case "$SRC_TEXT" in *spawnPromisified*)
+  for required in src/buffer/buffer.ts src/string_decoder/string_decoder.ts src/stream/stream.ts \
+      src/child_process/child_process.ts; do
+    case "
+$FILES" in *"
+$required
+"*) continue;; esac
+    FILES="$FILES$required
+"
+  done;;
+esac
+
 # The `module` corpus always carries the resolver and the file system under it,
 # whether or not the test in hand spells `require('module')`; see
 # ZUN_NODE_REQUIRE above. The append-once rule is the loop's.
@@ -921,7 +997,7 @@ fi
 # methods (and a call to any other is a compile error, not a missing method), so
 # every bundle needs the real one. The two bindings that shadow the prelude are
 # in `src/console/global.ts`, split off for the same reason
-# `tools/harness/node_test.ts` is conditional: `test-console-table.js` and
+# `src/test/test.ts` is conditional: `test-console-table.js` and
 # `test-console-log-throw-primitive.js` declare their own top-level
 # `const console = new Console(...)`, and two top-level declarations of one name
 # are a compile error in a single Zun program. Such a test keeps its own
@@ -959,7 +1035,7 @@ esac
 # the only way to carry them out of it.
 REWRITE="$(mktemp)"
 LATE="$(mktemp)"
-trap 'rm -f "$REWRITE" "$LATE"' EXIT
+trap 'rm -f "$REWRITE" "$LATE" ${ESM_SRC:+"$ESM_SRC"}' EXIT
 
 # Every per-module rule below matches only that module's own `require(...)`
 # call, so a module the test never requires contributes nothing;
@@ -1568,7 +1644,9 @@ rm -f "$OUT.members"
 # quoted text are left alone.
 for shadow in setTimeout setInterval clearTimeout clearInterval queueMicrotask Blob File; do
   if grep -qE "^(export )?(async )?(function|class) $shadow\b" "$OUT"; then
-    perl -pi -e "s/(?<![.\\w\$'\"\`])$shadow\\b(?!\\s*:(?!:))/__zunShadow_$shadow/g" "$OUT"
+    # (`\\\$` reaches perl as `\$`: a bare `$'` inside the class would be
+    # perl's postmatch variable, which silently dropped the quote from it.)
+    perl -pi -e "s/(?<![.\\w\\\$'\"\`])$shadow\\b(?!\\s*:(?!:))/__zunShadow_$shadow/g" "$OUT"
   fi
 done
 # The rename above also hits a *class method* of the same name (`net.Socket`,
@@ -1586,7 +1664,7 @@ perl -pi -e 's/^(\s+(?:static\s+|async\s+)*)__zunShadow_(\w+)(\s*\([^()]*\)\s*(?
 # `.json` file as a parenthesized expression, a `.js` file as an IIFE that
 # hands its `module.exports` back. A missing fixture is left alone and fails
 # the unresolved-require check below.
-FIXTURE_DIR="$(cd "$(dirname "$SRC")/.." 2>/dev/null && pwd)/fixtures"
+FIXTURE_DIR="$(cd "$SRC_DIR/.." 2>/dev/null && pwd)/fixtures"
 if grep -q "fixtures\.path" "$OUT"; then
   FIXTURE_DIR="$FIXTURE_DIR" perl -0pi -e '
     sub __fixture {
@@ -1605,6 +1683,24 @@ if grep -q "fixtures\.path" "$OUT"; then
   ' "$OUT"
 fi
 
+
+# `mock.timers` and the bare `Date`.
+#
+# `MockTimers.enable({ apis: ['Date'] })` replaces `globalThis.Date`, as Node
+# does, but a bare `Date` in a bundle is the engine's intrinsic and never reads
+# the global, so `new Date()` and `Date.now()` would keep the real clock. In a
+# test that enables mock timers, every bare `Date` of the *test body* is
+# therefore spelled `globalThis.Date` (`new globalThis.Date(...)` reaches the
+# replacement; member reads, object keys and quoted text are left alone).
+if grep -q "timers\.enable" "$OUT" && grep -q "^// ==== test body ====" "$OUT"; then
+  perl -pi -e '
+    $body = 1 if /^\/\/ ==== test body ====/;
+    $body = 0 if /^\/\/ ==== harness epilogue/;
+    if ($body && !/^\s*\/\//) {
+      s{(\x27(?:[^\x27\\]|\\.)*\x27|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`)|(?<![.\w\$])Date\b(?!\s*:(?!:))}{defined $1 ? $1 : "globalThis.Date"}ge;
+    }
+  ' "$OUT"
+fi
 # Any `require` left over means the test needs a module the bundler does not
 # know; fail loudly rather than letting the engine report a mystery.
 if grep -n "require(" "$OUT" | grep -v "^[0-9]*: *[*/]" >/dev/null 2>&1; then

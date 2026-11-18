@@ -435,6 +435,21 @@ function __processSplitArgv(): any {
     split.script = raw[index];
     for (let i = index + 1; i < count; i++) split.rest.push(raw[i]);
   }
+  // Under the `node`-shaped launcher (src/bin/zun-node-run.rs) the engine's
+  // own options are not the program's: the Node flags the launcher was given
+  // (`--test-reporter=tap`, `--test-only`, ...) travel in ZUN_NODE_EXEC_ARGV,
+  // in the ZUN_NODE_ARGV encoding, and are what `process.execArgv` reports.
+  if (host.envHas("ZUN_NODE_EXEC_ARGV")) {
+    const packed: string = String(host.envGet("ZUN_NODE_EXEC_ARGV"));
+    if (packed.charAt(0) === "A") {
+      const flags: string[] = [];
+      const body: string = packed.slice(1);
+      if (body !== "") {
+        for (const entry of body.split("\u001f")) flags.push(entry);
+      }
+      split.execArgv = flags;
+    }
+  }
   return split;
 }
 

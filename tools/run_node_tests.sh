@@ -226,6 +226,10 @@ case "$MODULE" in
   # grew the datagram verbs in `src/io/udp.rs`; `src/dgram/dgram.ts` is the
   # module Node exposes: `Socket` as an `EventEmitter` over a UDP handle.
   dgram)  KIND="zun-ts+ext"; PATTERNS="test-dgram-";                       PATTERN="test-dgram-";;
+  # `node:test` (src/test). `+ext` because a third of the files spawn a child
+  # `node --test <fixture>` through child_process, and the rest read fs.
+  test_runner)
+          KIND="zun-ts+ext"; PATTERNS="test-runner-";                      PATTERN="test-runner-";;
 
   # `worker_threads`' corpus is four prefixes: `test-worker-` (the bulk, which
   # also selects `test-worker.js` itself), plus `test-messagechannel`,
@@ -257,6 +261,8 @@ if [ "$MODULE" = child_process ] && [ "$TIMEOUT" = 20 ]; then TIMEOUT=60; fi
 # A worker is a child Zun process that may bundle its own script first (see
 # "The Worker process" in src/worker_threads/worker_threads.ts).
 if [ "$MODULE" = worker_threads ] && [ "$TIMEOUT" = 20 ]; then TIMEOUT=240; fi
+# `node:test` files spawn `node --test` children, each bundled on demand.
+if [ "$MODULE" = test_runner ] && [ "$TIMEOUT" = 20 ]; then TIMEOUT=300; fi
 [ -n "$ZUN" ] || { echo "usage: --zun <path> [--ext <lib>] [--module fs|path|events|os|buffer|string_decoder]" >&2; exit 2; }
 case "$KIND" in
   extension)

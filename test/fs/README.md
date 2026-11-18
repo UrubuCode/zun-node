@@ -51,7 +51,7 @@ with no `--ext`):
   `hasEnoughSpace()` behave as Node's do; the directory is
   `<os temp>/.tmp.zun-node.<pid>` rather than one inside a Node checkout, since
   the only source tree in reach is the engine's.
-* **`tools/harness/node_test.ts`** — the `node:test` shim. It used to be
+* **`tools/harness/node_test.ts`** (now `src/test/test.ts`) — the `node:test` shim. It used to be
   inlined unconditionally, which broke every test file declaring its own
   `function test(...)` (eight in this corpus) with "duplicate function
   declaration".

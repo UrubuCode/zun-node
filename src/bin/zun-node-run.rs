@@ -43,9 +43,20 @@
 //! child is the bundle (not the original file); `__filename` and `__dirname`
 //! are the original's, because the bundler embeds them.
 //!
-//! What this is **not**: a Node. Node flags other than `-e`/`-p` are accepted
-//! and ignored, there is no REPL and no stdin script, and `--require`/`--import`
-//! preloads are skipped. It exists for the harness; it is a development tool.
+//! `zun-node-run --test [flags] [files...]` is Node's test-runner CLI: the
+//! launcher writes a two-line script that hands the `--test-*` flags and the
+//! files (none: Node's default discovery from the working directory) to
+//! `node:test`'s `run()` (src/test/run.ts' `__ntCli`), and runs that script as
+//! above.
+//!
+//! Every Node flag the launcher sees before the script reaches the child as
+//! its `process.execArgv`, through `ZUN_NODE_EXEC_ARGV` (`"A"` then the flags,
+//! `U+001F`-separated: the `ZUN_NODE_ARGV` convention).
+//!
+//! What this is **not**: a Node. Node flags other than `-e`/`-p`/`--test` are
+//! accepted and passed on as `execArgv`, but otherwise ignored; there is no REPL
+//! and no stdin script, and `--require`/`--import` preloads are skipped. It
+//! exists for the harness; it is a development tool.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -63,7 +74,115 @@ const VALUE_FLAGS: &[&str] = &[
     "--max-old-space-size",
     "--stack-size",
     "--title",
+    "--test-reporter",
+    "--test-reporter-destination",
+    "--test-name-pattern",
+    "--test-skip-pattern",
+    "--test-concurrency",
+    "--test-timeout",
+    "--test-shard",
+    "--test-isolation",
+    "--test-coverage-include",
+    "--test-coverage-exclude",
+    "--experimental-config-file",
 ];
+
+/// The Node flags before the script: every flag in `--test` mode, where the
+/// positional arguments are test files rather than a script.
+fn exec_flags(args: &[String]) -> Vec<String> {
+    let test_mode = args.iter().any(|a| a == "--test");
+    let mut out = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        if arg == "--" || matches!(arg, "-e" | "--eval" | "-p" | "--print" | "-pe" | "-ep") {
+            break;
+        }
+        if VALUE_FLAGS.contains(&arg) {
+            out.push(arg.to_owned());
+            if let Some(value) = args.get(index + 1) {
+                out.push(value.clone());
+            }
+            index += 2;
+        } else if arg.starts_with('-') && arg != "-" {
+            out.push(arg.to_owned());
+            index += 1;
+        } else if test_mode {
+            index += 1;
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+/// Whether `--test-isolation=none` (either spelling) is among the flags.
+fn isolation_none(flags: &[String]) -> bool {
+    flags.iter().any(|f| f == "--test-isolation=none")
+        || flags.windows(2).any(|w| w[0] == "--test-isolation" && w[1] == "none")
+}
+
+/// Node's default `--test` file patterns, from the working directory:
+/// `**/*.test.{c,m,}js`, `**/*-test.*`, `**/*_test.*`, `**/test-*.*`,
+/// `**/test.*` and anything under a `test` directory, minus `node_modules`.
+fn discover_tests() -> Vec<String> {
+    fn is_js(name: &str) -> bool {
+        name.ends_with(".js") || name.ends_with(".cjs") || name.ends_with(".mjs")
+    }
+    fn matches(name: &str, in_test_dir: bool) -> bool {
+        if !is_js(name) {
+            return false;
+        }
+        if in_test_dir {
+            return true;
+        }
+        let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+        stem == "test"
+            || stem.ends_with(".test")
+            || stem.ends_with("-test")
+            || stem.ends_with("_test")
+            || stem.starts_with("test-")
+    }
+    fn walk(dir: &Path, relative: &Path, in_test_dir: bool, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let mut names: Vec<_> = entries.flatten().collect();
+        names.sort_by_key(|e| e.file_name());
+        for entry in names {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name == "node_modules" || name.starts_with('.') {
+                continue;
+            }
+            let path = entry.path();
+            let rel = relative.join(&name);
+            if path.is_dir() {
+                walk(&path, &rel, in_test_dir || name == "test", out);
+            } else if matches(&name, in_test_dir) {
+                out.push(rel.to_string_lossy().into_owned());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        walk(&cwd, Path::new(""), false, &mut out);
+    }
+    out.sort();
+    out
+}
+
+/// `value` as a JavaScript string literal.
+fn js_string(value: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
 
 fn fail(message: &str) -> ExitCode {
     eprintln!("zun-node-run: {message}");
@@ -78,10 +197,32 @@ enum Source {
     File(PathBuf),
     /// `-e` (`false`) or `-p` (`true`): the program text and whether to print it.
     Text(String, bool),
+    /// `--test [files...]`: the test-runner CLI over these files.
+    Test(Vec<String>),
 }
 
 /// Split Node's command line into the program and the arguments it receives.
 fn parse(args: &[String]) -> Option<(Source, Vec<String>)> {
+    if args.iter().any(|a| a == "--test") {
+        let mut files = Vec::new();
+        let mut index = 0;
+        while index < args.len() {
+            let arg = args[index].as_str();
+            if arg == "--" {
+                files.extend(args[index + 1..].iter().cloned());
+                break;
+            }
+            if VALUE_FLAGS.contains(&arg) {
+                index += 2;
+                continue;
+            }
+            if !(arg.starts_with('-') && arg != "-") {
+                files.push(arg.to_owned());
+            }
+            index += 1;
+        }
+        return Some((Source::Test(files), Vec::new()));
+    }
     let mut index = 0;
     while index < args.len() {
         let arg = args[index].as_str();
@@ -250,9 +391,73 @@ fn main() -> ExitCode {
     };
 
     // `-e`/`-p` text becomes a file of its own so the bundler can take it.
-    let is_eval = matches!(source, Source::Text(..));
+    let flags = exec_flags(&args);
+    let is_eval = matches!(source, Source::Text(..) | Source::Test(..));
+    let mut cli_env: Vec<(String, String)> = Vec::new();
     let script = match source {
         Source::File(path) => path,
+        Source::Test(files) if isolation_none(&flags) => {
+            // `--test-isolation=none`: every file runs in this one process, as
+            // Node does it, so the files are concatenated -- each in a
+            // function of its own, which is the scope CommonJS gives it -- and
+            // the result runs as an ordinary script whose `node:test` root
+            // reports them all.
+            // A file that declares no test at all is reported as one passing
+            // test named after the file, which is what Node prints for it
+            // (`__ntFileMark`/`__ntFileDone`, src/test/test.ts).
+            let list = if files.is_empty() { discover_tests() } else { files };
+            let quoted_flags: Vec<String> = flags.iter().map(|f| js_string(f)).collect();
+            let quoted_files: Vec<String> = list.iter().map(|f| js_string(f)).collect();
+            let mut text = format!(
+                "require('node:test');\n__ntCliDebug([{}], [{}]);\n",
+                quoted_flags.join(", "),
+                quoted_files.join(", ")
+            );
+            for (index, file) in list.iter().enumerate() {
+                let Ok(source) = std::fs::read_to_string(file) else {
+                    let shown = std::path::absolute(file).unwrap_or_else(|_| PathBuf::from(file));
+                    eprintln!("Could not find '{}'", shown.display());
+                    return ExitCode::from(1);
+                };
+                text.push_str(&format!("const __zunFileMark{index} = __ntFileMark();\n(function () {{\n"));
+                text.push_str(&source);
+                text.push_str(&format!("\n}})();\n__ntFileDone({}, __zunFileMark{index});\n", js_string(file)));
+            }
+            let mut hasher = DefaultHasher::new();
+            text.hash(&mut hasher);
+            let directory = cache_dir();
+            if std::fs::create_dir_all(&directory).is_err() {
+                return fail("cannot create the cache directory");
+            }
+            // An `.mjs` member makes the whole program one, so the bundler
+            // lowers its `import` lines.
+            let extension = if list.iter().any(|f| f.ends_with(".mjs")) { "mjs" } else { "js" };
+            let file = directory.join(format!("test-none-{:016x}.{extension}", hasher.finish()));
+            if std::fs::write(&file, text).is_err() {
+                return fail("cannot write the test-runner script");
+            }
+            file
+        }
+        Source::Test(files) => {
+            // The flags and files travel in the environment rather than in
+            // the script, so every `--test` invocation shares one bundle. They
+            // are JSON arrays: `process.env` splits its own records on U+001F.
+            let json = |list: &[String]| format!("[{}]", list.iter().map(|v| js_string(v)).collect::<Vec<_>>().join(","));
+            cli_env.push(("ZUN_NODE_TEST_FLAGS".to_owned(), json(&flags)));
+            cli_env.push(("ZUN_NODE_TEST_FILES".to_owned(), json(&files)));
+            let text = "const { run } = require('node:test');\n\
+                        __ntCli(run, __ntCliEnvList('ZUN_NODE_TEST_FLAGS'), __ntCliEnvList('ZUN_NODE_TEST_FILES'));\n"
+                .to_owned();
+            let directory = cache_dir();
+            if std::fs::create_dir_all(&directory).is_err() {
+                return fail("cannot create the cache directory");
+            }
+            let file = directory.join("test-cli.js");
+            if std::fs::write(&file, text).is_err() {
+                return fail("cannot write the test-runner script");
+            }
+            file
+        }
         Source::Text(text, print) => {
             let mut hasher = DefaultHasher::new();
             text.hash(&mut hasher);
@@ -291,6 +496,10 @@ fn main() -> ExitCode {
     tail.extend(rest.iter().cloned());
     command.env("ZUN_NODE_ARGV", format!("A{}", tail.join("\u{1f}")));
     command.env("ZUN_NODE_DEPTH", (depth + 1).to_string());
+    command.env("ZUN_NODE_EXEC_ARGV", format!("A{}", flags.join("\u{1f}")));
+    for (name, value) in &cli_env {
+        command.env(name, value);
+    }
     command.arg(&bundled);
     match command.status() {
         Ok(status) => match status.code() {

@@ -286,7 +286,8 @@ function __zunHarnessStep(): void {
     __harnessLoop.deadline = 0;
   } else if (io > 0) {
     if (Number(__harnessLoop.deadline) === 0) {
-      __harnessLoop.deadline = Number(Date.now()) + __IO_DEADLINE_MS;
+      const budget: number = Number(__ioDeadlineOverride.ms) > 0 ? Number(__ioDeadlineOverride.ms) : __IO_DEADLINE_MS;
+      __harnessLoop.deadline = Number(Date.now()) + budget;
     }
   } else {
     __harnessLoop.rounds = Number(__harnessLoop.rounds) + 1;
@@ -407,6 +408,36 @@ const common: any = {
 
   // A skipped test is a pass in Node's TAP output; exit 0 so the runner agrees.
   // The pending call counts are abandoned, because the test never ran.
+  // Node's `common.spawnPromisified(...)`: `spawn` collecting both streams,
+  // resolving `{ code, signal, stderr, stdout }` on 'close' (rejecting with
+  // the same shape on 'error'). It reaches `child_process` through
+  // `__libModules`, because the harness is inlined into bundles that do not
+  // carry that module.
+  spawnPromisified(file?: any, args?: any, options?: any): any {
+    const cp: any = __libModules.child_process;
+    if (cp === undefined || cp === null) {
+      throw new Error("common.spawnPromisified: child_process is not in this bundle");
+    }
+    const state: any = { stdout: "", stderr: "" };
+    const child: any = cp.spawn(file, args, options);
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (data: any) => {
+      state.stderr = state.stderr + String(data);
+    });
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (data: any) => {
+      state.stdout = state.stdout + String(data);
+    });
+    return new Promise((resolve: any, reject: any) => {
+      child.on("close", (code: any, signal: any) => {
+        resolve({ code: code, signal: signal, stderr: state.stderr, stdout: state.stdout });
+      });
+      child.on("error", (code: any, signal: any) => {
+        reject({ code: code, signal: signal, stderr: state.stderr, stdout: state.stdout });
+      });
+    });
+  },
+
   skip(message: string): void {
     __harnessState.skipped = true;
     console.log("1..0 # Skipped: " + message);
