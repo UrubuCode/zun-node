@@ -104,6 +104,7 @@ use crate::fs::base64;
 use crate::Descriptor;
 
 pub(crate) mod sys;
+pub(crate) mod udp;
 
 #[cfg(test)]
 mod tests;
@@ -131,6 +132,8 @@ enum Kind {
     Listener,
     /// A connected or connecting stream.
     Stream,
+    /// A datagram (UDP) socket: readable means a datagram is waiting.
+    Datagram,
 }
 
 /// One row of the handle table.
@@ -144,6 +147,9 @@ struct Handle {
     /// True until a non-blocking `connect` has settled, which is what makes a
     /// writable event mean "connected" rather than "drained".
     connecting: bool,
+    /// True for an IPv6 datagram socket (`udp6`); the option numbers differ by
+    /// family and an unbound Windows socket cannot be asked.
+    ipv6: bool,
 }
 
 /// Every live handle, keyed by the number published to the program.
@@ -152,6 +158,12 @@ static TABLE: Mutex<Option<HashMap<i64, Handle>>> = Mutex::new(None);
 /// The next handle number to publish. 1-based, so `0` is never a valid handle
 /// and the TypeScript side can use it as "none".
 static NEXT_HANDLE: AtomicI64 = AtomicI64::new(1);
+
+/// The next handle number, from the one counter every kind of handle shares —
+/// sockets here, pipes and processes in `child_process::asyncp`.
+pub(crate) fn next_handle() -> i64 {
+    NEXT_HANDLE.fetch_add(1, Ordering::Relaxed)
+}
 
 fn with_table<R>(action: impl FnOnce(&mut HashMap<i64, Handle>) -> R) -> R {
     let mut guard = TABLE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -282,7 +294,7 @@ fn handle_of<R>(
 fn publish(raw: sys::Raw, kind: Kind, connecting: bool) -> i64 {
     let id = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
     with_table(|table| {
-        table.insert(id, Handle { raw, kind, interest: 0, connecting });
+        table.insert(id, Handle { raw, kind, interest: 0, connecting, ipv6: false });
     });
     id
 }
@@ -805,6 +817,10 @@ unsafe extern "C" fn reset(args: *const ZunValue, n: usize, out: *mut ZunValue) 
 unsafe extern "C" fn close(args: *const ZunValue, n: usize, out: *mut ZunValue) -> i32 {
     // SAFETY: the host passes `n` initialized values matching the descriptor.
     let id = unsafe { arg_i64(args, n, 0) };
+    if crate::child_process::asyncp::owns(id) {
+        crate::child_process::asyncp::close(id);
+        return unsafe { ret_str(out, &ok()) };
+    }
     if let Some(handle) = with_table(|table| table.remove(&id)) {
         if handle.raw != sys::INVALID {
             sys::close(handle.raw);
@@ -830,6 +846,10 @@ unsafe extern "C" fn interest(args: *const ZunValue, n: usize, out: *mut ZunValu
     let id = unsafe { arg_i64(args, n, 0) };
     // SAFETY: as above.
     let mask = unsafe { arg_i64(args, n, 1) } as u8;
+    if crate::child_process::asyncp::owns(id) {
+        crate::child_process::asyncp::set_interest(id, mask);
+        return unsafe { ret_str(out, &ok()) };
+    }
     let payload = match handle_of(id, "poll", |handle| {
         handle.interest = mask & (sys::READ | sys::WRITE);
     }) {
@@ -872,10 +892,46 @@ unsafe extern "C" fn poll(args: *const ZunValue, n: usize, out: *mut ZunValue) -
             .collect()
     });
 
+    use crate::child_process::asyncp;
     let mut masks: Vec<sys::PollItem> = items.iter().map(|(_, item)| *item).collect();
-    if let Err(err) = sys::poll(&mut masks, timeout) {
-        // SAFETY: `out` is a writable Str return.
-        return unsafe { ret_str(out, &fail_io("poll", &err, "")) };
+    // Children's pipes and exits are not sockets; see `asyncp.rs`. Read the
+    // generation first so a change landing while we look is not missed.
+    let seen = asyncp::generation();
+    let children = asyncp::active();
+    let mut child_ready = if children { asyncp::ready() } else { Vec::new() };
+    if children && child_ready.is_empty() {
+        if masks.is_empty() {
+            // Nothing to select on: sleep on the wake-up channel.
+            asyncp::wait(seen, timeout);
+            child_ready = asyncp::ready();
+        } else {
+            // Select in one-millisecond slices, looking at the children in
+            // between.
+            let deadline =
+                std::time::Instant::now() + std::time::Duration::from_millis(timeout as u64);
+            loop {
+                for item in masks.iter_mut() {
+                    item.revents = 0;
+                }
+                if let Err(err) = sys::poll(&mut masks, 1) {
+                    // SAFETY: `out` is a writable Str return.
+                    return unsafe { ret_str(out, &fail_io("poll", &err, "")) };
+                }
+                child_ready = asyncp::ready();
+                if masks.iter().any(|m| m.revents != 0)
+                    || !child_ready.is_empty()
+                    || std::time::Instant::now() >= deadline
+                {
+                    break;
+                }
+            }
+        }
+    } else {
+        let wait = if child_ready.is_empty() { timeout } else { 0 };
+        if let Err(err) = sys::poll(&mut masks, wait) {
+            // SAFETY: `out` is a writable Str return.
+            return unsafe { ret_str(out, &fail_io("poll", &err, "")) };
+        }
     }
     for ((_, item), polled) in items.iter_mut().zip(masks.iter()) {
         item.revents = polled.revents;
@@ -886,6 +942,9 @@ unsafe extern "C" fn poll(args: *const ZunValue, n: usize, out: *mut ZunValue) -
         if item.revents != 0 {
             records.push(format!("{id}{US}{}", item.revents));
         }
+    }
+    for id in child_ready {
+        records.push(format!("{id}{US}{}", sys::READ));
     }
     let payload = format!("+{}", records.join(&RS.to_string()));
     // SAFETY: `out` is a writable Str return.

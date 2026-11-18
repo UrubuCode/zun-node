@@ -161,6 +161,23 @@ longer lists it, and `test/parallel/test-buffer-slow.js` at `v25.0.0` tests
 `Buffer.allocUnsafeSlow` instead. Exporting one would be inventing API the
 oracle does not have.
 
+## Update: engine fixes on `fix/buffer-gaps`
+
+With the engine branch `fix/buffer-gaps`, 37 of 64 tests pass (see `RESULTS.md`).
+Groups A (a `number`/`any` as size, offset, index or fill byte) and most of B
+(`Buffer.compare`, `isEncoding`, `of`, `allocUnsafeSlow`, `copyBytesFrom`,
+`poolSize`, `buf.compare`, `toJSON`, `.parent`) are closed: every argument now
+reaches the intrinsics as a raw `any` and Node's own validation and `ERR_*`
+errors (code, name, message) are reproduced. Also fixed in the engine:
+`Buffer()` / `new Buffer()`, `x instanceof Buffer`, `buf[name](...args)` and
+spread calls on byte views, `[...buf]`, expando properties on a Buffer,
+`s += buf` / `String(buf)` / `JSON.stringify(buf)`, `ascii` encoding, strict
+hex decoding, `swap16/32/64` errors, BigInt `===` by value. The tables below
+describe the earlier state; rows for the fixed items are historical.
+Still open: Function-constructor/prototype tests (group F), `internalBinding`
+harness tests, `let x = 'str'; x = buf` (static typing), resizable/Shared
+ArrayBuffer, and tests needing `crypto` natives (no `--ext` for this module).
+
 ## Status and what blocks the rest
 
 [`RESULTS.md`](RESULTS.md) is the live per-test table with the first line of

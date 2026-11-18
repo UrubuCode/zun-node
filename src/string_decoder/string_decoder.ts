@@ -217,7 +217,8 @@ class StringDecoder {
   __lc3: number = 0;
 
   constructor(encoding?: any) {
-    const normalized = __bufNormalizeEncoding(encoding);
+    // `normalizeEncoding` (lib/internal/util.js): `null` means utf8, like `undefined`.
+    const normalized = __bufNormalizeEncoding(encoding === null ? undefined : encoding);
     if (normalized === "") {
       throw new ERR_UNKNOWN_ENCODING(encoding);
     }

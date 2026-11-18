@@ -155,30 +155,26 @@ Both are described at the top of `src/stream/stream.ts`; in short:
    carries no methods to reflect over
    ([zun#51](https://github.com/UrubuCode/zun/issues/51)).
 
-## The one deliberate deviation: byte-mode strings stay strings
+## Byte-mode chunks are Buffers (formerly the one deliberate deviation)
 
-Node converts a pushed or written **string** to a `Buffer` in non-object mode.
-That is not expressible here and would not help if it were:
+Node converts a pushed or written **string**, and any `ArrayBufferView`, to a
+`Buffer` in non-object mode. Earlier engine builds could not build or read
+such a Buffer through `any` (zun#58, zun#38, zun#55), so strings stayed
+strings. The engine now builds a usable Buffer from a typed `string` local and
+from a view's `buffer`/`byteOffset`/`byteLength`, so `__sStrToBuf` and
+`__sAbvToBuf` convert exactly where Node does: `write()` with `decodeStrings`,
+`push()`/`unshift()` without a matching decoder, and every view kind. A Buffer
+is passed through as is, keeping its identity.
 
-* `Buffer.from(chunk)` does not compile when `chunk` is an `any`
-  ([zun#58](https://github.com/UrubuCode/zun/issues/58)), which every chunk in
-  this module is;
-* a byte view read back through an `any` has no `length`, no index and no
-  `toString` ([zun#38](https://github.com/UrubuCode/zun/issues/38)), so the
-  Buffer would be unreachable to the test that received it;
-* the GC does not trace a view's backing store
-  ([zun#55](https://github.com/UrubuCode/zun/issues/55)), so it would not be
-  safe either.
+Remaining gap: a plain `Uint8Array` answers `true` to `Buffer.isBuffer` and
+`instanceof Buffer` ([zun#113](https://github.com/UrubuCode/zun/issues/113)),
+so object-mode tests that assert a view is *not* a Buffer still fail.
 
-So a string chunk stays a string, and the **accounting still uses Node's
-numbers**: `__sChunkLen` charges a string its UTF-8 byte length, which is what
-`Buffer.byteLength` would have charged, so `highWaterMark`, `readableLength`,
-`writableLength` and the `drain` threshold all agree with Node. A chunk that
-arrives *as* a Buffer or `Uint8Array` is passed through untouched and measured
-through the typed `Buffer` lane, which does work. The visible cost is
-`Buffer.isBuffer(chunk)` answering `false` for a chunk the test pushed as a
-string, and `read(n)` slicing by code unit rather than by byte for a
-multi-byte string. The deviation lives in one function.
+Measured 2026-11-18 on Windows with the rebuilt engine: **118 / 204** (was
+111 / 204). The bundler also renames shim declarations that collide with new
+engine globals (`setTimeout`, `Blob`, ...;
+[zun#111](https://github.com/UrubuCode/zun/issues/111)) — without it every
+bundle failed to compile.
 
 ## What is absent, and why
 

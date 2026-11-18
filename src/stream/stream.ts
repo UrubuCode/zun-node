@@ -65,17 +65,11 @@
 //     `Any` lane arrives as a `functionBox` record (zun#17, zun#50).
 //   * `Number(x.length)` throughout: `.length` is typed `u64` at the type
 //     level (zun#3).
-//   * byte-mode string chunks stay **strings** rather than becoming Buffers.
-//     `Buffer.from(chunk)` does not compile when `chunk` is an `any`
-//     (zun#58), a byte view read back through an `any` has no `length`,
-//     no index and no `toString` (zun#38), and the GC frees a live view's
-//     backing store (zun#55) — so a Buffer built here would be both
-//     unreachable to the test and unsafe. The accounting still uses Node's
-//     numbers: `__sChunkLen` charges a string its **UTF-8 byte length**, which
-//     is what Node's `Buffer.byteLength` would have charged. A chunk that
-//     arrives *as* a Buffer or `Uint8Array` is passed through untouched and
-//     measured through the typed `Buffer` lane (`__sViewLen`), which does work.
-//     This is the module's one deliberate deviation and it lives in one place.
+//   * byte-mode string chunks become Buffers where Node converts them
+//     (`push` without a matching decoder, `write` with `decodeStrings`), built
+//     by `__sStrToBuf` from a typed `string` local: `Buffer.from(chunk)` on an
+//     `any` operand does not compile (zun#58). A string that Node keeps as a
+//     string (a decoder is installed) is still charged by `__sChunkLen`.
 //   * `__sTryConstruct` runs `_construct` synchronously from the constructor
 //     instead of on the next tick, because presence can only be discovered by
 //     calling it (see 2 above). The completion callback still defers through
@@ -352,6 +346,32 @@ function __sChunkLen(state: any, chunk: any): number {
   if (chunk === null || chunk === undefined) return 0;
   const reported: any = chunk.length;
   return typeof reported === "number" ? Number(reported) : 0;
+}
+
+// Any ArrayBufferView (`ArrayBuffer.isView`): what a byte-mode stream accepts
+// besides a string.
+function __sIsAbv(value: any): boolean {
+  if (value === null || value === undefined || typeof value !== "object") return false;
+  return ArrayBuffer.isView(value) === true;
+}
+
+// `Stream._uint8ArrayToBuffer`: a Buffer over the same bytes, without a copy.
+// A Buffer is passed through as is, so its identity survives the stream.
+function __sAbvToBuf(chunk: any): any {
+  if (__sIsView(chunk)) return chunk;
+  const view: Uint8Array = chunk;
+  const out = Buffer.from(view.buffer, view.byteOffset, view.byteLength);
+  const boxed: any = out;
+  return boxed;
+}
+
+// `Buffer.from(string, encoding)` behind a typed `string` local, the shape
+// the engine builds a usable Buffer from.
+function __sStrToBuf(chunk: any, encoding: any): any {
+  const text: string = String(chunk);
+  const out = Buffer.from(text, encoding);
+  const view: any = out;
+  return view;
 }
 
 function __sViewSlice(view: Buffer, from: number, to: number): Buffer {
@@ -1597,11 +1617,13 @@ function __sPushByteMode(stream: any, state: any, chunk: any, encoding: any): bo
   if (typeof value === "string") {
     if (enc === undefined || enc === null || enc === "") enc = state.defaultEncoding;
     // Node converts the string to a Buffer here unless the stored encoding
-    // already matches. The engine cannot build a usable Buffer from an `any`
-    // string (see the Buffer note in the header), so the string is kept and
-    // `__sChunkLen` charges its UTF-8 byte length.
-    if (state.encoding !== enc) enc = "";
-  } else if (__sIsView(value)) {
+    // already matches.
+    if (state.encoding !== enc) {
+      value = __sStrToBuf(value, enc);
+      enc = "";
+    }
+  } else if (__sIsAbv(value)) {
+    value = __sAbvToBuf(value);
     enc = "";
   } else if (value !== undefined) {
     __sErrorOrDestroy(
@@ -1690,7 +1712,9 @@ function __sUnshiftByteMode(stream: any, state: any, chunk: any, encoding: any):
     if (state.encoding !== enc && state.encoding !== null && state.encoding !== undefined) {
       value = String(value);
     }
-  } else if (!__sIsView(value) && value !== undefined) {
+  } else if (__sIsAbv(value)) {
+    value = __sAbvToBuf(value);
+  } else if (value !== undefined) {
     __sErrorOrDestroy(
       stream,
       new ERR_INVALID_ARG_TYPE("chunk", ["string", "Buffer", "TypedArray", "DataView"], value),
@@ -2738,12 +2762,13 @@ function __sWriteImpl(stream: any, chunk: any, encoding: any, cb: any): any {
       throw new ERR_UNKNOWN_ENCODING(enc);
     }
     if (typeof value === "string") {
-      // Node turns the string into a Buffer when `decodeStrings` is on; the
-      // string is kept here (see the Buffer note in the header) and the
-      // encoding tag still becomes 'buffer' so `_writev` reports `allBuffers`
-      // the way Node does.
-      if (state.decodeStrings !== false) enc = "buffer";
-    } else if (__sIsView(value)) {
+      // Node turns the string into a Buffer when `decodeStrings` is on.
+      if (state.decodeStrings !== false) {
+        value = __sStrToBuf(value, enc);
+        enc = "buffer";
+      }
+    } else if (__sIsAbv(value)) {
+      value = __sAbvToBuf(value);
       enc = "buffer";
     } else {
       throw new ERR_INVALID_ARG_TYPE(
@@ -5256,12 +5281,12 @@ const __node_stream: any = {
   // is the identity. `Stream.Stream` is the `Stream` entry above, which is how
   // Node keeps its node-0.4 alias.
   _isArrayBufferView(value: any): boolean {
-    return __sIsView(value);
+    return __sIsAbv(value);
   },
   _isUint8Array(value: any): boolean {
     return __sIsView(value);
   },
   _uint8ArrayToBuffer(chunk: any): any {
-    return chunk;
+    return __sAbvToBuf(chunk);
   },
 };

@@ -6,7 +6,7 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-url*|test-whatwg-url-*.js`. Ge
 <!-- node-url:start -->
 ### Node.js v25 `url` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **34.0%** — 15 / 44 Node `test-url*|test-whatwg-url-*` tests passing
+`████████░░░░░░░░░░░░░░░░` **36.3%** — 16 / 44 Node `test-url*|test-whatwg-url-*` tests passing
 <!-- node-url:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
@@ -23,8 +23,8 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-url-parse-format.js` | ✅ pass | |
 | `test-url-parse-invalid-input.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
 | `test-url-parse-query.js` | ✅ pass | |
-| `test-url-pathtofileurl.js` | ❌ type error | bundles/test-url-pathtofileurl.ts:19972:38: error: [SEM0001] spread arguments are not lowered yet |
-| `test-url-relative.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-url-pathtofileurl.js` | ❌ type error | bundles/test-url-pathtofileurl.ts:20568:38: error: [SEM0001] spread arguments are not lowered yet |
+| `test-url-relative.js` | ✅ pass | |
 | `test-url-revokeobjecturl.js` | ✅ pass | |
 | `test-url-urltooptions.js` | ✅ pass | |
 | `test-urlpattern-invalidthis.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
@@ -36,24 +36,24 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-whatwg-url-custom-href-side-effect.js` | ✅ pass | |
 | `test-whatwg-url-custom-inspect.js` | ✅ pass | |
 | `test-whatwg-url-custom-parsing.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-whatwg-url-custom-parsing.js: |
-| `test-whatwg-url-custom-properties.js` | ❌ unsupported import/require | bundles/test-whatwg-url-custom-properties.ts:19892:28: error: [SEM0001] 'delete' requires an object receiver,  |
-| `test-whatwg-url-custom-searchparams-append.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-append.ts:19866:5: error: [SEM0001] 'call' passes 1 argument(s) in |
+| `test-whatwg-url-custom-properties.js` | ❌ unsupported import/require | bundles/test-whatwg-url-custom-properties.ts:20488:28: error: [SEM0001] 'delete' requires an object receiver,  |
+| `test-whatwg-url-custom-searchparams-append.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-append.ts:20462:5: error: [SEM0001] 'call' passes 1 argument(s) in |
 | `test-whatwg-url-custom-searchparams-constructor.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-whatwg-url-custom-searchparams-delete.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-delete.ts:19866:5: error: [SEM0001] 'call' passes 1 argument(s) in |
+| `test-whatwg-url-custom-searchparams-delete.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-delete.ts:20462:5: error: [SEM0001] 'call' passes 1 argument(s) in |
 | `test-whatwg-url-custom-searchparams-entries.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-whatwg-url-custom-searchparams-foreach.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-foreach.ts:19866:5: error: [SEM0001] 'call' passes 1 argument(s) i |
-| `test-whatwg-url-custom-searchparams-get.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-get.ts:19866:5: error: [SEM0001] 'call' passes 1 argument(s) inclu |
-| `test-whatwg-url-custom-searchparams-getall.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-getall.ts:19866:5: error: [SEM0001] 'call' passes 1 argument(s) in |
-| `test-whatwg-url-custom-searchparams-has.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-has.ts:19866:5: error: [SEM0001] 'call' passes 1 argument(s) inclu |
+| `test-whatwg-url-custom-searchparams-foreach.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-foreach.ts:20462:5: error: [SEM0001] 'call' passes 1 argument(s) i |
+| `test-whatwg-url-custom-searchparams-get.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-get.ts:20462:5: error: [SEM0001] 'call' passes 1 argument(s) inclu |
+| `test-whatwg-url-custom-searchparams-getall.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-getall.ts:20462:5: error: [SEM0001] 'call' passes 1 argument(s) in |
+| `test-whatwg-url-custom-searchparams-has.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-has.ts:20462:5: error: [SEM0001] 'call' passes 1 argument(s) inclu |
 | `test-whatwg-url-custom-searchparams-inspect.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-whatwg-url-custom-searchparams-keys.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-whatwg-url-custom-searchparams-set.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-set.ts:19866:5: error: [SEM0001] 'call' passes 1 argument(s) inclu |
+| `test-whatwg-url-custom-searchparams-set.js` | ❌ type error | bundles/test-whatwg-url-custom-searchparams-set.ts:20462:5: error: [SEM0001] 'call' passes 1 argument(s) inclu |
 | `test-whatwg-url-custom-searchparams-sort.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-whatwg-url-custom-searchparams-sort.js: |
-| `test-whatwg-url-custom-searchparams-stringifier.js` | ❌ engine panic | thread '<unnamed>' (41336) panicked at crates\zun_interp\src\value.rs:228:22: |
+| `test-whatwg-url-custom-searchparams-stringifier.js` | ❌ engine panic | thread '<unnamed>' (34776) panicked at crates\zun_interp\src\value.rs:228:22: |
 | `test-whatwg-url-custom-searchparams-values.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-whatwg-url-custom-searchparams.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-whatwg-url-custom-searchparams.js: |
 | `test-whatwg-url-custom-setters.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-whatwg-url-custom-setters.js: |
 | `test-whatwg-url-custom-tostringtag.js` | ❌ assertion | AssertionError [strictEqual]: undefined !== URL |
-| `test-whatwg-url-invalidthis.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
+| `test-whatwg-url-invalidthis.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-whatwg-url-override-hostname.js` | ✅ pass | |
 | `test-whatwg-url-properties.js` | ❌ assertion | AssertionError [notStrictEqual]: Expected "actual" to be strictly unequal to: |

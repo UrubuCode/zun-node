@@ -93,8 +93,8 @@ A Node module lands here in whichever form fits what it actually does:
   not need — a file's *bytes* cannot ride a NUL-terminated string carrier, so
   they cross base64 and the TypeScript side turns them into the engine's
   prelude `Buffer`. **`child_process` is the third**: `src/child_process/*.rs`
-  spawns a child and waits for it (`std::process::Command`, a thread per pipe, a
-  timeout with a chosen kill signal), while
+  spawns a child and either waits for it or streams it through the I/O loop
+  (`std::process::Command`, a thread per pipe, a timeout with a chosen kill signal), while
   [`src/child_process/child_process.ts`](src/child_process/child_process.ts)
   holds the module Node exposes — the argument normalizers, the shell rules, the
   `stdio` grammar and the result object. A spawn request cannot cross one scalar
@@ -211,7 +211,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-fs:start -->
 ### Node.js v25 `fs` compatibility
 
-`██████████░░░░░░░░░░░░░░` **42.2%** — 96 / 227 Node `test-fs-*` tests passing
+`███████████░░░░░░░░░░░░░` **49.7%** — 113 / 227 Node `test-fs-*` tests passing
 <!-- node-fs:end -->
 
 > `fs` is implemented as **TS over natives**, the `os` kind: `src/fs/*.rs` holds
@@ -240,7 +240,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-util:start -->
 ### Node.js v25 `util` compatibility
 
-`██████░░░░░░░░░░░░░░░░░░` **26.9%** — 7 / 26 Node `test-util*` tests passing
+`███████░░░░░░░░░░░░░░░░░` **30.7%** — 8 / 26 Node `test-util*` tests passing
 <!-- node-util:end -->
 
 > `util` is implemented end to end — `inspect` with every option Node documents
@@ -332,7 +332,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-path:start -->
 ### Node.js v25 `path` compatibility
 
-`█████████████████████░░░` **88.2%** — 15 / 17 Node `test-path*` tests passing
+`██████████████████████░░` **94.1%** — 16 / 17 Node `test-path*` tests passing
 <!-- node-path:end -->
 
 > `path` already runs the whole Node corpus, so its number is a real measurement.
@@ -353,7 +353,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
 
-`████████████░░░░░░░░░░░░` **51.4%** — 18 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+`███████████████░░░░░░░░░` **62.8%** — 22 / 35 Node `test-event-emitter-*|test-events-*` tests passing
 <!-- node-events:end -->
 
 > `events` is implemented end to end — the whole `EventEmitter` surface, every
@@ -447,7 +447,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-buffer:start -->
 ### Node.js v25 `buffer` compatibility
 
-`██░░░░░░░░░░░░░░░░░░░░░░` **9.3%** — 6 / 64 Node `test-buffer*` tests passing
+`█████████████░░░░░░░░░░░` **57.8%** — 37 / 64 Node `test-buffer*` tests passing
 <!-- node-buffer:end -->
 
 > `buffer` is the first module whose central object is **the engine's**, not
@@ -570,7 +570,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-url:start -->
 ### Node.js v25 `url` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **34.0%** — 15 / 44 Node `test-url*|test-whatwg-url-*` tests passing
+`████████░░░░░░░░░░░░░░░░` **36.3%** — 16 / 44 Node `test-url*|test-whatwg-url-*` tests passing
 <!-- node-url:end -->
 
 > `url` is implemented end to end, on both of its halves. `src/url/url.ts` is
@@ -629,7 +629,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-timers:start -->
 ### Node.js v25 `timers` compatibility
 
-`████████████░░░░░░░░░░░░` **53.4%** — 31 / 58 Node `test-timers*` tests passing
+`█████████████░░░░░░░░░░░` **56.8%** — 33 / 58 Node `test-timers*` tests passing
 <!-- node-timers:end -->
 
 > `timers` is the first module whose *substance* was already in the engine: the
@@ -672,7 +672,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-process:start -->
 ### Node.js v25 `process` compatibility
 
-`███████████░░░░░░░░░░░░░` **45.8%** — 44 / 96 Node `test-process-*` tests passing
+`████████████░░░░░░░░░░░░` **53.1%** — 51 / 96 Node `test-process-*` tests passing
 <!-- node-process:end -->
 
 > `process` is the module every other bundle in this library stands on, and the
@@ -692,51 +692,44 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-child_process:start -->
 ### Node.js v25 `child_process` compatibility
 
-`░░░░░░░░░░░░░░░░░░░░░░░░` **3.6%** — 4 / 109 Node `test-child-process*` tests passing
+`███████░░░░░░░░░░░░░░░░░` **31.1%** — 34 / 109 Node `test-child-process*` tests passing
 <!-- node-child_process:end -->
 
-> `child_process` is **TS over natives** (the `os` kind) and deliberately **half
-> a module**: `src/child_process/*.rs` runs one child to completion with
+> `child_process` is **TS over natives** (the `os` kind), **both halves**, the
+> asynchronous one over the shared I/O loop in `src/io/` that `net` and `dgram`
+> use. `src/child_process/spawn.rs` runs one child to completion with
 > `std::process::Command` plus the three things `Command` does not do on its own
-> (feed stdin from its own thread so it cannot deadlock against the child's
-> output, enforce a timeout and kill with a *chosen* signal — `libc::kill` on
-> POSIX, since `Child::kill` is hard-wired to `SIGKILL` and Node's default is
-> `SIGTERM` — and cap a pipe at `maxBuffer` with `ENOBUFS`), and
-> [`src/child_process/child_process.ts`](src/child_process/child_process.ts) is
-> Node's shape: `spawnSync`, `execSync`, `execFileSync` with Node's three
-> argument normalizers, the `cmd.exe /d /s /c "<command>"` and `/bin/sh -c`
-> shells, the `stdio` grammar, `encoding`, the result object with its `output`
-> array, `convertToValidSignal`, the null-byte rejection and
-> `checkExecSyncError`'s two kinds of throw. The async half is a **stated gap**:
-> a `ChildProcess` is an `EventEmitter` whose `stdin`/`stdout`/`stderr` are
-> `node:stream` objects, so `spawn` and `fork` throw
-> `ERR_METHOD_NOT_IMPLEMENTED` rather than pretending — while `exec` and
-> `execFile` *are* here, because their callback contract is reproducible without
-> streams (the child runs through the sync native and only the callback is
-> deferred, through `process.nextTick`). The number is low for two reasons, and
-> the second one matters more than the first: about seventy of the files need
-> that async half, and about twenty re-run **themselves** with
-> `spawnSync(process.execPath, [__filename, 'child'])`. `process.execPath` is
-> real here (`cpExecPath()` is the host's own executable, i.e. the `zun`
-> binary), but the child would be handed a raw CommonJS test file the engine
-> cannot run ([zun#4](https://github.com/UrubuCode/zun/issues/4)) — it would
-> have to be bundled first, which is a harness capability this library does not
-> have yet. The module is therefore verified directly instead: 15 native tests
-> through the real `cpSpawnSync` entry point (the wire grammar, the spawn and
-> the reply encoder together) plus a differential pass over the TypeScript layer against
-> Node on commands that need no Node child. One real bug came out of that: on
-> Windows `Command::arg` applies MSVCRT quoting, which turned
-> `cmd /d /s /c "echo hi"` into `cmd /d /s /c "\"echo hi\""` and made every
-> shell command an unknown program — the Windows shell path uses `raw_arg` now,
-> which is what libuv's `UV_PROCESS_WINDOWS_VERBATIM_ARGUMENTS` is for. Blocker
-> table: [`test/child_process/README.md`](test/child_process/README.md);
-> per-test breakdown:
-> [`test/child_process/RESULTS.md`](test/child_process/RESULTS.md).
+> (feed stdin from its own thread, enforce a timeout and kill with a *chosen*
+> signal, and cap a pipe at `maxBuffer` with `ENOBUFS`) — `spawnSync`,
+> `execSync`, `execFileSync`. `src/child_process/asyncp.rs` starts a child and
+> returns: each stdio pipe is drained by a small thread into a bounded buffer (a
+> reader that falls behind makes the child block, which is real backpressure), a
+> thread waits on the child, and every thread wakes the loop through one
+> condition variable, because an anonymous pipe cannot be put in a Windows
+> `select` set and a child's exit cannot be polled on POSIX either.
+> [`child_process.ts`](src/child_process/child_process.ts) is Node's shape on top
+> of it: `ChildProcess` (an `EventEmitter` with `stdin`/`stdout`/`stderr` as
+> `Writable`/`Readable`, `pid`, `exitCode`, `signalCode`, `kill`, `ref`/`unref`,
+> `'spawn'`/`'exit'`/`'close'`/`'error'` in Node's order), `spawn` with
+> `timeout`/`killSignal`/`signal`, `exec`/`execFile` built on `spawn` as
+> `lib/child_process.js` builds them, `util.promisify`, `getValidStdio`.
+> **`fork()` and the IPC channel are not done** (39 of the 109 files call
+> `fork(`), `stdio` is `'pipe'`/`'ignore'`/`'inherit'`/fd 0–2, and the stdio
+> streams are not `net.Socket`s. **47 files run `process.execPath` as a child**,
+> and `zun run` takes neither a CommonJS file nor script arguments, so
+> `process.execPath` is a *launcher* under the test runner: `zun-node-run`
+> (`src/bin/zun-node-run.rs`) speaks `node <script.js>`/`-e`/`-p`, bundles the
+> script with `tools/bundle_node_test.sh` (cached) and runs `zun run --ext` on
+> the bundle; the arguments travel in `ZUN_NODE_ARGV`. The decision, and what it
+> cost to get right (a stale bundle cache, a fork bomb), is in
+> [`test/child_process/README.md`](test/child_process/README.md); per-test
+> breakdown: [`test/child_process/RESULTS.md`](test/child_process/RESULTS.md).
+> The POSIX half of `asyncp.rs` was written but not compiled or run.
 
 <!-- node-stream:start -->
 ### Node.js v25 `stream` compatibility
 
-`█████████░░░░░░░░░░░░░░░` **38.2%** — 78 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
+`█████████████░░░░░░░░░░░` **57.8%** — 118 / 204 Node `test-stream-*|test-stream2-*|test-stream3-*|test-streams-*|test-readable-*` tests passing
 <!-- node-stream:end -->
 
 > `stream` is the largest module here by a wide margin — 204 Node files against
@@ -877,7 +870,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-console:start -->
 ### Node.js v25 `console` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **36.3%** — 8 / 22 Node `test-console*` tests passing
+`████████████░░░░░░░░░░░░` **50.0%** — 11 / 22 Node `test-console*` tests passing
 <!-- node-console:end -->
 
 <!-- node-perf_hooks:start -->
@@ -1145,7 +1138,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-net:start -->
 ### Node.js v25 `net` compatibility
 
-`██████░░░░░░░░░░░░░░░░░░` **27.5%** — 41 / 149 Node `test-net-*` tests passing
+`███████████░░░░░░░░░░░░░` **46.9%** — 70 / 149 Node `test-net-*` tests passing
 <!-- node-net:end -->
 
 > `net` is **TS over natives, and the first module here whose natives are not
@@ -1300,7 +1293,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-worker_threads:start -->
 ### Node.js v25 `worker_threads` compatibility
 
-`█░░░░░░░░░░░░░░░░░░░░░░░` **7.0%** — 10 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
+`██░░░░░░░░░░░░░░░░░░░░░░` **8.5%** — 12 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
 <!-- node-worker_threads:end -->
 
 > `node:worker_threads` is two things wearing one name, and the split decides
@@ -1357,3 +1350,52 @@ target/debug/zun run /tmp/bundle.ts
 > [`test/worker_threads/README.md`](test/worker_threads/README.md); per-test
 > breakdown:
 > [`test/worker_threads/RESULTS.md`](test/worker_threads/RESULTS.md).
+
+<!-- node-dgram:start -->
+### Node.js v25 `dgram` compatibility
+
+`██████████████████░░░░░░` **76.3%** — 58 / 76 Node `test-dgram-*` tests passing
+<!-- node-dgram:end -->
+
+> `dgram` is the second consumer of the shared I/O loop and follows the pattern
+> `net` set: the datagram verbs (`socket(SOCK_DGRAM)`, `sendto`/`recvfrom`,
+> connect/disconnect, broadcast, TTL, multicast membership including
+> source-specific, buffer sizes) are natives in
+> [`src/io/udp.rs`](src/io/udp.rs) beside the stream verbs, sharing the same
+> handle table, readiness query and `ref`/`unref` accounting; the Node API —
+> `createSocket`, `Socket` as an `EventEmitter`, the bind/connect state
+> machines, the queue that holds a `send()` until the socket is bound, the
+> `send()` argument cascades, Node's errors — is
+> [`src/dgram/dgram.ts`](src/dgram/dgram.ts). Of the 47 failures, 14 need
+> `internal/dgram`, `cluster` or `../common/udp`, 11 are rejected at compile
+> time by their own `Buffer.alloc(<number>)` bodies, and most of the rest hit
+> the opaque-byte-view-through-`any` ceiling (a `'message'` handler's
+> `msg.toString()` is `104,101,…`). Deviations and the blocker table:
+> [`test/dgram/README.md`](test/dgram/README.md); per-test breakdown:
+> [`test/dgram/RESULTS.md`](test/dgram/RESULTS.md).
+
+<!-- node-http:start -->
+### Node.js v25 `http` compatibility
+
+`█████████░░░░░░░░░░░░░░░` **37.7%** — 143 / 379 Node `test-http-*` tests passing
+<!-- node-http:end -->
+
+> `http` is **Zun TypeScript over `net`**, with no natives of its own:
+> [`src/http/http.ts`](src/http/http.ts) holds an incremental HTTP/1.1 parser
+> (request/status line, headers, `Content-Length`, chunked with trailers,
+> until-close bodies, keep-alive and pipelining) where Node has llhttp, and on
+> top of it `createServer`/`Server`, `IncomingMessage` (a `Readable` whose
+> backpressure pauses the socket), `OutgoingMessage`/`ServerResponse` (a
+> `Writable` with Node's implicit-header rules), `ClientRequest` with
+> `request`/`get`, an `Agent` with a real socket pool (`keepAlive` reuse,
+> `maxSockets`, `lifo`/`fifo`, `'free'`), `METHODS`, `STATUS_CODES` and the header
+> validators. **Documented deviations**: `http.Server` on the module object is a
+> factory (a class cannot be called, and `new <module>.Ctor()` does not reach a
+> constructor); `headersTimeout`/`requestTimeout` are stored but not enforced; no
+> Unix sockets; the parser is not llhttp. **Most of the 302 failures are not in
+> the module**: ~92 read `this.address()` inside a listener (`this` is
+> `undefined` for a function expression passed as an argument — the same blocker
+> as `net`), ~16 hit closure capture across callbacks, and ~37 are rejected at
+> compile time or need `https`/`tls`/`cluster`. Deviations, repros and the
+> blocker table: [`test/http/README.md`](test/http/README.md); per-test
+> breakdown: [`test/http/RESULTS.md`](test/http/RESULTS.md).

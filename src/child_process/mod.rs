@@ -1,5 +1,4 @@
-//! `node:child_process` — the synchronous half of Node's `child_process`, as a
-//! native `zun_abi` extension.
+//! `node:child_process` — Node's `child_process`, as a native `zun_abi` extension.
 //!
 //! # TS over natives
 //!
@@ -18,10 +17,9 @@
 //!   `stdio` grammar, the `encoding` handling, the result object with its
 //!   `output` array, and the `ERR_*` / `Command failed:` errors.
 //!
-//! The async half (`spawn`, `exec`, `execFile`, `fork`) is *not* here: a
-//! `ChildProcess` is an `EventEmitter` whose `stdin`/`stdout`/`stderr` are
-//! `node:stream` objects, and `node:stream` does not exist in this library yet.
-//! See the module documentation in `child_process.ts` for what that costs.
+//! The asynchronous half (`spawn`, `exec`, `execFile`, `ChildProcess`) is
+//! [`asyncp`]: a child that runs while the program does, observed through the
+//! shared I/O loop in `src/io/`. `fork()` and the IPC channel are not done.
 //!
 //! # What crosses the boundary
 //!
@@ -83,10 +81,13 @@
 //! truncated with `ENOBUFS`.
 
 use crate::Descriptor;
-use zun_abi::ZunTy::Str;
+use zun_abi::ZunTy::{I64, Str};
 
+pub(crate) mod asyncp;
 pub(crate) mod spawn;
 
+#[cfg(test)]
+mod async_tests;
 #[cfg(test)]
 mod tests;
 
@@ -104,4 +105,13 @@ pub(super) const RS: char = '\u{1e}';
 pub(crate) const DESCRIPTORS: &[Descriptor] = &[
     Descriptor { key: b"cpSpawnSync\0", params: &[Str], ret: Str, invoke: spawn::spawn_sync },
     Descriptor { key: b"cpExecPath\0", params: &[], ret: Str, invoke: spawn::exec_path },
+    // The asynchronous half (`asyncp.rs`): a child that runs while the program
+    // does, observed through the shared I/O loop.
+    Descriptor { key: b"cpSpawn\0", params: &[Str], ret: Str, invoke: asyncp::spawn_async },
+    Descriptor { key: b"cpRead\0", params: &[I64, I64], ret: Str, invoke: asyncp::read },
+    Descriptor { key: b"cpWrite\0", params: &[I64, Str], ret: Str, invoke: asyncp::write },
+    Descriptor { key: b"cpCloseStdin\0", params: &[I64], ret: Str, invoke: asyncp::close_stdin },
+    Descriptor { key: b"cpKill\0", params: &[I64, Str], ret: Str, invoke: asyncp::kill },
+    Descriptor { key: b"cpExit\0", params: &[I64], ret: Str, invoke: asyncp::exit_info },
+    Descriptor { key: b"cpRelease\0", params: &[I64], ret: Str, invoke: asyncp::release },
 ];

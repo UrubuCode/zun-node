@@ -109,7 +109,8 @@ function __mustCallInner(fn: any, criteria: any, field: string, bare?: any): any
     const passed: any[] = [];
     const count = Number(arguments.length);
     for (let i = 0; i < count; i++) passed.push(arguments[i]);
-    return __evCall(target, passed);
+    // The receiver passes through: `mustCall(function () { this.close(); })`.
+    return __evCallOn(target, this, passed);
   };
   // `bare` asks for the wrapper itself rather than the box -- see the
   // `__commonMustCall` family below for the one caller that needs it.
@@ -349,6 +350,28 @@ function __zunHarnessExit(): void {
   }
 }
 
+function __commonArrayBufferViews(buf: any): any[] {
+  const src: Uint8Array = buf;
+  const ab: ArrayBuffer = src.buffer;
+  const off = Number(src.byteOffset);
+  const len = Number(src.byteLength);
+  const out: any[] = [];
+  out.push(new Int8Array(ab, off, len));
+  out.push(new Uint8Array(ab, off, len));
+  out.push(new Uint8ClampedArray(ab, off, len));
+  if (len % 2 === 0) out.push(new Int16Array(ab, off, len / 2));
+  if (len % 2 === 0) out.push(new Uint16Array(ab, off, len / 2));
+  if (len % 4 === 0) out.push(new Int32Array(ab, off, len / 4));
+  if (len % 4 === 0) out.push(new Uint32Array(ab, off, len / 4));
+  if (len % 4 === 0) out.push(new Float32Array(ab, off, len / 4));
+  if (len % 8 === 0) out.push(new Float64Array(ab, off, len / 8));
+  if (len % 8 === 0) out.push(new BigInt64Array(ab, off, len / 8));
+  if (len % 8 === 0) out.push(new BigUint64Array(ab, off, len / 8));
+  out.push(new DataView(ab, off, len));
+  return out;
+}
+
+
 const common: any = {
   isWindows: process.platform === "win32",
   isLinux: process.platform === "linux",
@@ -429,6 +452,22 @@ const common: any = {
     return value;
   },
 
+  // `test/common/index.js`: every ArrayBufferView kind over the same bytes,
+  // skipping the kinds whose element size does not divide the length. Spelled
+  // out per constructor because a typed-array constructor held in an `any` is
+  // opaque (zun#38).
+  getArrayBufferViews(buf: any): any[] {
+    return __commonArrayBufferViews(buf);
+  },
+
+  // `getArrayBufferViews` plus the backing ArrayBuffer itself.
+  getBufferSources(buf: any): any[] {
+    const out: any[] = __commonArrayBufferViews(buf);
+    const src: Uint8Array = buf;
+    out.push(new Uint8Array(src).buffer);
+    return out;
+  },
+
   // `common.mustSucceed(fn?, exact?)` — a callback that asserts `err` is falsy
   // and then forwards the remaining arguments.
   mustSucceed(fn?: any, exact?: any): any {
@@ -450,7 +489,7 @@ const common: any = {
   // `common.expectsError(validator)` — a predicate for `assert.throws`, which
   // checks the fields of the thrown error and answers `true`.
   expectsError(validator: any, exact?: any): any {
-    const predicate: any = function (error: any): any {
+    const predicate: any = (error: any): any => {
       if (validator === undefined || validator === null) return true;
       if (typeof validator === "function") {
         return __evCall(validator, [error]) === true;

@@ -192,6 +192,7 @@ fs/promises __node_fs_promises -
 timers __node_timers setTimeout
 timers/promises __node_timers_promises -
 child_process __node_child_process -
+internal/child_process __node_internal_child_process -
 diagnostics_channel __node_diagnostics_channel Channel,TracingChannel
 async_hooks __node_async_hooks AsyncLocalStorage
 console __node_console Console
@@ -215,6 +216,7 @@ internal/readline/utils __node_internal_readline_utils CSI
 internal/readline/callbacks __node_internal_readline_callbacks -
 internal/util/inspect __node_internal_util_inspect -
 [.][.]/common/arraystream __node_harness_arraystream ArrayStream
+[.][.]/common/countdown __node_harness_countdown Countdown
 vm __node_vm Script,compileFunction
 crypto __node_crypto Hash,Hmac,Cipheriv,Decipheriv,KeyObject
 [.][.]/common/crypto __node_harness_crypto -
@@ -227,6 +229,17 @@ dns __node_dns Resolver
 dns/promises __node_dns_promises -
 net __node_net Socket,Server,Stream,BlockList,SocketAddress
 internal/net __node_net -
+http __node_http Agent,ClientRequest,IncomingMessage,OutgoingMessage,ServerResponse
+_http_agent __node_http -
+_http_client __node_http -
+_http_common __node_http -
+_http_incoming __node_http -
+_http_outgoing __node_http -
+_http_server __node_http -
+dgram __node_dgram -
+internal/dgram __node_internal_dgram -
+cluster __node_cluster -
+[.][.]/common/udp __node_harness_udp -
 internal/test/binding __node_internal_test_binding -
 internal/errors __node_internal_errors -
 [.][.]/common/internet __node_harness_internet -
@@ -409,7 +422,14 @@ fs/promises src/stream/stream.ts
 fs/promises src/fs/fs.ts
 fs/promises src/fs/streams.ts
 fs/promises src/fs/watchers.ts
+child_process src/buffer/buffer.ts
+child_process src/string_decoder/string_decoder.ts
+child_process src/stream/stream.ts
 child_process src/child_process/child_process.ts
+internal/child_process src/buffer/buffer.ts
+internal/child_process src/string_decoder/string_decoder.ts
+internal/child_process src/stream/stream.ts
+internal/child_process src/child_process/child_process.ts
 async_hooks src/async_hooks/async_hooks.ts
 domain src/domain/domain.ts
 diagnostics_channel src/async_hooks/async_hooks.ts
@@ -440,6 +460,7 @@ internal/util/inspect src/readline/readline.ts
 [.][.]/common/arraystream src/string_decoder/string_decoder.ts
 [.][.]/common/arraystream src/stream/stream.ts
 [.][.]/common/arraystream tools/harness/arraystream.ts
+[.][.]/common/countdown tools/harness/countdown.ts
 tty src/buffer/buffer.ts
 tty src/string_decoder/string_decoder.ts
 tty src/stream/stream.ts
@@ -465,6 +486,58 @@ internal/net src/buffer/buffer.ts
 internal/net src/string_decoder/string_decoder.ts
 internal/net src/stream/stream.ts
 internal/net src/net/net.ts
+http src/buffer/buffer.ts
+http src/string_decoder/string_decoder.ts
+http src/stream/stream.ts
+http src/net/net.ts
+http src/http/http.ts
+_http_agent src/buffer/buffer.ts
+_http_agent src/string_decoder/string_decoder.ts
+_http_agent src/stream/stream.ts
+_http_agent src/net/net.ts
+_http_agent src/http/http.ts
+_http_client src/buffer/buffer.ts
+_http_client src/string_decoder/string_decoder.ts
+_http_client src/stream/stream.ts
+_http_client src/net/net.ts
+_http_client src/http/http.ts
+_http_common src/buffer/buffer.ts
+_http_common src/string_decoder/string_decoder.ts
+_http_common src/stream/stream.ts
+_http_common src/net/net.ts
+_http_common src/http/http.ts
+_http_incoming src/buffer/buffer.ts
+_http_incoming src/string_decoder/string_decoder.ts
+_http_incoming src/stream/stream.ts
+_http_incoming src/net/net.ts
+_http_incoming src/http/http.ts
+_http_outgoing src/buffer/buffer.ts
+_http_outgoing src/string_decoder/string_decoder.ts
+_http_outgoing src/stream/stream.ts
+_http_outgoing src/net/net.ts
+_http_outgoing src/http/http.ts
+_http_server src/buffer/buffer.ts
+_http_server src/string_decoder/string_decoder.ts
+_http_server src/stream/stream.ts
+_http_server src/net/net.ts
+_http_server src/http/http.ts
+dgram src/buffer/buffer.ts
+dgram src/string_decoder/string_decoder.ts
+dgram src/stream/stream.ts
+dgram src/net/net.ts
+dgram src/dgram/dgram.ts
+internal/dgram src/buffer/buffer.ts
+internal/dgram src/string_decoder/string_decoder.ts
+internal/dgram src/stream/stream.ts
+internal/dgram src/net/net.ts
+internal/dgram src/dgram/dgram.ts
+[.][.]/common/udp src/buffer/buffer.ts
+[.][.]/common/udp src/string_decoder/string_decoder.ts
+[.][.]/common/udp src/stream/stream.ts
+[.][.]/common/udp src/net/net.ts
+[.][.]/common/udp src/dgram/dgram.ts
+[.][.]/common/udp tools/harness/udp.ts
+cluster tools/harness/cluster.ts
 internal/test/binding src/dns/dns.ts
 internal/test/binding tools/harness/binding.ts
 internal/errors src/dns/dns.ts
@@ -759,11 +832,11 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
   printf 's/^"use strict";[[:space:]]*$//\n'
 
   # `../common` and `../common/fixtures` are bound by the harness itself.
-  printf "s|^\\(const\\|let\\|var\\)[[:space:]]\\{1,\\}common[[:space:]]*=[[:space:]]*require('\\.\\./common')[[:space:]]*;[[:space:]]*\$||\n"
-  printf "s|^\\(const\\|let\\|var\\)[[:space:]]\\{1,\\}fixtures[[:space:]]*=[[:space:]]*require('\\.\\./common/fixtures')[[:space:]]*;[[:space:]]*\$||\n"
+  printf "s#^\\(const\\|let\\|var\\)[[:space:]]\\{1,\\}common[[:space:]]*=[[:space:]]*require('\\.\\./common')[[:space:]]*;[[:space:]]*\$##\n"
+  printf "s#^\\(const\\|let\\|var\\)[[:space:]]\\{1,\\}fixtures[[:space:]]*=[[:space:]]*require('\\.\\./common/fixtures')[[:space:]]*;[[:space:]]*\$##\n"
   printf "s|^require('\\.\\./common')[[:space:]]*;[[:space:]]*\$||\n"
   printf "s|require('\\.\\./common/fixtures')|fixtures|g\n"
-  printf "s|^\(const\|let\|var\)[[:space:]]\{1,\}tmpdir[[:space:]]*=[[:space:]]*require('[^']*common/tmpdir\(\.js\)\{0,1\}')[[:space:]]*;[[:space:]]*\$||\n"
+  printf "s#^\(const\|let\|var\)[[:space:]]\{1,\}tmpdir[[:space:]]*=[[:space:]]*require('[^']*common/tmpdir\(\.js\)\{0,1\}')[[:space:]]*;[[:space:]]*\$##\n"
   printf "s|require('[^']*common/tmpdir\(\.js\)\{0,1\}')|tmpdir|g\n"
   printf "s|require('\\.\\./common')|common|g\n"
 
@@ -1295,6 +1368,20 @@ $obj
   echo "// ==== harness epilogue: settle the loop, emit 'exit', check call counts ===="
   echo "__zunHarnessFinish();"
 } > "$OUT"
+
+# A module-scope declaration cannot shadow an engine global: `function
+# setTimeout` (timers.ts) and `class Blob` (buffer.ts) are 'duplicate function
+# declaration' / 'duplicate class' (https://github.com/UrubuCode/zun/issues/111,
+# #108). Every such name the bundle declares is renamed to `__zunShadow_<name>`
+# throughout the bundle, which keeps the shims' semantics: the test's bare
+# `setTimeout(...)` still reaches the inlined implementation. Member reads
+# (`globalThis.setTimeout`), explicit object keys (`{ setTimeout: ... }`) and
+# quoted text are left alone.
+for shadow in setTimeout setInterval clearTimeout clearInterval queueMicrotask Blob File; do
+  if grep -qE "^(export )?(async )?(function|class) $shadow\b" "$OUT"; then
+    perl -pi -e "s/(?<![.\\w\$'\"\`])$shadow\\b(?!\\s*:(?!:))/__zunShadow_$shadow/g" "$OUT"
+  fi
+done
 
 # Any `require` left over means the test needs a module the bundler does not
 # know; fail loudly rather than letting the engine report a mystery.

@@ -601,11 +601,14 @@ function __fsPromisesWatchImpl(filename: any, options: any): any {
   const settings: any = { ...__fsGetOptions(options, {}) };
   if (settings.persistent === undefined) settings.persistent = true;
   if (settings.recursive === undefined) settings.recursive = false;
-  const maxQueue: number = settings.maxQueue === undefined ? 2048 : Number(settings.maxQueue);
+  // Validated as given: a non-number `maxQueue` is a type error, not NaN.
+  const maxQueueGiven: any = settings.maxQueue === undefined ? 2048 : settings.maxQueue;
   const overflow: any = settings.overflow === undefined ? "ignore" : settings.overflow;
   __fsValidateBoolean(settings.persistent, "options.persistent");
   __fsValidateBoolean(settings.recursive, "options.recursive");
-  __fsValidateInteger(maxQueue, "options.maxQueue", 0, __FS_UINT32_MAX);
+  __evValidateAbortSignal(settings.signal, "options.signal");
+  __fsValidateInteger(maxQueueGiven, "options.maxQueue", 0, __FS_UINT32_MAX);
+  const maxQueue: number = Number(maxQueueGiven);
   if (overflow !== "ignore" && overflow !== "error") {
     throw new ERR_INVALID_ARG_VALUE(
       "options.overflow",
@@ -619,6 +622,8 @@ function __fsPromisesWatchImpl(filename: any, options: any): any {
     waiting: undefined,
     done: false,
     watcher: undefined,
+    // The `AbortError` the iterator rejects with once its signal fires.
+    abortError: undefined,
   };
 
   const watcher: any = __fsWatchImpl(filename, settings, undefined);
@@ -632,9 +637,18 @@ function __fsPromisesWatchImpl(filename: any, options: any): any {
 
   const signal: any = settings.signal;
   if (signal !== undefined && signal !== null) {
-    signal.addEventListener("abort", function (): void {
+    if (signal.aborted === true) {
+      // Node's generator throws at its first step.
+      state.abortError = new AbortError(undefined, { cause: signal.reason });
       __fsWatchQueueEnd(state);
-    });
+      watcher.close();
+    } else {
+      signal.addEventListener("abort", function (): void {
+        state.abortError = new AbortError(undefined, { cause: signal.reason });
+        __fsWatchQueueEnd(state);
+        watcher.close();
+      });
+    }
   }
 
   return __fsWatchIterator(state);
@@ -687,10 +701,16 @@ function __fsWatchIterator(state: any): any {
         return Promise.resolve(__fsWatchStep(state));
       }
       if (state.done === true) {
-        return Promise.resolve({ value: undefined, done: true });
+        return __fsWatchFinished(state);
       }
       return new Promise(function (resolve: any, reject: any): void {
         state.waiting = function (): void {
+          if (Number(state.queue.length) === 0 && state.abortError !== undefined) {
+            const failure: any = state.abortError;
+            state.abortError = undefined;
+            reject(failure);
+            return;
+          }
           if (Number(state.queue.length) > 0) {
             const step: any = __fsWatchStep(state);
             if (step.failure !== undefined) {
@@ -719,6 +739,17 @@ function __fsWatchIterator(state: any): any {
     return iterator;
   };
   return iterator;
+}
+
+// The step of an iterator that has ended: an abort rejects once, then the
+// iterator is simply done.
+function __fsWatchFinished(state: any): any {
+  const failure: any = state.abortError;
+  if (failure !== undefined) {
+    state.abortError = undefined;
+    return Promise.reject(failure);
+  }
+  return Promise.resolve({ value: undefined, done: true });
 }
 
 // One queued item, as the iterator result Node's generator would yield. An

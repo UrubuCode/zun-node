@@ -172,6 +172,8 @@ windows-sys = { version = "0.61", features = [
     # `CreateToolhelp32Snapshot` for the parent pid, `GetProcessMemoryInfo` for
     # the resident set size and `PeakWorkingSetSize`, and the console title.
     "Win32_System_Diagnostics_ToolHelp",
+    # `node:dgram`: `WSAIoctl(SIO_UDP_CONNRESET)` names an `OVERLAPPED`.
+    "Win32_System_IO",
     "Win32_System_ProcessStatus",
     "Win32_System_Registry",
     # `node:fs` needs the file APIs `std` does not cover: the per-file

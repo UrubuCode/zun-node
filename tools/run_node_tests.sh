@@ -211,6 +211,16 @@ case "$MODULE" in
   # dispatch) and `src/net/net.ts` is the module Node exposes: `Socket` as a
   # `stream.Duplex`, `Server`, `isIP*`, `BlockList` and `SocketAddress`.
   net)    KIND="zun-ts+ext"; PATTERNS="test-net-";                         PATTERN="test-net-";;
+  # `http` is Zun TypeScript over `net` (and so over the shared I/O loop): the
+  # HTTP/1.1 parser, `Server`, `ClientRequest`, `Agent` and the message classes
+  # are src/http/http.ts, with no natives of its own. The kind is `zun-ts+ext`
+  # because the sockets underneath are the I/O loop's. The corpus is
+  # `test-http-*`, which does not select `test-http2-*` or `test-https-*`.
+  http)   KIND="zun-ts+ext"; PATTERNS="test-http-";                        PATTERN="test-http-";;
+  # `dgram` is the second consumer of the shared I/O loop (`src/io/`), which
+  # grew the datagram verbs in `src/io/udp.rs`; `src/dgram/dgram.ts` is the
+  # module Node exposes: `Socket` as an `EventEmitter` over a UDP handle.
+  dgram)  KIND="zun-ts+ext"; PATTERNS="test-dgram-";                       PATTERN="test-dgram-";;
 
   # `worker_threads`' corpus is four prefixes: `test-worker-` (the bulk, which
   # also selects `test-worker.js` itself), plus `test-messagechannel`,
@@ -236,6 +246,9 @@ case "$MODULE" in
   *)      KIND="extension";  PATTERNS="test-$MODULE-";                    PATTERN="test-$MODULE-";;
 esac
 
+# A re-executed child is bundled first (about five seconds), so the
+# `child_process` corpus gets a longer default budget than the 20 s of the rest.
+if [ "$MODULE" = child_process ] && [ "$TIMEOUT" = 20 ]; then TIMEOUT=60; fi
 [ -n "$ZUN" ] || { echo "usage: --zun <path> [--ext <lib>] [--module fs|path|events|os|buffer|string_decoder]" >&2; exit 2; }
 case "$KIND" in
   extension)
@@ -260,6 +273,20 @@ esac
 # without the extension.
 if [ -n "$EXT" ] && [ "$KIND" != "zun-ts" ]; then
   export ZUN_NODE_EXT="$EXT"
+  # `process.execPath` re-execution (src/bin/zun-node-run.rs): Node's tests run
+  # themselves, or `-e`/`-p` text, through `process.execPath`. The launcher built
+  # next to the extension turns that into "bundle it, then `zun run` it". It is
+  # configured through these variables, which child processes inherit; without
+  # the launcher binary `process.execPath` stays the `zun` binary.
+  for shim in "$(dirname "$EXT")/zun-node-run.exe" "$(dirname "$EXT")/zun-node-run"; do
+    if [ -f "$shim" ]; then
+      export ZUN_NODE_SHIM="$shim"
+      export ZUN_NODE_ZUN="$ZUN"
+      export ZUN_NODE_BUNDLER="$ROOT/tools/bundle_node_test.sh"
+      export ZUN_NODE_BASH="$(command -v bash)"
+      break
+    fi
+  done
 fi
 
 # The `module` corpus needs the bundler's require mode; see the case entry
