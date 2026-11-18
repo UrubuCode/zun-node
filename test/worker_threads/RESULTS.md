@@ -6,7 +6,7 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-worker*|test-messagechannel*|t
 <!-- node-worker_threads:start -->
 ### Node.js v25 `worker_threads` compatibility
 
-`██░░░░░░░░░░░░░░░░░░░░░░` **9.9%** — 14 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
+`█████░░░░░░░░░░░░░░░░░░░` **24.1%** — 34 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
 <!-- node-worker_threads:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
@@ -16,141 +16,141 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-broadcastchannel-custom-inspect.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-messagechannel.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-messageport-hasref.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: undefined is not a function |
-| `test-worker-abort-on-uncaught-exception-terminate.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (wh |
-| `test-worker-abort-on-uncaught-exception.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (th |
-| `test-worker-arraybuffer-zerofill.js` | ❌ runtime | not ok - ...should not affect zero-fill in other threads: The worker_threads.Worker constructor ( |
-| `test-worker-beforeexit-throw-exit.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ( |
+| `test-worker-abort-on-uncaught-exception-terminate.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-0fe7a59af23dd6 |
+| `test-worker-abort-on-uncaught-exception.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-145880b667d462 |
+| `test-worker-arraybuffer-zerofill.js` | ❌ timeout | not ok - ...should not affect zero-fill in other threads: Cannot read properties of undefined (reading 'fn') |
+| `test-worker-beforeexit-throw-exit.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-476c7114411681 |
 | `test-worker-broadcastchannel-wpt.js` | ✅ pass | |
-| `test-worker-broadcastchannel.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ( |
-| `test-worker-cjs-workerdata.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-cleanexit-with-js.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (__ |
+| `test-worker-broadcastchannel.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-worker-cjs-workerdata.js` | ❌ parse | zun-node-run: cannot read script: O sistema não pode encontrar o arquivo especificado. (os error 2) |
+| `test-worker-cleanexit-with-js.js` | ❌ parse | ReferenceError: __node_v8 is not defined |
 | `test-worker-cleanexit-with-moduleload.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-cleanexit-with-moduleload.js: |
-| `test-worker-cleanup-handles.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
+| `test-worker-cleanup-handles.js` | ❌ parse | Uncaught TypeError: Cannot read properties of null (reading 'fd') |
 | `test-worker-cli-options.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-cli-options.js: |
-| `test-worker-console-listeners.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-cpu-profile.js` | ❌ type error | bundles/test-worker-cpu-profile.ts:22847:33: error: [SEM0001] no method 'startCpuProfile' on this type |
-| `test-worker-cpu-usage.js` | ❌ type error | bundles/test-worker-cpu-usage.ts:22883:18: error: [SEM0001] no method 'cpuUsage' on this type |
+| `test-worker-console-listeners.js` | ✅ pass | |
+| `test-worker-cpu-profile.js` | ❌ type error | bundles/test-worker-cpu-profile.ts:34085:33: error: [SEM0001] no method 'startCpuProfile' on this type |
+| `test-worker-cpu-usage.js` | ❌ type error | bundles/test-worker-cpu-usage.ts:34121:18: error: [SEM0001] no method 'cpuUsage' on this type |
 | `test-worker-crypto-sign-transfer-result.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-crypto-sign-transfer-result.js: |
 | `test-worker-data-url.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_INVALID_ARG_TYPE: The "filename" argument must be of type string  |
 | `test-worker-debug.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-debug.js: |
 | `test-worker-dns-terminate-during-query.js` | ❌ runtime | bundles/test-worker-dns-terminate-during-query.ts: error: parse error: "A 'return' statement can only be used  |
-| `test-worker-dns-terminate.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ( |
+| `test-worker-dns-terminate.js` | ❌ parse | ReferenceError: __node_dns is not defined |
 | `test-worker-environmentdata.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-environmentdata.js: |
-| `test-worker-error-stack-getter-throws.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (co |
-| `test-worker-esm-exit.js` | ❌ unsupported import/require | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-esm-missing-main.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-esmodule.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
+| `test-worker-error-stack-getter-throws.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-worker-esm-exit.js` | ❌ assertion | zun-node-run: cannot read script: O sistema não pode encontrar o caminho especificado. (os error 3) |
+| `test-worker-esm-missing-main.js` | ❌ parse | zun-node-run: cannot read script: O sistema não pode encontrar o arquivo especificado. (os error 2) |
+| `test-worker-esmodule.js` | ❌ parse | zun-node-run: cannot read script: O sistema não pode encontrar o arquivo especificado. (os error 2) |
 | `test-worker-eval-typescript.js` | ✅ pass | |
-| `test-worker-event.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (): |
+| `test-worker-event.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-worker-execargv-invalid.js` | ✅ pass | |
-| `test-worker-execargv.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
+| `test-worker-execargv.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: Cannot read properties of null (reading 'on') |
 | `test-worker-exit-code.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-exit-code.js: |
-| `test-worker-exit-event-error.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (): |
-| `test-worker-exit-from-uncaught-exception.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-exit-heapsnapshot.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-fs-stat-watcher.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
+| `test-worker-exit-event-error.js` | ✅ pass | |
+| `test-worker-exit-from-uncaught-exception.js` | ❌ parse | Uncaught Error: Unhandled error. ('Error') |
+| `test-worker-exit-heapsnapshot.js` | ✅ pass | |
+| `test-worker-fs-stat-watcher.js` | ✅ pass | |
 | `test-worker-hasref.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: undefined is not a function |
-| `test-worker-heap-profile.js` | ❌ type error | bundles/test-worker-heap-profile.ts:22847:33: error: [SEM0001] no method 'startHeapProfile' on this type |
+| `test-worker-heap-profile.js` | ❌ type error | bundles/test-worker-heap-profile.ts:34090:33: error: [SEM0001] no method 'startHeapProfile' on this type |
 | `test-worker-heap-snapshot.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-worker-heap-statistics.js` | ❌ type error | bundles/test-worker-heap-statistics.ts:22888:5: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), fou |
-| `test-worker-heapdump-failure.js` | ❌ type error | bundles/test-worker-heapdump-failure.ts:22856:25: error: [SEM0001] 'getHeapSnapshot' expects 0 to 0 argument(s |
+| `test-worker-heap-statistics.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: skipIfInspectorDisabled is not a function |
+| `test-worker-heapdump-failure.js` | ❌ type error | bundles/test-worker-heapdump-failure.ts:34099:25: error: [SEM0001] 'getHeapSnapshot' expects 0 to 0 argument(s |
 | `test-worker-http2-generic-streams-terminate.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-http2-generic-streams-terminate.js: |
 | `test-worker-http2-stream-terminate.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-http2-stream-terminate.js: |
 | `test-worker-init-failure.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-init-failure.js: |
 | `test-worker-invalid-workerdata.js` | ✅ pass | |
-| `test-worker-load-file-with-extension-other-than-js.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
+| `test-worker-load-file-with-extension-other-than-js.js` | ✅ pass | |
 | `test-worker-memory.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-memory.js: |
-| `test-worker-message-channel-sharedarraybuffer.js` | ❌ type error | bundles/test-worker-message-channel-sharedarraybuffer.ts:22859:3: error: [SEM0001] 'postMessage' expects 0 to  |
-| `test-worker-message-channel.js` | ❌ type error | bundles/test-worker-message-channel.ts:22875:3: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), fou |
-| `test-worker-message-event.js` | ❌ type error | bundles/test-worker-message-event.ts:22886:33: error: [SEM0001] spread arguments are not lowered yet |
+| `test-worker-message-channel-sharedarraybuffer.js` | ❌ parse | Uncaught ReferenceError: __node_worker_threads is not defined |
+| `test-worker-message-channel.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-worker-message-event.js` | ❌ type error | bundles/test-worker-message-event.ts:34129:33: error: [SEM0001] spread arguments are not lowered yet |
 | `test-worker-message-mark-as-uncloneable.js` | ❌ assertion | AssertionError [throws]: Should throw DataCloneError when posting uncloneables |
 | `test-worker-message-not-serializable.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-message-not-serializable.js: |
 | `test-worker-message-port-arraybuffer.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-worker-message-port-close-while-receiving.js` | ✅ pass | |
 | `test-worker-message-port-close.js` | ✅ pass | |
 | `test-worker-message-port-constructor.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
-| `test-worker-message-port-drain.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
+| `test-worker-message-port-drain.js` | ❌ runtime | Uncaught TypeError: apply is not a function |
 | `test-worker-message-port-infinite-message-loop.js` | ✅ pass | |
 | `test-worker-message-port-inspect-during-init-hook.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: createHook is not a function |
 | `test-worker-message-port-jstransferable-nested-untransferable.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-message-port-jstransferable-nested-untransferable.js: |
-| `test-worker-message-port-message-before-close.js` | ❌ type error | bundles/test-worker-message-port-message-before-close.ts:22864:5: error: [SEM0001] 'postMessage' expects 0 to  |
+| `test-worker-message-port-message-before-close.js` | ❌ parse | Uncaught ReferenceError: __node_worker_threads is not defined |
 | `test-worker-message-port-message-port-transferring.js` | ✅ pass | |
-| `test-worker-message-port-move.js` | ❌ type error | bundles/test-worker-message-port-move.ts:24217:17: error: [SEM0001] cannot add String and Function(4294967295) |
+| `test-worker-message-port-move.js` | ❌ type error | bundles/test-worker-message-port-move.ts:35629:17: error: [SEM0001] cannot add String and Function(4294967295) |
 | `test-worker-message-port-multiple-sharedarraybuffers.js` | ✅ pass | |
 | `test-worker-message-port-receive-message.js` | ✅ pass | |
-| `test-worker-message-port-terminate-transfer-list.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-message-port-transfer-closed.js` | ❌ assertion | AssertionError [throws]: The error is expected to be an instance of "". Received "__WtDOMException" |
+| `test-worker-message-port-terminate-transfer-list.js` | ❌ timeout | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-worker-message-port-transfer-closed.js` | ❌ assertion | AssertionError [==]: false == true |
 | `test-worker-message-port-transfer-duplicate.js` | ✅ pass | |
 | `test-worker-message-port-transfer-fake-js-transferable-internal.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-worker-message-port-transfer-fake-js-transferable.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: module is not defined |
 | `test-worker-message-port-transfer-filehandle.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (DataCloneError). |
-| `test-worker-message-port-transfer-native.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
+| `test-worker-message-port-transfer-native.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (DataCloneError). |
 | `test-worker-message-port-transfer-self.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-message-port-transfer-self.js: |
 | `test-worker-message-port-transfer-target.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-worker-message-port-transfer-terminate.js` | ❌ type error | bundles/test-worker-message-port-transfer-terminate.ts:22848:5: error: [SEM0001] 'postMessage' expects 0 to 0  |
-| `test-worker-message-port-wasm-module.js` | ❌ type error | bundles/test-worker-message-port-wasm-module.ts:22852:1: error: [SEM0001] 'postMessage' expects 0 to 0 argumen |
-| `test-worker-message-port-wasm-threads.js` | ❌ type error | bundles/test-worker-message-port-wasm-threads.ts:22883:12: error: [SEM0001] no field or setter 'buf' on this t |
+| `test-worker-message-port-transfer-terminate.js` | ❌ timeout |  |
+| `test-worker-message-port-wasm-module.js` | ❌ type error | zun: runtime error: unhandled exception: ReferenceError: WebAssembly is not defined |
+| `test-worker-message-port-wasm-threads.js` | ❌ type error | bundles/test-worker-message-port-wasm-threads.ts:34131:12: error: [SEM0001] no field or setter 'buf' on this t |
 | `test-worker-message-port.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
 | `test-worker-message-transfer-port-mark-as-untransferable.js` | ✅ pass | |
 | `test-worker-message-type-unknown.js` | ❌ timeout |  |
 | `test-worker-messageport-hasref.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: undefined is not a function |
-| `test-worker-messaging-errors-handler.js` | ❌ type error | bundles/test-worker-messaging-errors-handler.ts:22856:3: error: [SEM0001] 'postMessage' expects 0 to 0 argumen |
-| `test-worker-messaging-errors-invalid.js` | ❌ type error | bundles/test-worker-messaging-errors-invalid.ts:22874:3: error: [SEM0001] 'postMessage' expects 0 to 0 argumen |
+| `test-worker-messaging-errors-handler.js` | ✅ pass | |
+| `test-worker-messaging-errors-invalid.js` | ✅ pass | |
 | `test-worker-messaging-errors-timeout.js` | ✅ pass | |
-| `test-worker-messaging.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-worker-mjs-workerdata.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-name.js` | ❌ type error | bundles/test-worker-name.ts:22861:5: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found 1 |
-| `test-worker-nearheaplimit-deadlock.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-nested-on-process-exit.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-nested-uncaught.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (co |
-| `test-worker-nexttick-terminate.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ( |
-| `test-worker-no-sab.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-no-stdin-stdout-interaction.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
+| `test-worker-messaging.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-worker-mjs-workerdata.js` | ❌ parse | zun-node-run: cannot read script: O sistema não pode encontrar o arquivo especificado. (os error 2) |
+| `test-worker-name.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: skipIfInspectorDisabled is not a function |
+| `test-worker-nearheaplimit-deadlock.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-worker-nested-on-process-exit.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-0994758f05262f |
+| `test-worker-nested-uncaught.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-0f54adcb01c138 |
+| `test-worker-nexttick-terminate.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-68874100b37f92 |
+| `test-worker-no-sab.js` | ✅ pass | |
+| `test-worker-no-stdin-stdout-interaction.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: Cannot read properties of null (reading 'on') |
 | `test-worker-node-options.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-node-options.js: |
-| `test-worker-non-fatal-uncaught-exception.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
+| `test-worker-non-fatal-uncaught-exception.js` | ❌ parse | Uncaught TypeError: _fatalException is not a function |
 | `test-worker-on-process-exit.js` | ❌ timeout |  |
-| `test-worker-onmessage-not-a-function.js` | ❌ type error | bundles/test-worker-onmessage-not-a-function.ts:22848:3: error: [SEM0001] 'postMessage' expects 0 to 0 argumen |
-| `test-worker-onmessage.js` | ❌ type error | bundles/test-worker-onmessage.ts:22853:3: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found 1 |
-| `test-worker-parent-port-ref.js` | ❌ type error | bundles/test-worker-parent-port-ref.ts:22847:5: error: [SEM0001] 'on' expects 2 to 2 argument(s), found 3 |
-| `test-worker-process-argv.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-process-cwd.js` | ❌ type error | bundles/test-worker-process-cwd.ts:22861:5: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found 1 |
-| `test-worker-process-env-shared.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-process-env.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
+| `test-worker-onmessage-not-a-function.js` | ✅ pass | |
+| `test-worker-onmessage.js` | ✅ pass | |
+| `test-worker-parent-port-ref.js` | ❌ type error | bundles/test-worker-parent-port-ref.ts:34097:5: error: [SEM0001] 'on' expects 2 to 2 argument(s), found 3 |
+| `test-worker-process-argv.js` | ❌ timeout | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
+| `test-worker-process-cwd.js` | ❌ assertion | AssertionError [match]: The input did not match the regular expression /AtomicsLoad/. Input: |
+| `test-worker-process-env-shared.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-worker-process-env.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
 | `test-worker-process-exit-async-module.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_INVALID_ARG_TYPE: The "filename" argument must be of type string  |
-| `test-worker-ref-onexit.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (__ |
-| `test-worker-ref.js` | ❌ type error | bundles/test-worker-ref.ts:22852:3: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found 1 |
-| `test-worker-relative-path-double-dot.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-relative-path.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-resource-limits.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-safe-getters.js` | ❌ type error | bundles/test-worker-safe-getters.ts:22856:5: error: [SEM0001] 'postMessage' expects 0 to 0 argument(s), found  |
-| `test-worker-sharedarraybuffer-from-worker-thread.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ( |
-| `test-worker-stack-overflow-stack-size.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-worker-stack-overflow.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (fu |
-| `test-worker-stdio-flush-inflight.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-stdio-flush.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
+| `test-worker-ref-onexit.js` | ✅ pass | |
+| `test-worker-ref.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-20fcea81ddecc3 |
+| `test-worker-relative-path-double-dot.js` | ✅ pass | |
+| `test-worker-relative-path.js` | ✅ pass | |
+| `test-worker-resource-limits.js` | ❌ timeout | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-worker-safe-getters.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-worker-sharedarraybuffer-from-worker-thread.js` | ❌ parse | ReferenceError: __node_worker_threads is not defined |
+| `test-worker-stack-overflow-stack-size.js` | ❌ timeout | AssertionError [==]: w1stack = 0, w2stack = 0 are too far apart |
+| `test-worker-stack-overflow.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-40f223d7df4274 |
+| `test-worker-stdio-flush-inflight.js` | ✅ pass | |
+| `test-worker-stdio-flush.js` | ✅ pass | |
 | `test-worker-stdio-from-preload-module.js` | ❌ unsupported import/require | zun: runtime error: unhandled exception: ERR_WORKER_INVALID_EXEC_ARGV: Initiated Worker with invalid execArgv  |
-| `test-worker-stdio.js` | ❌ type error | bundles/test-worker-stdio.ts:34235:10: error: [SEM0001] no field or setter 'chunks' on this type |
-| `test-worker-syntax-error-file.js` | ❌ parse | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-syntax-error.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (ab |
+| `test-worker-stdio.js` | ❌ type error | bundles/test-worker-stdio.ts:38768:10: error: [SEM0001] no field or setter 'chunks' on this type |
+| `test-worker-syntax-error-file.js` | ❌ parse | zun-node-run: cannot read script: O sistema não pode encontrar o caminho especificado. (os error 3) |
+| `test-worker-syntax-error.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-d6516bc521e816 |
 | `test-worker-terminate-http2-respond-with-file.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-terminate-http2-respond-with-file.js: |
-| `test-worker-terminate-microtask-loop.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ( |
-| `test-worker-terminate-nested.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ( |
-| `test-worker-terminate-null-handler.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ( |
-| `test-worker-terminate-ref-public-port.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ( |
-| `test-worker-terminate-source-map.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-terminate-timers.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ( |
-| `test-worker-terminate-unrefed.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
-| `test-worker-thread-name.js` | ❌ type error | bundles/test-worker-thread-name.ts:22848:24: error: [SEM0001] no field or getter 'threadName' on this type |
+| `test-worker-terminate-microtask-loop.js` | ❌ timeout |       0 [main] bash 1541320 dofork: child -1 - forked process 1676 died unexpectedly, retry 0, exit code 0x… |
+| `test-worker-terminate-nested.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-9b79d907c3cd5b |
+| `test-worker-terminate-null-handler.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-12834df70d9a9f |
+| `test-worker-terminate-ref-public-port.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-fa9a26f2eecd82 |
+| `test-worker-terminate-source-map.js` | ✅ pass | |
+| `test-worker-terminate-timers.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-9f1543e4455592 |
+| `test-worker-terminate-unrefed.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-0c361476898bd2 |
+| `test-worker-thread-name.js` | ❌ type error | bundles/test-worker-thread-name.ts:34107:24: error: [SEM0001] no field or getter 'threadName' on this type |
 | `test-worker-track-unmanaged-fds.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-worker-track-unmanaged-fds.js: |
 | `test-worker-type-check.js` | ✅ pass | |
-| `test-worker-uncaught-exception-async.js` | ❌ parse | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-uncaught-exception.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-unref-from-message-during-exit.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ( |
-| `test-worker-unsupported-path.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
-| `test-worker-unsupported-things.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-vm-context-terminate.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-voluntarily-exit-followed-by-addition.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-voluntarily-exit-followed-by-throw.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
-| `test-worker-workerdata-messageport.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor ([f |
-| `test-worker-workerdata-sharedarraybuffer.js` | ❌ type error | bundles/test-worker-workerdata-sharedarraybuffer.ts:22863:3: error: [SEM0001] 'postMessage' expects 0 to 0 arg |
-| `test-worker.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_METHOD_NOT_IMPLEMENTED: The worker_threads.Worker constructor (C: |
+| `test-worker-uncaught-exception-async.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-worker-uncaught-exception.js` | ✅ pass | |
+| `test-worker-unref-from-message-during-exit.js` | ❌ timeout | zun-node-run: the bundler failed for C:\Users\<user>\AppData\Local\Temp\zun-node-run-cache\eval-21b36be9826a4b |
+| `test-worker-unsupported-path.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
+| `test-worker-unsupported-things.js` | ❌ assertion | AssertionError [throws]: Missing expected exception. |
+| `test-worker-vm-context-terminate.js` | ❌ parse | Mismatched function call: function should not have been called |
+| `test-worker-voluntarily-exit-followed-by-addition.js` | ✅ pass | |
+| `test-worker-voluntarily-exit-followed-by-throw.js` | ✅ pass | |
+| `test-worker-workerdata-messageport.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-worker-workerdata-sharedarraybuffer.js` | ❌ parse | Uncaught ReferenceError: __node_worker_threads is not defined |
+| `test-worker.js` | ✅ pass | |

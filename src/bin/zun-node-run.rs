@@ -155,6 +155,58 @@ fn bundle(bundler: &str, source: &Path) -> Result<PathBuf, String> {
         return Ok(output);
     }
 
+    // One bundler per script at a time. A test that starts ten workers from
+    // the same `eval` text at once would otherwise run ten bundlers side by
+    // side, each taking seconds; the first to create the lock bundles and the
+    // others wait for its output. A lock older than the bundler can plausibly
+    // take is abandoned (its owner was killed), and so is waiting itself.
+    let lock = directory.join(format!("{key:016x}.lock"));
+    let mut owned = false;
+    let started = std::time::Instant::now();
+    loop {
+        if output.is_file() {
+            return Ok(output);
+        }
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
+            Ok(_) => {
+                owned = true;
+                break;
+            }
+            Err(_) => {
+                let stale = std::fs::metadata(&lock)
+                    .and_then(|meta| meta.modified())
+                    .ok()
+                    .and_then(|time| time.elapsed().ok())
+                    .is_some_and(|age| age.as_secs() > 600);
+                if stale {
+                    let _ = std::fs::remove_file(&lock);
+                    continue;
+                }
+                if started.elapsed().as_secs() > 600 {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    }
+    let result = bundle_into(bundler, &absolute, &directory, key, &output);
+    if owned {
+        let _ = std::fs::remove_file(&lock);
+    }
+    result
+}
+
+/// Run the bundler for `absolute` into `output` (see [`bundle`]).
+fn bundle_into(
+    bundler: &str,
+    absolute: &Path,
+    directory: &Path,
+    key: u64,
+    output: &Path,
+) -> Result<PathBuf, String> {
+    if output.is_file() {
+        return Ok(output.to_path_buf());
+    }
     // Bundle to a private name and rename, so two children racing on the same
     // script never see a half-written file.
     let partial = directory.join(format!("{key:016x}.{}.partial", std::process::id()));
@@ -179,7 +231,7 @@ fn bundle(bundler: &str, source: &Path) -> Result<PathBuf, String> {
         }
     })
     .map_err(|()| "cannot publish the bundle".to_owned())?;
-    Ok(output)
+    Ok(output.to_path_buf())
 }
 
 fn main() -> ExitCode {

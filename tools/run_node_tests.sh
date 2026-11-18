@@ -254,6 +254,9 @@ esac
 # A re-executed child is bundled first (about five seconds), so the
 # `child_process` corpus gets a longer default budget than the 20 s of the rest.
 if [ "$MODULE" = child_process ] && [ "$TIMEOUT" = 20 ]; then TIMEOUT=60; fi
+# A worker is a child Zun process that may bundle its own script first (see
+# "The Worker process" in src/worker_threads/worker_threads.ts).
+if [ "$MODULE" = worker_threads ] && [ "$TIMEOUT" = 20 ]; then TIMEOUT=240; fi
 [ -n "$ZUN" ] || { echo "usage: --zun <path> [--ext <lib>] [--module fs|path|events|os|buffer|string_decoder]" >&2; exit 2; }
 case "$KIND" in
   extension)

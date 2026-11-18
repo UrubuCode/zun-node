@@ -963,14 +963,17 @@ class MessagePort extends EventTarget {
     __wtSetEventHandler(this, "messageerror", value);
   }
 
-  postMessage(value: any = __WT_MISSING, options: any = undefined): void {
-    if (value === __WT_MISSING) {
+  // A rest parameter, because a defaulted `value = MISSING` cannot tell
+  // `postMessage()` from `postMessage(undefined)` -- an explicit `undefined`
+  // takes the default too -- and only the first one is `ERR_MISSING_ARGS`.
+  postMessage(...rest: any[]): void {
+    if (Number(rest.length) === 0) {
       throw new NodeTypeError(
         "ERR_MISSING_ARGS",
         "Not enough arguments to MessagePort.postMessage",
       );
     }
-    __wtPortPostMessage(this, value, options);
+    __wtPortPostMessage(this, rest[0], rest[1]);
   }
 
   start(): void {
@@ -1506,11 +1509,13 @@ class BroadcastChannel extends EventTarget {
     __wtSetEventHandler(this, "messageerror", value);
   }
 
-  postMessage(message: any = __WT_MISSING): void {
+  // A rest parameter for the reason `MessagePort.prototype.postMessage` gives.
+  postMessage(...rest: any[]): void {
     if (this.__wtOpen !== true) {
       throw new __WtDOMException("BroadcastChannel is closed.", "InvalidStateError");
     }
-    if (message === __WT_MISSING) {
+    const message: any = rest[0];
+    if (Number(rest.length) === 0) {
       throw new NodeTypeError("ERR_MISSING_ARGS", 'The "message" argument must be specified');
     }
     __wtBroadcastPost(this, message);
@@ -1935,11 +1940,17 @@ class Worker extends EventEmitter {
       this.stdout = link.stdout;
       this.stderr = link.stderr;
     }
+    // Node announces every new worker on `process`, one tick later.
+    const self: any = this;
+    process.nextTick((): void => {
+      process.emit("worker", self);
+    });
   }
 
-  // A rest parameter rather than `(value = MISSING, options = undefined)`:
-  // on this class the checker demands both arguments of the defaulted form
-  // at a statically typed call site.
+  // A rest parameter rather than `(value = MISSING, options = undefined)`: the
+  // word "arguments" in the error text below makes the checker inject a
+  // synthetic rest parameter after the declared ones, so a statically typed
+  // `worker.postMessage(v)` would be rejected as too few arguments (zun#40).
   postMessage(...rest: any[]): void {
     if (Number(rest.length) === 0) {
       throw new NodeTypeError("ERR_MISSING_ARGS", "Not enough arguments to Worker.postMessage");
@@ -1967,6 +1978,15 @@ class Worker extends EventEmitter {
     });
     if (link.terminated !== true) {
       link.terminated = true;
+      // Closing the link first is what stops the worker: its end sees the
+      // peer go away and exits at once (see `__wtLinkClose`). Killing the
+      // child alone is not enough when the child is the launcher, because the
+      // worker it started is a grandchild that would outlive it.
+      __wtLinkClose(link);
+      if (Number(link.server) !== 0) {
+        __ioUnregister(Number(link.server));
+        link.server = 0;
+      }
       const child: any = link.child;
       if (child !== null && child !== undefined) child.kill();
     }
@@ -2397,9 +2417,9 @@ function __wtLinkClose(link: any): void {
   if (id !== 0) __ioUnregister(id);
   link.id = 0;
   if (link.isWorkerSide === true) {
-    // The parent is gone (or terminated us): the worker's port closes.
-    const port: any = link.owner;
-    if (port !== null && port !== undefined) __wtClosePort(port);
+    // The parent is gone or called `terminate()`: either way this worker
+    // stops now, as a thread would.
+    host.exitProcess(1);
   }
 }
 
@@ -2481,7 +2501,7 @@ function __wtLinkOnline(link: any): void {
 
 function __wtAccept(link: any): void {
   const ops: any = __ioOps();
-  if (Number(link.server) === 0 || Number(link.id) !== 0) return;
+  if (Number(link.server) === 0 || Number(link.id) !== 0 || link.closed === true) return;
   const reply: string = String(ops.accept(Number(link.server)));
   if (reply === "-" || reply === "+A") return;
   const fields: string[] = __ioFields(reply);
@@ -2547,6 +2567,8 @@ function __wtSpawnWorker(link: any, host: any, opts: any, code: any, script: str
   if (code !== null) {
     args.push("-e");
     args.push(String(code));
+    // `process.argv[1]` of an eval worker is Node's placeholder.
+    args.push("[worker eval]");
   } else {
     args.push(script);
   }
@@ -2570,6 +2592,15 @@ function __wtSpawnWorker(link: any, host: any, opts: any, code: any, script: str
       for (const item of opts.argv) tail.push(String(item));
     }
     env["ZUN_NODE_ARGV"] = "A" + tail.join("\u001f");
+    // The launcher's recursion guard, which this path bypasses: a script
+    // that starts a worker of itself unconditionally would otherwise spawn
+    // generations without end (it happened, with the one test whose
+    // relative path is only accepted because of where the runner runs it).
+    const depth = Number(process.env["ZUN_NODE_DEPTH"] === undefined ? 0 : process.env["ZUN_NODE_DEPTH"]);
+    if (depth >= 8) {
+      throw new NodeError("ERR_WORKER_INIT_FAILED", "Worker re-execution depth limit (8) reached");
+    }
+    env["ZUN_NODE_DEPTH"] = String(depth + 1);
   }
   const stdio: any[] = ["ignore", opts.stdout === true ? "pipe" : "inherit", "pipe"];
   const child: any = host.spawn(file, argv, { env: env, stdio: stdio, windowsHide: true });

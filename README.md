@@ -1293,7 +1293,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-worker_threads:start -->
 ### Node.js v25 `worker_threads` compatibility
 
-`██░░░░░░░░░░░░░░░░░░░░░░` **9.9%** — 14 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
+`█████░░░░░░░░░░░░░░░░░░░` **24.1%** — 34 / 141 Node `test-worker*|test-messagechannel*|test-messageport*|test-broadcastchannel*` tests passing
 <!-- node-worker_threads:end -->
 
 > `node:worker_threads` is two things wearing one name, and the split decides

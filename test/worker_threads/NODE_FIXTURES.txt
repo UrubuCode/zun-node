@@ -1,0 +1,8 @@
+# Fixtures the worker_threads corpus opens as worker scripts (see tools/run_node_tests.sh).
+test/fixtures/worker-data.cjs
+test/fixtures/worker-data.mjs
+test/fixtures/worker-script.mjs
+test/fixtures/worker-script.ts
+test/fixtures/printA.js
+test/fixtures/syntax/bad_syntax.js
+test/fixtures/es-modules/import-process-exit.mjs
