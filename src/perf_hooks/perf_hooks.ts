@@ -1681,6 +1681,28 @@ function __perfTimerify(fn?: any, options?: any): any {
 // observable goes.
 const __perfEventTarget: any = new EventTarget();
 
+// The engine's `EventTarget` rejects a boxed function (`common.mustCall`'s
+// shape, "invalid argument to built-in function"), and an unboxed wrapper that
+// reads `arguments` sees none when the host calls it. Every listener is
+// therefore handed over as a one-parameter adapter, one per listener identity
+// so that `removeEventListener` finds the same adapter again.
+const __perfAdapters: any[] = [];
+
+function __perfListenerAdapter(listener: any, create: boolean): any {
+  if (listener === null || listener === undefined) return listener;
+  if (typeof listener !== "function") return listener;
+  for (let i = 0; i < Number(__perfAdapters.length); i++) {
+    const pair: any = __perfAdapters[i];
+    if (__evSame(pair.listener, listener)) return pair.adapter;
+  }
+  if (!create) return listener;
+  const adapter: any = function (event: any): any {
+    return __evCall(listener, [event]);
+  };
+  __perfAdapters.push({ listener: listener, adapter: adapter });
+  return adapter;
+}
+
 function __perfDispatchBufferFull(type: string): void {
   __perfEventTarget.dispatchEvent(new Event(type));
 }
@@ -1796,11 +1818,11 @@ class Performance {
   }
 
   addEventListener(type?: any, listener?: any, options?: any): void {
-    __perfEventTarget.addEventListener(type, listener, options);
+    __perfEventTarget.addEventListener(type, __perfListenerAdapter(listener, true), options);
   }
 
   removeEventListener(type?: any, listener?: any, options?: any): void {
-    __perfEventTarget.removeEventListener(type, listener, options);
+    __perfEventTarget.removeEventListener(type, __perfListenerAdapter(listener, false), options);
   }
 
   dispatchEvent(event?: any): boolean {
@@ -1841,6 +1863,16 @@ __perfDefineTag(Performance.prototype, "Performance");
 // class above; a name that is not would be a compile error here rather than an
 // `undefined` at run time, which is the better failure.
 const __zunPerformance: Performance = new Performance(__PERF_TOKEN);
+
+// `performance.markResourceTiming(...args)` *inside a function body* does not
+// lower: a spread into a method call is lowered at top level only (zun#92).
+// `tools/bundle_node_test.sh` therefore rewrites that spelling to this free
+// function, handing it the spread arguments as one array.
+function __zunPerformanceMarkResourceTiming(args: any): any {
+  return __perfMarkResourceTiming(
+    args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+  );
+}
 
 // ---------------------------------------------------------------------------
 // constants

@@ -876,7 +876,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-perf_hooks:start -->
 ### Node.js v25 `perf_hooks` compatibility
 
-`██░░░░░░░░░░░░░░░░░░░░░░` **10.0%** — 2 / 20 Node `test-perf-hooks-*|test-performance*` tests passing
+`██████░░░░░░░░░░░░░░░░░░` **25.0%** — 5 / 20 Node `test-perf-hooks-*|test-performance*` tests passing
 <!-- node-perf_hooks:end -->
 
 > The whole surface is implemented — `performance` (`now`, `timeOrigin`,
