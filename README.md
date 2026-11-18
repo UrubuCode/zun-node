@@ -412,7 +412,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-os:start -->
 ### Node.js v25 `os` compatibility
 
-`███░░░░░░░░░░░░░░░░░░░░░` **14.2%** — 1 / 7 Node `test-os*` tests passing
+`██████░░░░░░░░░░░░░░░░░░` **28.5%** — 2 / 7 Node `test-os*` tests passing
 <!-- node-os:end -->
 
 > `os` is complete — every function, `constants` for both platforms, `EOL`,

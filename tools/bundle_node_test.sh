@@ -633,8 +633,35 @@ requires_module() {
 # This runs after the whole $REWRITE program, so it sees the module objects the
 # `require` rules have already substituted in.
 UNPACK_MODULE_DESTRUCTURING='
+# A pattern that spans lines (`const {` ... `} = os.constants.priority;`) is
+# buffered and joined; the rewrite is printed on its first line and every
+# other buffered line becomes empty, so later line numbers do not move.
+function flush_pending(   k) {
+  for (k = 1; k <= pending_n; k++) print pending[k];
+  pending_n = 0;
+}
+pending_n > 0 {
+  pending[++pending_n] = $0;
+  if ($0 ~ /[{]/ || pending_n > 64) { flush_pending(); next; }
+  if ($0 !~ /[}]/) next;
+  joined = "";
+  for (k = 1; k <= pending_n; k++) joined = joined " " pending[k];
+  r = unpack(joined);
+  if (r == "") { flush_pending(); next; }
+  print r;
+  for (k = 2; k <= pending_n; k++) print "";
+  pending_n = 0;
+  next;
+}
+/^[[:space:]]*(const|let|var)[[:space:]]*\{[^{}]*$/ {
+  pending_n = 1; pending[1] = $0; next;
+}
 {
-  line = $0;
+  r = unpack($0);
+  if (r != "") print r; else print $0;
+}
+END { flush_pending(); }
+function unpack(line,   kw, obj, inner, count, parts, out, ok, i, entry, key, name) {
   if (line ~ /^[[:space:]]*(const|let|var)[[:space:]]*\{[^{}]*\}[[:space:]]*=[[:space:]]*[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z0-9_$]+)*[[:space:]]*;[[:space:]]*$/) {
     kw = line; sub(/^[[:space:]]*/, "", kw); sub(/[[:space:]].*$/, "", kw);
     obj = line; sub(/^.*=[[:space:]]*/, "", obj); sub(/[[:space:]]*;[[:space:]]*$/, "", obj);
@@ -653,9 +680,9 @@ UNPACK_MODULE_DESTRUCTURING='
         out = out kw " " name " = " obj "." key "; ";
       } else { ok = 0; break; }
     }
-    if (ok == 1 && out != "") { print out; next; }
+    if (ok == 1 && out != "") return out;
   }
-  print line;
+  return "";
 }
 '
 
