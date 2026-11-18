@@ -156,9 +156,9 @@ pub(crate) fn describe(der: &[u8]) -> Option<String> {
                         .0
                         .iter()
                         .filter_map(|g| match g {
-                            GeneralName::DnsName(s) => Some(format!("DNS:{s}")),
-                            GeneralName::Rfc822Name(s) => Some(format!("email:{s}")),
-                            GeneralName::UniformResourceIdentifier(s) => Some(format!("URI:{s}")),
+                            GeneralName::DnsName(s) => Some(format!("DNS:{}", san_escape(&s.to_string()))),
+                            GeneralName::Rfc822Name(s) => Some(format!("email:{}", san_escape(&s.to_string()))),
+                            GeneralName::UniformResourceIdentifier(s) => Some(format!("URI:{}", san_escape(&s.to_string()))),
                             GeneralName::IpAddress(o) => Some(format!("IP Address:{}", ip_text(o.as_bytes()))),
                             _ => None,
                         })
@@ -280,4 +280,25 @@ pub(crate) fn signed_parts(der: &[u8]) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>, i64
         tbs.validity.not_before.to_unix_duration().as_secs() as i64,
         tbs.validity.not_after.to_unix_duration().as_secs() as i64,
     ))
+}
+
+/// Node's alt-name spelling: a name with a separator, quote, backslash or a
+/// non-printable character is written as a JSON-style quoted string
+/// (`DNS:"a\u0000b"`), so the list stays unambiguous.
+fn san_escape(name: &str) -> String {
+    let needs = name.chars().any(|c| c == ',' || c == '"' || c == '\\' || (c as u32) < 0x20 || (c as u32) > 0x7e);
+    if !needs {
+        return name.to_owned();
+    }
+    let mut out = String::from("\"");
+    for c in name.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 || (c as u32) > 0x7e => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }

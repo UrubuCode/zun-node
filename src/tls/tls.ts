@@ -139,9 +139,11 @@ function __tlsValidateKeyish(name: string, value: any): void {
 function __tlsCollect(name: string, value: any, allowObject: boolean, passOut: any): string[] {
   const out: string[] = [];
   if (value === undefined || value === null || value === false) return out;
-  const items: any[] = Array.isArray(value) ? value : [value];
+  const isList: boolean = Array.isArray(value);
+  const items: any[] = isList ? value : [value];
   for (const item of items) {
-    if (allowObject && item !== null && typeof item === "object" && !__tlsIsBytes(item)) {
+    // `{ pem, passphrase }` is accepted only as an element of a key array.
+    if (allowObject && isList && item !== null && typeof item === "object" && !__tlsIsBytes(item)) {
       const pem: any = item.pem;
       __tlsValidateKeyish(name, pem);
       if (item.passphrase !== undefined && item.passphrase !== null) passOut.value = String(item.passphrase);
@@ -232,15 +234,18 @@ function __tlsCreateSecureContext(options?: any): any {
   if (opts.ciphers !== undefined && opts.ciphers !== null && typeof opts.ciphers !== "string") {
     throw new ERR_INVALID_ARG_TYPE("options.ciphers", "string", opts.ciphers);
   }
+  if (typeof opts.ciphers === "string" && !__tlsCipherListMatches(String(opts.ciphers))) {
+    throw new __TlsOpenSSLError("ERR_SSL_NO_CIPHER_MATCH", "error:0A0000B9:SSL routines::no cipher match");
+  }
   if (opts.passphrase !== undefined && opts.passphrase !== null && typeof opts.passphrase !== "string") {
     throw new ERR_INVALID_ARG_TYPE("options.passphrase", "string", opts.passphrase);
   }
   const ctx: any = new SecureContext(opts.secureProtocol, opts.secureOptions, opts.minVersion, opts.maxVersion);
   const state: any = ctx._tls;
   const pass: any = { value: opts.passphrase === undefined || opts.passphrase === null ? undefined : String(opts.passphrase) };
-  state.ca = __tlsCollect("options.ca", opts.ca, false, pass);
-  state.cert = __tlsCollect("options.cert", opts.cert, false, pass);
   state.key = __tlsCollect("options.key", opts.key, true, pass);
+  state.cert = __tlsCollect("options.cert", opts.cert, false, pass);
+  state.ca = __tlsCollect("options.ca", opts.ca, false, pass);
   state.passphrase = pass.value;
   state.ciphers = opts.ciphers;
   state.honorCipherOrder = opts.honorCipherOrder === true;
@@ -282,6 +287,22 @@ function __tlsCreateSecureContext(options?: any): any {
     }
   }
   return ctx;
+}
+
+// OpenSSL's "no cipher match": a list none of whose entries names a cipher
+// or a cipher-string keyword. Keywords (`HIGH`, `DEFAULT`, `!aNULL`, `AES128`)
+// are recognised by shape -- upper-case words -- so a list that only uses
+// suites rustls lacks is still accepted, as Node accepts it.
+function __tlsCipherListMatches(list: string): boolean {
+  for (const raw of list.split(":")) {
+    let token: string = raw.trim();
+    while (token !== "" && "!-+@".indexOf(token.charAt(0)) !== -1) token = token.slice(1);
+    if (token === "") continue;
+    if (token.charAt(0) === "!" || raw.trim().charAt(0) === "!") continue;
+    if (__tlsGetCiphers().indexOf(token.toLowerCase()) !== -1) return true;
+    if (token.toUpperCase() === token || /^[A-Za-z0-9+=._-]+$/.test(token) && token.charAt(0) === token.charAt(0).toUpperCase() && /[A-Z]/.test(token)) return true;
+  }
+  return false;
 }
 
 function __tlsKeyLooksBad(b64: string): boolean {
@@ -551,7 +572,9 @@ class TLSSocket extends Socket {
     super({ allowHalfOpen: opts.allowHalfOpen === true || (socket !== undefined && socket !== null && socket.allowHalfOpen === true) });
     const self: any = this;
     this._tlsOptions = opts;
-    this._rejectUnauthorized = opts.rejectUnauthorized !== false;
+    // A bare `new TLSSocket()` does not reject; `tls.connect` passes the
+    // option explicitly (default true).
+    this._rejectUnauthorized = opts.rejectUnauthorized === true;
     this._requestCert = opts.requestCert === true;
     if (opts.isServer === true) this.server = opts.server;
     this.ssl = {};
@@ -578,6 +601,7 @@ class TLSSocket extends Socket {
       host: opts.host,
       session: null,
       helloSeen: false,
+      pendingFinal: null,
     };
     // A TLS socket has no I/O handle of its own: the hooks below replace the
     // ones `Socket`'s constructor installed.
@@ -937,6 +961,16 @@ function __tlsParseInfo(self: any): any {
 }
 
 function __tlsOnSecure(self: any): void {
+  __tlsOnSecureInner(self);
+  const st: any = self._tlsState;
+  const pending: any = st.pendingFinal;
+  if (pending !== null && pending !== undefined && self.destroyed !== true) {
+    st.pendingFinal = null;
+    __tlsFinalHook(self, pending);
+  }
+}
+
+function __tlsOnSecureInner(self: any): void {
   const st: any = self._tlsState;
   st.secured = true;
   self._secureEstablished = true;
@@ -1121,6 +1155,12 @@ function __tlsWriteHook(self: any, chunk: any, encoding: any, cb: any): void {
 
 function __tlsFinalHook(self: any, cb: any): void {
   const st: any = self._tlsState;
+  // A `close_notify` sent mid-handshake aborts it, so an `end()` issued
+  // before the session is up waits for it, as Node's does.
+  if (st.secured !== true && Number(st.handle) !== 0) {
+    st.pendingFinal = cb;
+    return;
+  }
   if (Number(st.handle) !== 0 && st.closeSent !== true) {
     st.closeSent = true;
     const result: string = String(__tlsNative.tlsCloseNotify(Number(st.handle)));
@@ -1143,14 +1183,12 @@ function __tlsDestroyHook(self: any, err: any, cb: any): void {
   __netClearTimeout(self);
   const raw: any = st.raw;
   if (raw !== null && raw.destroyed !== true) {
-    if (err === undefined || err === null) {
-      // A clean destroy lets the queued ciphertext (the `close_notify`
-      // included) reach the peer first.
-      if (typeof raw.destroySoon === "function") raw.destroySoon();
-      else raw.destroy();
-    } else {
-      raw.destroy();
-    }
+    // The TCP side is closed with a FIN after the queued ciphertext (an
+    // alert or `close_notify` included), even when the TLS socket is
+    // destroyed with an error: OpenSSL's peer sees an orderly close, while an
+    // abortive one surfaces as ECONNRESET/ECONNABORTED on the other end.
+    if (typeof raw.destroySoon === "function") raw.destroySoon();
+    else raw.destroy();
   }
   __netInvoke(cb, [err === undefined ? null : err]);
   const hadError: boolean = err !== undefined && err !== null;

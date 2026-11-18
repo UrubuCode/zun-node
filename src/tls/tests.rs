@@ -94,3 +94,14 @@ fn mismatched_key_is_rejected() {
     let ca_key_opts = record(&[("cert", base64::encode(CA)), ("key", base64::encode(KEY))]);
     assert!(new_session(true, &ca_key_opts).is_err());
 }
+
+#[test]
+fn describes_a_certificate_with_a_nul_in_its_alt_names() {
+    let der = parse_certs(include_bytes!("testdata/0-dns-cert.pem")).unwrap().remove(0);
+    let text = x509::describe(der.as_ref()).expect("parses");
+    let fields: Vec<&str> = text.split(US).collect();
+    assert_eq!(
+        fields[8],
+        r#"DNS:"good.example.org\u0000.evil.example.com", DNS:just-another.example.com, IP Address:8.8.8.8, IP Address:8.8.4.4, DNS:last.example.com"#
+    );
+}
