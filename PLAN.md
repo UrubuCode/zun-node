@@ -683,9 +683,16 @@ gets deleted; nothing else in the tracker changes.
   three spellings a test body can use to reach the class — `new URL(...)`,
   `URL.<static>`, `x instanceof URL` — exactly as it already rewrites
   `console`, `performance` and `crypto`.
-  **Not done, by capability:** `URLPattern` (a separate WHATWG specification
-  Node implements in C++ over ada's `url_pattern`, declared as a gap rather
-  than faked), `fileURLToPathBuffer` (needs `node:buffer`), `Symbol.iterator`
+  `src/url/urlpattern.ts` is the **WHATWG URL Pattern Standard** (`URLPattern`,
+  exported from `node:url` and installed as a global, as in Node 25): the
+  tokenizer, pattern parser, regexp and pattern-string generators, the
+  constructor string parser, "process a URLPatternInit", the per-component
+  canonicalizers over `whatwg.ts`' basic URL parser, `exec`/`test`, and Node's
+  argument checks (`ERR_INVALID_ARG_TYPE`, `ERR_CONSTRUCT_CALL_REQUIRED`,
+  "Illegal invocation"). Engine bugs found on the way:
+  [#130](https://github.com/UrubuCode/zun/issues/130),
+  [#131](https://github.com/UrubuCode/zun/issues/131).
+  **Not done, by capability:** `fileURLToPathBuffer` (needs `node:buffer`), `Symbol.iterator`
   and `Symbol.toStringTag` on `URL`/`URLSearchParams` (no symbol-keyed class
   members on this engine), `util.inspect` custom formatting for them, and the
   rest of **UTS#46**: there is no ICU here, so `whatwg.ts` carries the three

@@ -570,7 +570,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-url:start -->
 ### Node.js v25 `url` compatibility
 
-`███████████████████░░░░░` **79.5%** — 35 / 44 Node `test-url*|test-whatwg-url-*` tests passing
+`████████████████████░░░░` **84.0%** — 37 / 44 Node `test-url*|test-whatwg-url-*` tests passing
 <!-- node-url:end -->
 
 > `url` is implemented end to end, on both of its halves. `src/url/url.ts` is
@@ -617,8 +617,8 @@ the direct `zun run --ext <lib> <test.js>` path.
 > panics on the loop counter
 > ([zun#67](https://github.com/UrubuCode/zun/issues/67), re-confirmed on
 > `c4afcca4`). The
-> remaining failures are `URLPattern` (a separate WHATWG specification Node
-> implements in C++, declared as a gap rather than faked), the
+> `URLPattern` is implemented too (`src/url/urlpattern.ts`, the URL Pattern
+> Standard over the same basic URL parser). The remaining failures are the
 > function/prototype/descriptor model, symbol-keyed class members
 > (`Symbol.iterator`, `Symbol.toStringTag`, `util.inspect.custom`), reading a
 > class method as a value for the `method.call(undefined)` brand checks,
