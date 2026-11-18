@@ -244,7 +244,12 @@ function __ntRoot(): any {
     root.concurrency = 1;
     __ntState.root = root;
     __ntState.counters = __ntNewCounters();
-    __ntState.only = __ntArgvHas("--test-only");
+    // lib/internal/test_runner/harness.js: `only` filtering is always on in a
+    // plain run (and under --test-isolation=none, which is one), and follows
+    // --test-only in a child of the test runner.
+    const context: any = process.env.NODE_TEST_CONTEXT;
+    const isChild = context !== undefined && context !== null && String(context) !== "";
+    __ntState.only = isChild ? __ntArgvHas("--test-only") : true;
     const patterns = __ntArgvValues("--test-name-pattern");
     if (Number(patterns.length) > 0) {
       __ntState.namePatterns = patterns.map((p: any) => __ntStringToRegExp(String(p), "--test-name-pattern"));
@@ -308,7 +313,7 @@ function __ntNewNode(kind: string, name: any, options: any, fn: any, parent: any
     skipMessage: undefined,
     isTodo: false,
     todoMessage: undefined,
-    only: false,
+    only: undefined,
     runOnlySubtests: false,
     timeout: Infinity,
     plan: null,
@@ -377,7 +382,7 @@ function __ntApplyOptions(node: any, options: any): void {
   const parent: any = node.parent;
   const timeout: any = options.timeout;
   if (timeout === null || timeout === undefined) {
-    node.timeout = parent !== null && parent.kind !== "root" ? parent.timeout : Infinity;
+    node.timeout = parent !== null && parent.kind !== "root" ? parent.timeout : __ntDefaultTimeout();
   } else {
     if (typeof timeout !== "number") throw new ERR_INVALID_ARG_TYPE("options.timeout", "number", timeout);
     if (timeout !== Infinity) __ntValidateNumber(timeout, "options.timeout", 0, __NT_TIMEOUT_MAX);
@@ -409,41 +414,50 @@ function __ntApplyOptions(node: any, options: any): void {
     node.expectedAssertions = Number(plan);
   }
 
+  // Node's own tests: `skip !== undefined && skip !== false` (so `''` and
+  // `null` both skip), and a todo parent makes every descendant todo.
   const skip: any = options.skip;
-  if (skip !== undefined && skip !== null && skip !== false) {
+  if (skip !== undefined && skip !== false) {
     node.skipped = true;
-    node.skipMessage = typeof skip === "string" ? skip : undefined;
+    node.skipMessage = typeof skip === "string" && skip !== "" ? skip : undefined;
   }
   const todo: any = options.todo;
-  if (todo !== undefined && todo !== null && todo !== false) {
+  if (todo !== undefined && todo !== false) {
     node.isTodo = true;
-    node.todoMessage = typeof todo === "string" ? todo : undefined;
+    node.todoMessage = typeof todo === "string" && todo !== "" ? todo : undefined;
+  } else if (parent !== null && parent.kind !== "root" && parent.isTodo) {
+    node.isTodo = true;
   }
   if (options.only === true) node.only = true;
+  else if (options.only === false) node.only = false;
 
   // A skipped node with a todo flag reports as skipped (Node's
   // `if (skip) { ... } else if (todo)` order).
   if (node.skipped) node.isTodo = false;
 
-  // `--test-only`: a test that is not `only` (and whose parent does not run
-  // everything) is skipped with the message Node uses.
-  if (__ntState.only && parent !== null) {
-    const parentRunsAll = parent.kind === "root" ? false : !parent.runOnlySubtests && parent.only;
-    if (!node.only && !parentRunsAll && node.kind !== "suite" && !__ntHasOnlyAncestor(parent)) {
-      if (parent.kind === "root" || parent.runOnlySubtests || parent.kind === "suite") {
-        node.skipped = true;
-        node.skipMessage = "'only' option not set";
-        node.filtered = true;
+  // Filtering, as in Node's Test constructor: a name-pattern match unfilters
+  // every ancestor; an `only` test makes its parent run only `only`
+  // subtests and marks the not-yet-started ancestors as having some. The
+  // decision itself is `__ntApplyFilters`, taken when the node starts.
+  if (parent !== null && node.kind !== "hook") {
+    if (__ntState.namePatterns !== null || __ntState.skipPatterns !== null) {
+      node.filteredByName = __ntWillBeFilteredByName(node);
+      if (!node.filteredByName) {
+        for (let t: any = parent; t !== null && t.filteredByName === true; t = t.parent) t.filteredByName = false;
       }
     }
-  }
-
-  // --test-name-pattern / --test-skip-pattern filtering.
-  if (node.kind === "test" && __ntState.namePatterns !== null) {
-    if (!__ntMatchesPatterns(node, __ntState.namePatterns)) node.filtered = true;
-  }
-  if (node.kind === "test" && __ntState.skipPatterns !== null) {
-    if (__ntMatchesPatterns(node, __ntState.skipPatterns)) node.filtered = true;
+    if (__ntState.only) {
+      if (node.only === true) {
+        parent.runOnlySubtests = true;
+        if (parent.kind === "root" || !parent.started) {
+          for (let t: any = parent; t !== null && t.hasOnlyTests !== true; t = t.parent) t.hasOnlyTests = true;
+        }
+      } else if (node.only === false) {
+        node.fn = undefined;
+      }
+    } else if (options.only === true || parent.runOnlySubtests) {
+      node.diagnostics.push("'only' and 'runOnly' require the --test-only command-line option.");
+    }
   }
 
   const ac: any = new AbortController();
@@ -460,29 +474,47 @@ function __ntApplyOptions(node: any, options: any): void {
   }
 }
 
-function __ntHasOnlyAncestor(node: any): boolean {
-  let cur: any = node;
-  while (cur !== null && cur.kind !== "root") {
-    if (cur.only) return true;
-    cur = cur.parent;
+// `--test-timeout`: the timeout of a top-level test that sets none.
+function __ntDefaultTimeout(): number {
+  const values = __ntArgvValues("--test-timeout");
+  if (Number(values.length) === 0) return Infinity;
+  const n = Number(values[Number(values.length) - 1]);
+  return n > 0 ? n : Infinity;
+}
+
+function __ntApplyFilters(node: any): void {
+  if (node.error !== null) return;
+  if (node.filteredByName === true) {
+    node.filtered = true;
+    return;
   }
+  const parent: any = node.parent;
+  if (__ntState.only && node.only !== true && node.hasOnlyTests !== true && parent !== null) {
+    if (parent.runOnlySubtests || parent.hasOnlyTests === true || node.only === false) node.filtered = true;
+  }
+}
+
+function __ntWillBeFilteredByName(node: any): boolean {
+  if (__ntState.namePatterns !== null && !__ntMatchesPatterns(node, __ntState.namePatterns)) return true;
+  if (__ntState.skipPatterns !== null && __ntMatchesPatterns(node, __ntState.skipPatterns)) return true;
   return false;
 }
 
 function __ntNameWithAncestors(node: any): string {
-  const parts: string[] = [];
-  let cur: any = node;
-  while (cur !== null && cur.kind !== "root") {
-    parts.unshift(String(cur.name));
-    cur = cur.parent;
-  }
-  return parts.join(" ");
+  if (node === null || node.parent === null) return "";
+  return __ntNameWithAncestors(node.parent) + " " + String(node.name);
 }
 
+// `internal/test_runner/utils`' `testMatchesPattern`.
 function __ntMatchesPatterns(node: any, patterns: any[]): boolean {
-  const full = __ntNameWithAncestors(node);
   for (const re of patterns) {
+    re.lastIndex = 0;
     if (re.exec(String(node.name)) !== null) return true;
+  }
+  if (node.parent !== null && node.parent.kind !== "root" && __ntMatchesPatterns(node.parent, patterns)) return true;
+  const full = __ntNameWithAncestors(node).trim();
+  for (const re of patterns) {
+    re.lastIndex = 0;
     if (re.exec(full) !== null) return true;
   }
   return false;
@@ -793,7 +825,6 @@ function __ntCreateTest(parent: any, args: any[], kind: string): any {
   const node: any = __ntNewNode(kind, parsed.name, parsed.options, parsed.fn, parent);
   __ntApplyOptions(node, parsed.options);
   if (kind === "suite") {
-    if (parent.kind === "suite" && parent.isTodo && !node.isTodo) node.isTodo = parent.isTodo;
     __ntBuildSuite(node);
   }
   if (parent.finished && parent.kind !== "root") {
@@ -815,7 +846,8 @@ function __ntBuildSuite(node: any): void {
   const saved: any = __ntState.current;
   __ntState.current = node;
   try {
-    const ret: any = __ntCall(node.fn, undefined, [__ntContextOf(node)]);
+    const sctx: any = __ntContextOf(node);
+    const ret: any = __ntCall(node.fn, sctx, [sctx]);
     if (__ntIsPromise(ret)) {
       node.buildSuite = Promise.resolve(ret).then(
         (v: any) => undefined,
@@ -970,13 +1002,13 @@ async function __ntRunHook(hook: any, target: any): Promise<any> {
     let ret: any;
     if (Number(fn.length) >= 2) {
       const cb: any = __ntDeferred();
-      ret = __ntCall(fn, undefined, [ctx, (err: any) => {
+      ret = __ntCall(fn, ctx, [ctx, (err: any) => {
         if (err !== undefined && err !== null) cb.reject(err);
         else cb.resolve(undefined);
       }]);
       await __ntWithTimeout(cb.promise, hook.timeout);
     } else {
-      ret = __ntCall(fn, undefined, [ctx]);
+      ret = __ntCall(fn, ctx, [ctx]);
       if (__ntIsPromise(ret)) await __ntWithTimeout(ret, hook.timeout);
     }
   } catch (err) {
@@ -1049,6 +1081,7 @@ function __ntShouldAbort(node: any): boolean {
 
 async function __ntRunTest(node: any): Promise<any> {
   const parent: any = node.parent;
+  __ntApplyFilters(node);
   node.started = true;
   node.startTime = __ntNow();
   __ntEmitStart(node);
@@ -1108,14 +1141,14 @@ async function __ntRunTest(node: any): Promise<any> {
             if (err !== undefined && err !== null) cb.reject(err);
             else cb.resolve(undefined);
           };
-          const ret: any = __ntCall(node.fn, undefined, [ctx, done]);
+          const ret: any = __ntCall(node.fn, ctx, [ctx, done]);
           if (__ntIsPromise(ret)) {
             Promise.resolve(ret).then(undefined, (e: any) => undefined);
             throw new ERR_TEST_FAILURE("passed a callback but also returned a Promise", __NT_kCallbackAndPromisePresent);
           }
           produced = cb.promise;
         } else {
-          produced = __ntCall(node.fn, undefined, [ctx]);
+          produced = __ntCall(node.fn, ctx, [ctx]);
         }
       } finally {
         __ntState.current = saved;
@@ -1191,6 +1224,13 @@ async function __ntRunSuite(node: any): Promise<any> {
   const parent: any = node.parent;
   node.started = true;
   await node.buildSuite;
+  __ntApplyFilters(node);
+  if (node.filtered) {
+    node.queue = [];
+    node.finished = true;
+    __ntReport(node);
+    return;
+  }
   node.startTime = __ntNow();
   __ntEmitStart(node);
 
@@ -1250,13 +1290,47 @@ function __ntLoc(node: any, data: any): void {
   if (__ntState.file !== undefined) data.file = __ntState.file;
 }
 
+// Reports go out in declaration order whatever the concurrency, as in Node
+// (`Test#isClearToSend` / `readySubtests`): a node may emit its `test:start`
+// only once its parent has, and its result only once every earlier sibling
+// has reported; until then a finished node waits (`pendingReport`).
+function __ntCanSend(node: any): boolean {
+  const parent: any = node.parent;
+  if (parent === null) return true;
+  if (parent.kind !== "root" && !parent.reportedStart) return false;
+  for (const sibling of parent.children) {
+    if (sibling === node) return true;
+    if (!sibling.reported) return false;
+  }
+  return true;
+}
+
 function __ntEmitStart(node: any): void {
   if (node.reportedStart) return;
+  if (!__ntCanSend(node)) return;
   node.reportedStart = true;
-  if (node.filtered && !(node.skipped && node.skipMessage === "'only' option not set")) return;
-  const data: any = { name: node.name, nesting: node.nesting };
-  __ntLoc(node, data);
-  __ntEmit("test:start", data);
+  if (!node.filtered) {
+    const data: any = { name: node.name, nesting: node.nesting };
+    __ntLoc(node, data);
+    __ntEmit("test:start", data);
+  }
+  __ntFlushChildren(node);
+}
+
+// Report the leading run of `parent`'s children that are ready, and start
+// the first one still running.
+function __ntFlushChildren(parent: any): void {
+  if (parent.kind !== "root" && !parent.reportedStart) return;
+  for (const child of parent.children) {
+    if (child.reported) continue;
+    if (child.pendingReport) {
+      __ntReport(child);
+      if (!child.reported) return;
+      continue;
+    }
+    if (child.started) __ntEmitStart(child);
+    return;
+  }
 }
 
 function __ntDuration(node: any): number {
@@ -1267,14 +1341,21 @@ function __ntDuration(node: any): number {
 
 function __ntReport(node: any): void {
   if (node.reported) return;
+  if (!__ntCanSend(node)) {
+    node.pendingReport = true;
+    return;
+  }
+  // Starting the report also reports the children that were waiting on it.
+  __ntEmitStart(node);
   node.reported = true;
+  node.pendingReport = false;
   const parent: any = node.parent;
 
   // A failed subtest makes its parent fail with `N subtest(s) failed`.
   if (node.error === null && node.kind !== "hook") {
     let failed = 0;
     for (const child of node.children) {
-      if (!child.passed && !child.skipped && !child.isTodo && child.reported && !child.filtered) failed++;
+      if (!child.passed && !child.skipped && !child.isTodo && child.finished && !child.filtered) failed++;
     }
     if (failed > 0) {
       node.passed = false;
@@ -1287,7 +1368,8 @@ function __ntReport(node: any): void {
   if (node.error !== null) node.passed = false;
   else if (node.kind !== "hook") node.passed = true;
 
-  if (node.filtered && !(node.skipped && node.skipMessage === "'only' option not set")) {
+  if (node.filtered) {
+    __ntFlushChildren(parent);
     return;
   }
 
@@ -1329,6 +1411,8 @@ function __ntReport(node: any): void {
   for (const message of node.diagnostics) {
     __ntEmit("test:diagnostic", { nesting: node.nesting, message: message, file: __ntState.file });
   }
+  // The next sibling may have been waiting on this one.
+  __ntFlushChildren(parent);
 }
 
 function __ntReportRoot(root: any): void {
@@ -1787,3 +1871,17 @@ const __node_internal_test_runner_utils: any = {
     return __ntStringToRegExp(String(str), String(name));
   },
 };
+
+// `--test-isolation=none` (src/bin/zun-node-run.rs concatenates the files
+// into one program): a file that declares no test is reported as one passing
+// test named after the file, as Node reports it.
+function __ntFileMark(): number {
+  return Number(__ntRoot().children.length);
+}
+
+function __ntFileDone(name: any, mark: any): void {
+  const root: any = __ntRoot();
+  if (Number(root.children.length) === Number(mark)) {
+    test(String(name));
+  }
+}

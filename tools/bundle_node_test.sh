@@ -1501,7 +1501,9 @@ $obj
 # quoted text are left alone.
 for shadow in setTimeout setInterval clearTimeout clearInterval queueMicrotask Blob File; do
   if grep -qE "^(export )?(async )?(function|class) $shadow\b" "$OUT"; then
-    perl -pi -e "s/(?<![.\\w\$'\"\`])$shadow\\b(?!\\s*:(?!:))/__zunShadow_$shadow/g" "$OUT"
+    # (`\\\$` reaches perl as `\$`: a bare `$'` inside the class would be
+    # perl's postmatch variable, which silently dropped the quote from it.)
+    perl -pi -e "s/(?<![.\\w\\\$'\"\`])$shadow\\b(?!\\s*:(?!:))/__zunShadow_$shadow/g" "$OUT"
   fi
 done
 # The rename above also hits a *class method* of the same name (`net.Socket`,
@@ -1538,6 +1540,24 @@ if grep -q "fixtures\.path" "$OUT"; then
   ' "$OUT"
 fi
 
+
+# `mock.timers` and the bare `Date`.
+#
+# `MockTimers.enable({ apis: ['Date'] })` replaces `globalThis.Date`, as Node
+# does, but a bare `Date` in a bundle is the engine's intrinsic and never reads
+# the global, so `new Date()` and `Date.now()` would keep the real clock. In a
+# test that enables mock timers, every bare `Date` of the *test body* is
+# therefore spelled `globalThis.Date` (`new globalThis.Date(...)` reaches the
+# replacement; member reads, object keys and quoted text are left alone).
+if grep -q "timers\.enable" "$OUT" && grep -q "^// ==== test body ====" "$OUT"; then
+  perl -pi -e '
+    $body = 1 if /^\/\/ ==== test body ====/;
+    $body = 0 if /^\/\/ ==== harness epilogue/;
+    if ($body && !/^\s*\/\//) {
+      s{(\x27(?:[^\x27\\]|\\.)*\x27|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`)|(?<![.\w\$])Date\b(?!\s*:(?!:))}{defined $1 ? $1 : "globalThis.Date"}ge;
+    }
+  ' "$OUT"
+fi
 # Any `require` left over means the test needs a module the bundler does not
 # know; fail loudly rather than letting the engine report a mystery.
 if grep -n "require(" "$OUT" | grep -v "^[0-9]*: *[*/]" >/dev/null 2>&1; then

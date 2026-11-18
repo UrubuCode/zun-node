@@ -116,6 +116,59 @@ fn exec_flags(args: &[String]) -> Vec<String> {
     out
 }
 
+/// Whether `--test-isolation=none` (either spelling) is among the flags.
+fn isolation_none(flags: &[String]) -> bool {
+    flags.iter().any(|f| f == "--test-isolation=none")
+        || flags.windows(2).any(|w| w[0] == "--test-isolation" && w[1] == "none")
+}
+
+/// Node's default `--test` file patterns, from the working directory:
+/// `**/*.test.{c,m,}js`, `**/*-test.*`, `**/*_test.*`, `**/test-*.*`,
+/// `**/test.*` and anything under a `test` directory, minus `node_modules`.
+fn discover_tests() -> Vec<String> {
+    fn is_js(name: &str) -> bool {
+        name.ends_with(".js") || name.ends_with(".cjs") || name.ends_with(".mjs")
+    }
+    fn matches(name: &str, in_test_dir: bool) -> bool {
+        if !is_js(name) {
+            return false;
+        }
+        if in_test_dir {
+            return true;
+        }
+        let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+        stem == "test"
+            || stem.ends_with(".test")
+            || stem.ends_with("-test")
+            || stem.ends_with("_test")
+            || stem.starts_with("test-")
+    }
+    fn walk(dir: &Path, relative: &Path, in_test_dir: bool, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let mut names: Vec<_> = entries.flatten().collect();
+        names.sort_by_key(|e| e.file_name());
+        for entry in names {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name == "node_modules" || name.starts_with('.') {
+                continue;
+            }
+            let path = entry.path();
+            let rel = relative.join(&name);
+            if path.is_dir() {
+                walk(&path, &rel, in_test_dir || name == "test", out);
+            } else if matches(&name, in_test_dir) {
+                out.push(rel.to_string_lossy().into_owned());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        walk(&cwd, Path::new(""), false, &mut out);
+    }
+    out.sort();
+    out
+}
+
 /// `value` as a JavaScript string literal.
 fn js_string(value: &str) -> String {
     let mut out = String::from("\"");
@@ -290,6 +343,42 @@ fn main() -> ExitCode {
     let is_eval = matches!(source, Source::Text(..) | Source::Test(..));
     let script = match source {
         Source::File(path) => path,
+        Source::Test(files) if isolation_none(&flags) => {
+            // `--test-isolation=none`: every file runs in this one process, as
+            // Node does it, so the files are concatenated -- each in a
+            // function of its own, which is the scope CommonJS gives it -- and
+            // the result runs as an ordinary script whose `node:test` root
+            // reports them all.
+            // A file that declares no test at all is reported as one passing
+            // test named after the file, which is what Node prints for it
+            // (`__ntFileMark`/`__ntFileDone`, src/test/test.ts).
+            let list = if files.is_empty() { discover_tests() } else { files };
+            let mut text = String::from("require('node:test');\n");
+            for (index, file) in list.iter().enumerate() {
+                let Ok(source) = std::fs::read_to_string(file) else {
+                    let shown = std::path::absolute(file).unwrap_or_else(|_| PathBuf::from(file));
+                    eprintln!("Could not find '{}'", shown.display());
+                    return ExitCode::from(1);
+                };
+                text.push_str(&format!("const __zunFileMark{index} = __ntFileMark();\n(function () {{\n"));
+                text.push_str(&source);
+                text.push_str(&format!("\n}})();\n__ntFileDone({}, __zunFileMark{index});\n", js_string(file)));
+            }
+            let mut hasher = DefaultHasher::new();
+            text.hash(&mut hasher);
+            let directory = cache_dir();
+            if std::fs::create_dir_all(&directory).is_err() {
+                return fail("cannot create the cache directory");
+            }
+            // An `.mjs` member makes the whole program one, so the bundler
+            // lowers its `import` lines.
+            let extension = if list.iter().any(|f| f.ends_with(".mjs")) { "mjs" } else { "js" };
+            let file = directory.join(format!("test-none-{:016x}.{extension}", hasher.finish()));
+            if std::fs::write(&file, text).is_err() {
+                return fail("cannot write the test-runner script");
+            }
+            file
+        }
         Source::Test(files) => {
             let files: Vec<String> = files.iter().map(|f| js_string(f)).collect();
             let quoted: Vec<String> = flags.iter().map(|f| js_string(f)).collect();

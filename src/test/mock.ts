@@ -121,15 +121,16 @@ function __ntMockSetup(tracker: any, ctx: any, original: any): any {
     ctx._calls.push(record);
     return record.result;
   };
-  mock.mock = ctx;
-  try {
-    Object.defineProperty(mock, "name", { value: original.name, configurable: true });
-  } catch (e) {}
-  try {
-    Object.defineProperty(mock, "length", { value: original.length, configurable: true });
-  } catch (e) {}
+  // The mock goes out as a boxed function record (`__evBox`, see
+  // tools/harness/common.ts): a bare function returned from `t.mock.fn()` --
+  // a dynamic method call -- can still be called, but reading any property
+  // of it (`fn.mock`) panics the interpreter
+  // (https://github.com/UrubuCode/zun/issues/139). The record survives that
+  // lane, stays callable and constructible, and carries `mock` itself.
+  const boxed: any = __evBox(mock);
+  boxed.mock = ctx;
   tracker._mocks.push(ctx);
-  return mock;
+  return boxed;
 }
 
 // ---------------------------------------------------------------------------
@@ -379,6 +380,12 @@ function __ntNewMockTracker(): any {
 
 const __NT_SUPPORTED_TIMER_APIS: string[] = ["setTimeout", "setInterval", "setImmediate", "Date", "scheduler.wait"];
 
+// `validateAbortSignal`: an object with the AbortSignal surface.
+function __ntMockIsAbortSignal(signal: any): boolean {
+  if (signal === null || typeof signal !== "object") return false;
+  return typeof signal.aborted === "boolean" && __ntIsFn(signal.addEventListener);
+}
+
 class __NtMockTimeout {
   id: any;
   callback: any;
@@ -509,7 +516,7 @@ class MockTimers {
   }
 
   _assertTimeArg(time: any): void {
-    if (Number(time) < 0) throw new ERR_INVALID_ARG_VALUE("time", "positive integer", time);
+    if (Number(time) < 0) throw new ERR_INVALID_ARG_VALUE("time", "positive integer", String(time));
   }
 
   _promisify(isImmediate: boolean, ms: any, result: any, options: any): any {
@@ -517,6 +524,10 @@ class MockTimers {
     return new Promise((resolve: any, reject: any) => {
       const signal: any = options !== undefined && options !== null ? options.signal : undefined;
       if (signal !== undefined && signal !== null) {
+        if (!__ntMockIsAbortSignal(signal)) {
+          reject(new ERR_INVALID_ARG_TYPE("options.signal", "AbortSignal", signal));
+          return;
+        }
         if (signal.aborted) {
           reject(new AbortError(undefined, { cause: signal.reason }));
           return;

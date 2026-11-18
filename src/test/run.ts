@@ -256,6 +256,11 @@ function __ntRunFile(stream: any, file: string, opts: any, totals: any, sink: an
   return new Promise((resolve: any) => {
     const args: string[] = [];
     if (opts.only === true) args.push("--test-only");
+    // `timeout` applies to each test in the file (Node's FileTest itself has
+    // none), so it travels to the child as its default test timeout.
+    if (opts.timeout !== undefined && opts.timeout !== null && opts.timeout !== Infinity) {
+      args.push("--test-timeout=" + String(opts.timeout));
+    }
     for (const a of __ntPatternArgs("--test-name-pattern", opts.testNamePatterns)) args.push(a);
     for (const a of __ntPatternArgs("--test-skip-pattern", opts.testSkipPatterns)) args.push(a);
     if (Array.isArray(opts.execArgv)) for (const a of opts.execArgv) args.push(String(a));
@@ -287,6 +292,7 @@ function __ntRunFile(stream: any, file: string, opts: any, totals: any, sink: an
         const dtype: any = data.details !== undefined && data.details !== null ? data.details.type : undefined;
         if (dtype === "suite") {
           totals.suites = Number(totals.suites) + 1;
+          if (type === "test:fail") totals.suiteFailed = true;
         } else {
           const ftype: any = data.details !== undefined && data.details !== null && data.details.error !== undefined && data.details.error !== null
             ? data.details.error.failureType : undefined;
@@ -400,12 +406,6 @@ function __ntRunFile(stream: any, file: string, opts: any, totals: any, sink: an
     child.on("close", (code: any, signal: any) => {
       finishFile(code, signal, null);
     });
-    if (opts.timeout !== undefined && opts.timeout !== null && opts.timeout !== Infinity) {
-      state.timer = __timerRealSetTimeout(() => {
-        state.timedOut = true;
-        try { child.kill(); } catch (e) {}
-      }, opts.timeout);
-    }
     if (opts.signal !== undefined && opts.signal !== null) {
       const signal: any = opts.signal;
       const onAbort = (): void => {
@@ -518,7 +518,7 @@ function __ntRunMain(options?: any): any {
     for (const pair of lines) {
       stream._push("test:diagnostic", { nesting: 0, message: String(pair[0]) + " " + String(pair[1]), level: "info" });
     }
-    const success = Number(totals.failed) === 0 && Number(totals.cancelled) === 0;
+    const success = Number(totals.failed) === 0 && Number(totals.cancelled) === 0 && totals.suiteFailed !== true;
     stream._push("test:summary", {
       success: success,
       counts: {
@@ -619,10 +619,22 @@ function __ntCli(run: any, flags: string[], files: string[]): void {
   // The flags a file's child also needs: everything that is not the CLI's
   // own `--test*` configuration.
   const forwarded: string[] = [];
-  for (const f of flags) {
-    const s = String(f);
-    if (s === "--test" || s.indexOf("--test-") === 0) continue;
+  // The launcher hands value flags over as two words (`--test-reporter dot`);
+  // a word that does not start with `-` is the previous flag's value.
+  const flagCount = Number(flags.length);
+  for (let i = 0; i < flagCount; i++) {
+    const s = String(flags[i]);
+    const isTestFlag = s === "--test" || s.indexOf("--test-") === 0;
+    const hasValue = i + 1 < flagCount && String(flags[i + 1]).charAt(0) !== "-";
+    if (isTestFlag) {
+      if (hasValue && s.indexOf("=") === -1) i++;
+      continue;
+    }
     forwarded.push(s);
+    if (hasValue) {
+      forwarded.push(String(flags[i + 1]));
+      i++;
+    }
   }
   if (__ntCliFlag(flags, "--test-only") === true) forwarded.push("--test-only");
   if (forceExit) forwarded.push("--test-force-exit");

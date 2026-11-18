@@ -78,7 +78,8 @@ Three bundler entries were added for this corpus:
   `emitExperimentalWarning`, `deprecate`, `pendingDeprecate`, `promisify` and
   `customPromisifyArgs` are implemented in `src/util/util.ts` with real
   behaviour — nothing here is a stub.
-* `test` → `tools/harness/node_test.ts` and `tty` → a declared gap in the same
+* `test` → `node:test` (then the `tools/harness/node_test.ts` shim, now library
+  code in `src/test/`, see `test/test_runner/README.md`) and `tty` → a declared gap in the same
   file. `node:test` is not a module this library implements; it is the language
   several of Node's newer test files are *written in*, so it belongs with
   `common.ts`. Without it `test-util-stripvtcontrolcharacters.js` could not even

@@ -168,7 +168,7 @@ real blocker.
 
 ### One change to shared harness code
 
-`tools/harness/node_test.ts` declares a top-level `function test(...)`, and
+`tools/harness/node_test.ts` (now `src/test/test.ts`) declares a top-level `function test(...)`, and
 `test` is the name several of Node's own test files give their local helper —
 `test-string-decoder.js`, `test-buffer-tostring-rangeerror.js` and
 `test-buffer-constructor-node-modules-paths.js` among them. Two top-level
