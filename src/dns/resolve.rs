@@ -197,6 +197,103 @@ pub(in crate::dns) fn run_query(
     Err(last)
 }
 
+/// Marker codes of [`decode_response`] that are not c-ares errors: the answer
+/// was truncated (re-ask over TCP), or the datagram is not this query's answer.
+pub(in crate::dns) const TRUNCATED: &str = "TRUNCATED";
+pub(in crate::dns) const MISMATCH: &str = "MISMATCH";
+
+/// `dnsEncodeQuery(name, rrtype)` — the request message for the asynchronous
+/// transport in `src/dns/dns.ts`, as `+<id> US <base64>`.
+///
+/// The blocking [`run_query`] cannot serve a resolver whose server lives in the
+/// same process (a `dgram` socket the program itself is about to answer from),
+/// because nothing else runs while it waits. With the shared I/O loop present
+/// the TS layer therefore sends and receives over a `node:io` datagram socket
+/// itself, and only the wire format stays here: this encodes the question and
+/// [`decode_response`] parses the answer.
+pub(crate) unsafe extern "C" fn encode_request(
+    args: *const ZunValue,
+    count: usize,
+    out: *mut ZunValue,
+) -> i32 {
+    // SAFETY: the host passes `count` initialized values matching `[Str, Str]`.
+    let name = match unsafe { arg_str(args, count, 0) } {
+        Ok(value) => value,
+        Err(status) => return status,
+    };
+    // SAFETY: as above.
+    let rrtype = match unsafe { arg_str(args, count, 1) } {
+        Ok(value) => value,
+        Err(status) => return status,
+    };
+    let payload = match build_request(name, rrtype) {
+        Ok((id, request)) => {
+            let fields = vec![id.to_string(), crate::fs::base64::encode(&request)];
+            ok_records(&[fields])
+        }
+        Err(code) => failed(code),
+    };
+    // SAFETY: `out` is the host's writable return slot.
+    unsafe { ret_str(out, &payload) }
+}
+
+/// The plain half of [`encode_request`], for the unit tests.
+pub(in crate::dns) fn build_request(name: &str, rrtype: &str) -> Result<(u16, Vec<u8>), &'static str> {
+    let qtype = qtype_of(rrtype).ok_or(code::BADQUERY)?;
+    let question = encode_name(name).ok_or(code::BADNAME)?;
+    let id = next_id();
+    Ok((id, encode_query(id, &question, qtype)))
+}
+
+/// `dnsDecodeResponse(base64, rrtype, id)` — one received datagram as the
+/// records [`run_query`] would have produced, a c-ares code, or one of the
+/// [`TRUNCATED`] / [`MISMATCH`] markers.
+pub(crate) unsafe extern "C" fn decode_reply(
+    args: *const ZunValue,
+    count: usize,
+    out: *mut ZunValue,
+) -> i32 {
+    // SAFETY: the host passes `count` initialized values matching
+    // `[Str, Str, I64]`.
+    let encoded = match unsafe { arg_str(args, count, 0) } {
+        Ok(value) => value,
+        Err(status) => return status,
+    };
+    // SAFETY: as above.
+    let rrtype = match unsafe { arg_str(args, count, 1) } {
+        Ok(value) => value,
+        Err(status) => return status,
+    };
+    // SAFETY: as above.
+    let id = unsafe { arg_i64(args, count, 2) };
+    let message = crate::fs::base64::decode(encoded);
+    let payload = match decode_response(&message, rrtype, id) {
+        Ok(records) => ok_records(&records),
+        Err(code) => failed(code),
+    };
+    // SAFETY: `out` is the host's writable return slot.
+    unsafe { ret_str(out, &payload) }
+}
+
+/// The plain half of [`decode_reply`], for the unit tests.
+pub(in crate::dns) fn decode_response(
+    message: &[u8],
+    rrtype: &str,
+    id: i64,
+) -> Result<Vec<Vec<String>>, &'static str> {
+    let qtype = qtype_of(rrtype).ok_or(code::BADQUERY)?;
+    if message.len() < 12 {
+        return Err(code::BADRESP);
+    }
+    if i64::from(u16::from_be_bytes([message[0], message[1]])) != id {
+        return Err(MISMATCH);
+    }
+    if message[2] & 0x02 != 0 {
+        return Err(TRUNCATED);
+    }
+    decode_answers(message, qtype)
+}
+
 /// One request/response exchange with one server: UDP first, TCP when the
 /// answer is truncated.
 fn exchange(

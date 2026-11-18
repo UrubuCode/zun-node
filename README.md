@@ -1035,7 +1035,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-dns:start -->
 ### Node.js v25 `dns` compatibility
 
-`█████░░░░░░░░░░░░░░░░░░░` **22.2%** — 6 / 27 Node `test-dns*` tests passing
+`███████████████████░░░░░` **81.4%** — 22 / 27 Node `test-dns*` tests passing
 <!-- node-dns:end -->
 
 > `dns` is the sixth module written as Zun TypeScript over Rust natives, and the

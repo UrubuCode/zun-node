@@ -1508,6 +1508,8 @@ class NodeEnvironmentFlagsSet extends Set {
 // `process.allowedNodeEnvironmentFlags` is for. Each one is read out of
 // `NODE_OPTIONS` at load (see `__processApplyNodeOptions`).
 const __PROC_ALLOWED_FLAGS: string[] = [
+  // Read by `src/dns/dns.ts` (`__dnsInitialOrder`), not by the loop below.
+  "--dns-result-order",
   "--no-deprecation",
   "--no-warnings",
   "--pending-deprecation",

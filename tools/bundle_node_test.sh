@@ -247,6 +247,7 @@ dgram __node_dgram -
 internal/dgram __node_internal_dgram -
 cluster __node_cluster -
 [.][.]/common/udp __node_harness_udp -
+[.][.]/common/dns __node_harness_dns -
 internal/test/binding __node_internal_test_binding -
 internal/errors __node_internal_errors -
 [.][.]/common/internet __node_harness_internet -
@@ -546,6 +547,8 @@ internal/dgram src/dgram/dgram.ts
 [.][.]/common/udp src/net/net.ts
 [.][.]/common/udp src/dgram/dgram.ts
 [.][.]/common/udp tools/harness/udp.ts
+[.][.]/common/dns src/buffer/buffer.ts
+[.][.]/common/dns tools/harness/dns.ts
 cluster tools/harness/cluster.ts
 internal/test/binding src/dns/dns.ts
 internal/test/binding tools/harness/binding.ts

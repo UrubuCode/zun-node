@@ -117,8 +117,8 @@ import * as __dnsNative from "node:dns";
 // The native carrier
 // ---------------------------------------------------------------------------
 
-// Record and unit separators — C0 control characters, so no address, host name
-// or TXT chunk can contain one. See src/dns/mod.rs.
+// Record and unit separators — C0 control characters. A TXT chunk can still
+// contain one (or NUL), so fields are escaped; see `__dnsUnescape` below.
 const __DNS_RS: string = String.fromCharCode(30);
 const __DNS_US: string = String.fromCharCode(31);
 const __DNS_FAILED: string = "-";
@@ -148,13 +148,44 @@ function __dnsRecords(raw: string): string[][] {
   if (payload === "") return out;
   const records: string[] = payload.split(__DNS_RS);
   const count: number = Number(records.length);
-  for (let i = 0; i < count; i++) out.push(records[i].split(__DNS_US));
+  for (let i = 0; i < count; i++) out.push(__dnsUnescapeAll(records[i].split(__DNS_US)));
   return out;
 }
 
 // A successful result known to carry exactly one record.
 function __dnsFields(raw: string): string[] {
-  return raw.slice(1).split(__DNS_US);
+  return __dnsUnescapeAll(raw.slice(1).split(__DNS_US));
+}
+
+// The carrier's escape (see `push_escaped` in src/dns/mod.rs): a TXT chunk can
+// hold NUL or a separator, which cross as ESC + `0` / `r` / `u` / `e`.
+const __DNS_ESC: string = String.fromCharCode(28);
+
+function __dnsUnescapeAll(fields: string[]): string[] {
+  const out: string[] = [];
+  const n: number = Number(fields.length);
+  for (let i = 0; i < n; i++) out.push(__dnsUnescape(fields[i]));
+  return out;
+}
+
+function __dnsUnescape(field: string): string {
+  if (field.indexOf(__DNS_ESC) === -1) return field;
+  let out = "";
+  const n: number = Number(field.length);
+  for (let i = 0; i < n; i++) {
+    const ch: string = field.charAt(i);
+    if (ch !== __DNS_ESC || i + 1 >= n) {
+      out = out + ch;
+      continue;
+    }
+    i++;
+    const tag: string = field.charAt(i);
+    if (tag === "0") out = out + String.fromCharCode(0);
+    else if (tag === "r") out = out + __DNS_RS;
+    else if (tag === "u") out = out + __DNS_US;
+    else out = out + __DNS_ESC;
+  }
+  return out;
 }
 
 // `!value` where `value` may be an `any` holding the empty string: the negation
@@ -662,6 +693,7 @@ function __dnsBindingQuery(bindingName: string, req: any, name: any): any {
   const handle: any = __dnsChannelSlot.current;
   const rrtype: string = __DNS_BINDING_TYPES[bindingName];
   const queried: string = bindingName === "getHostByAddr" ? __dnsArpaName(String(name)) : String(name);
+  if (__ioAvailable()) return __dnsQueryAsync(handle, bindingName, req, rrtype, queried);
   const raw: string = __dnsNative.dnsQuery(
     __dnsServerPayload(handle),
     queried,
@@ -685,6 +717,220 @@ function __dnsBindingQuery(bindingName: string, req: any, name: any): any {
     __evCall(req.oncomplete, [null, shaped.result, shaped.ttls]);
   });
   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// The asynchronous transport
+// ---------------------------------------------------------------------------
+//
+// The blocking `dnsQuery` native cannot serve a resolver whose server lives in
+// this same process: nine files in the corpus answer the query from a
+// `dgram` socket of their own, and nothing runs while a native blocks, so the
+// answer can only arrive after the query has already timed out. Whenever the
+// shared I/O loop is present (`src/io/`, a bundle run with `--ext`), the query
+// is therefore sent and received here, over a non-blocking `node:io` datagram
+// socket, and only the wire format stays native (`dnsEncodeQuery` /
+// `dnsDecodeResponse`, `src/dns/resolve.rs`). That is also what gives the
+// module real concurrency, a `cancel()` that interrupts a query in flight, and
+// c-ares' timeout schedule:
+//
+//   * each server is asked `tries` times; attempt `n` waits
+//     `timeout * 2^n` milliseconds, capped at `maxTimeout` when one is set
+//     (c-ares' backoff, which `test-dns-resolver-max-timeout.js` measures);
+//   * `timeout: -1` is the library default of 5 s; `0` is the shortest wait;
+//   * an answer with TC set is re-asked over TCP through the blocking native,
+//     restricted to the server that truncated it.
+
+const __DNS_DEFAULT_TIMEOUT: number = 5000;
+
+function __dnsAttemptTimeout(handle: any, attempt: number): number {
+  const configured: number = Number(handle.timeout);
+  let wait: number = configured < 0 ? __DNS_DEFAULT_TIMEOUT : configured;
+  if (wait < 1) wait = 1;
+  for (let i = 0; i < attempt; i++) wait = wait * 2;
+  const cap: number = Number(handle.maxTimeout);
+  if (cap > 0 && wait > cap) wait = cap;
+  return wait;
+}
+
+function __dnsQueryAsync(handle: any, bindingName: string, req: any, rrtype: string, queried: string): any {
+  handle.pending = Number(handle.pending) + 1;
+  const q: any = {
+    handle: handle,
+    bindingName: bindingName,
+    req: req,
+    rrtype: rrtype,
+    queried: queried,
+    servers: handle.servers,
+    id: 0,
+    request: "",
+    server: 0,
+    attempt: 0,
+    socket: 0,
+    socketV6: false,
+    timer: null,
+    done: false,
+    last: "ECONNREFUSED",
+  };
+  req._dnsQuery = q;
+  const encoded: string = __dnsNative.dnsEncodeQuery(queried, rrtype);
+  if (__dnsFailed(encoded)) {
+    process.nextTick(() => {
+      __dnsQueryFinish(q, encoded);
+    });
+    return 0;
+  }
+  const fields: string[] = __dnsFields(encoded);
+  q.id = Number(fields[0]);
+  q.request = fields[1];
+  if (Number(q.servers.length) === 0) {
+    process.nextTick(() => {
+      __dnsQueryFinish(q, "-ECONNREFUSED");
+    });
+    return 0;
+  }
+  __dnsQuerySend(q);
+  return 0;
+}
+
+function __dnsQueryCloseSocket(q: any): void {
+  if (Number(q.socket) !== 0) {
+    __ioUnregister(Number(q.socket));
+    q.socket = 0;
+  }
+}
+
+function __dnsQueryClearTimer(q: any): void {
+  if (q.timer !== null && q.timer !== undefined) {
+    clearTimeout(q.timer);
+    q.timer = null;
+  }
+}
+
+// One attempt against the current server, then a timer for the next one.
+function __dnsQuerySend(q: any): void {
+  if (q.done === true) return;
+  if (Number(q.server) >= Number(q.servers.length)) {
+    __dnsQueryFinish(q, "-" + String(q.last));
+    return;
+  }
+  const target: any = q.servers[Number(q.server)];
+  const address: string = String(target[0]);
+  const port: number = Number(target[1]);
+  const ipv6: boolean = address.indexOf(":") !== -1;
+  const ops: any = __ioOps();
+  if (Number(q.socket) !== 0 && q.socketV6 !== ipv6) __dnsQueryCloseSocket(q);
+  if (Number(q.socket) === 0) {
+    const opened: any = ops.udpOpen(ipv6 ? 1 : 0);
+    if (__ioFailed(opened)) {
+      __dnsQueryNextServer(q, "ECONNREFUSED");
+      return;
+    }
+    const id: number = Number(__ioFields(opened)[0]);
+    const bound: any = ops.udpBind(id, ipv6 ? "::" : "0.0.0.0", 0, 0);
+    if (__ioFailed(bound)) {
+      ops.close(id);
+      __dnsQueryNextServer(q, "ECONNREFUSED");
+      return;
+    }
+    q.socket = id;
+    q.socketV6 = ipv6;
+    __ioRegister(id, {
+      readable(): void {
+        __dnsQueryReadable(q);
+      },
+      writable(): void {},
+      failed(): void {
+        __dnsQueryReadable(q);
+      },
+    });
+    __ioWant(id, __IO_READ);
+  }
+  const sent: any = ops.udpSend(Number(q.socket), address, port, String(q.request));
+  if (__ioFailed(sent)) {
+    __dnsQueryNextServer(q, "ECONNREFUSED");
+    return;
+  }
+  q.last = "ETIMEOUT";
+  __dnsQueryClearTimer(q);
+  q.timer = setTimeout(function (): void {
+    q.timer = null;
+    __dnsQueryRetry(q);
+  }, __dnsAttemptTimeout(q.handle, Number(q.attempt)));
+}
+
+function __dnsQueryRetry(q: any): void {
+  if (q.done === true) return;
+  q.attempt = Number(q.attempt) + 1;
+  if (Number(q.attempt) >= Number(q.handle.tries)) {
+    q.attempt = 0;
+    q.server = Number(q.server) + 1;
+  }
+  __dnsQuerySend(q);
+}
+
+function __dnsQueryNextServer(q: any, code: string): void {
+  q.last = code;
+  q.attempt = 0;
+  q.server = Number(q.server) + 1;
+  process.nextTick(() => {
+    __dnsQuerySend(q);
+  });
+}
+
+// Drain the socket; the first datagram that is this query's answer ends it.
+function __dnsQueryReadable(q: any): void {
+  const ops: any = __ioOps();
+  for (let turn = 0; turn < 64; turn++) {
+    if (q.done === true || Number(q.socket) === 0) return;
+    const payload: any = ops.udpRecv(Number(q.socket));
+    if (String(payload) === "+A") return;
+    // A receive error on a datagram socket (Windows reports an ICMP port
+    // unreachable as ECONNRESET here) is not an answer; the timer decides.
+    if (__ioFailed(payload)) return;
+    const parts: string[] = __ioFields(payload);
+    const raw: string = __dnsNative.dnsDecodeResponse(parts[0], String(q.rrtype), Number(q.id));
+    if (__dnsFailed(raw)) {
+      const code: string = raw.slice(1);
+      if (code === "MISMATCH") continue;
+      if (code === "TRUNCATED") {
+        const target: any = q.servers[Number(q.server)];
+        const retried: string = __dnsNative.dnsQuery(
+          String(target[0]) + __DNS_US + String(target[1]),
+          String(q.queried),
+          String(q.rrtype),
+          __dnsAttemptTimeout(q.handle, 0),
+          1,
+        );
+        __dnsQueryFinish(q, retried);
+        return;
+      }
+    }
+    __dnsQueryFinish(q, raw);
+    return;
+  }
+}
+
+// Tear the query down and deliver `raw` (a native payload) to the request.
+function __dnsQueryFinish(q: any, raw: string): void {
+  if (q.done === true) return;
+  q.done = true;
+  __dnsQueryClearTimer(q);
+  __dnsQueryCloseSocket(q);
+  const handle: any = q.handle;
+  const req: any = q.req;
+  handle.pending = Number(handle.pending) - 1;
+  handle.requests = __dnsWithoutRequest(handle.requests, req);
+  if (req.cancelled === true) {
+    __evCall(req.oncomplete, ["ECANCELLED"]);
+    return;
+  }
+  if (__dnsFailed(raw)) {
+    __evCall(req.oncomplete, [__dnsErrorValue(raw)]);
+    return;
+  }
+  const shaped: any = __dnsShapeAnswer(String(q.bindingName), __dnsRecords(raw));
+  __evCall(req.oncomplete, [null, shaped.result, shaped.ttls]);
 }
 
 // The channel's pending-request list without one request, so that a completed
@@ -840,6 +1086,7 @@ function __dnsAnyRecord(record: string[]): any {
   if (type === "CAA") {
     const entry: any = { critical: Number(record[1]) };
     entry[record[2]] = record[3];
+    entry.type = type;
     return entry;
   }
   if (type === "TLSA") {
@@ -988,9 +1235,20 @@ function __dnsMakeChannel(timeout: number, tries: number, maxTimeout: number): a
   handle.setLocalAddress = (ipv4: any, ipv6: any): void => {
     __dnsChannelSetLocalAddress(handle, ipv4, ipv6);
   };
+  // A query on the asynchronous transport is torn down and completed with
+  // `ECANCELLED` now, as `ares_cancel` does; a blocking one already has its
+  // answer and is completed with `ECANCELLED` on its own tick.
   handle.cancel = (): void => {
-    for (const request of handle.requests) request.cancelled = true;
+    const cancelled: any[] = [];
+    for (const request of handle.requests) {
+      request.cancelled = true;
+      cancelled.push(request);
+    }
     handle.requests = [];
+    for (const request of cancelled) {
+      const q: any = request._dnsQuery;
+      if (q !== undefined && q !== null) __dnsQueryFinish(q, "-ECANCELLED");
+    }
   };
   for (const bindingName of Object.keys(__DNS_BINDING_TYPES)) {
     handle[bindingName] = (req: any, name: any): any => {
@@ -1071,6 +1329,9 @@ function __dnsSetServers(handle: any, servers: any): void {
   const next: any[] = [];
   const count: number = Number(servers.length);
   for (let index = 0; index < count; index++) {
+    // `ArrayPrototypeForEach` semantics: the length is read once and a hole
+    // (or an index an accessor truncated away mid-walk) is skipped.
+    if (!(index in servers)) continue;
     const serv: any = servers[index];
     __dnsValidateString(serv, "servers[" + String(index) + "]");
     let version: number = __dnsIsIP(serv);
@@ -1154,9 +1415,29 @@ function __dnsSetLocalAddress(handle: any, ipv4: any, ipv6: any): void {
 // ---------------------------------------------------------------------------
 
 // Node's module-level `dnsOrder`, which `--dns-result-order` seeds and
-// `setDefaultResultOrder()` replaces. The engine has no such flag, so the
-// initial value is the default Node uses without one.
-const __dnsOrderState: any = { order: "verbatim" };
+// `setDefaultResultOrder()` replaces. The `zun` CLI has no such flag, so it is
+// read where `src/process/process.ts` reads the other Node options this
+// library honours: `NODE_OPTIONS` (where Node accepts it too) and the engine's
+// own option vector. Node rejects an invalid value at startup; here it is
+// ignored and the default stands.
+const __dnsOrderState: any = { order: __dnsInitialOrder() };
+
+function __dnsInitialOrder(): string {
+  const words: string[] = [];
+  const raw: any = __processEnvGet("NODE_OPTIONS");
+  if (typeof raw === "string" && raw !== "") {
+    for (const word of raw.split(" ")) words.push(word);
+  }
+  for (const word of process.execArgv) words.push(String(word));
+  let order = "verbatim";
+  const prefix = "--dns-result-order=";
+  for (const word of words) {
+    if (word.slice(0, prefix.length) !== prefix) continue;
+    const value: string = word.slice(prefix.length);
+    if (Number(__DNS_VALID_ORDERS.indexOf(value)) !== -1) order = value;
+  }
+  return order;
+}
 
 function __dnsSetDefaultResultOrder(value: any): void {
   __dnsValidateOneOf(value, "dnsOrder", __DNS_VALID_ORDERS);

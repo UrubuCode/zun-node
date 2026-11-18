@@ -6,8 +6,8 @@ listed in [`NODE_TESTS.txt`](NODE_TESTS.txt) and downloaded by
 vendored. The per-test run of the last measurement is
 [`RESULTS.md`](RESULTS.md); this file says *why* each failing test fails.
 
-**6 / 27 passing (22.2%)**, measured on Windows with the release engine at
-`c4afcca4` and the worktree's own `zun_node.dll`.
+**22 / 27 passing (81.4%)**, measured on Windows with the release engine and the
+worktree's own `zun_node.dll`.
 
 `dns` is the kind `os` introduced: Zun TypeScript (`../../src/dns/dns.ts`) over
 Rust natives (`../../src/dns/*.rs`), run as
@@ -18,101 +18,35 @@ Rust natives (`../../src/dns/*.rs`), run as
 same surface again under `node:dns/promises` — so the table below is almost
 entirely about things outside it.
 
-## Why the other 21 fail
+## Why the other 5 fail
 
-Three causes account for eighteen of them, and none is in this module.
-
-### 1. `node:dgram` does not exist yet (9 tests)
-
-Nine files in the corpus stand up a **fake DNS server** with
-`dgram.createSocket('udp4')`, point `dns.setServers()` at it, and assert on
-hand-assembled DNS packets through `test/common/dns.js`. That is the right way
-to test a resolver without a network, and it is how the whole `resolveAny`,
-`cancel`, channel-timeout and multi-channel surface is covered. There is no
-`node:dgram` in this library, so the bundler reports an unresolved `require`
-before the engine sees the test. Nothing in `src/dns/` is implicated: the wire
-format those tests exercise is covered by 21 Rust tests in
-[`../../src/dns/tests.rs`](../../src/dns/tests.rs) instead, driven from
-hand-assembled messages in exactly the same way.
-
-### 2. A function value loses its callability across a dynamic call (6 tests)
-
-This is one engine defect, and it is the single largest blocker in the corpus —
-not only here. The repository already records half of it (see the `stream`
-section of the top-level README: "a `functionBox` handed to
-`Promise.prototype.then` is silently never called"); what this corpus adds is
-*where the value goes wrong*, and that a fix path exists.
-
-A function value **returned across a dynamic call boundary**
-comes back as something that is no longer a function: returned from an
-object-literal method it reports `typeof === "object"`, and the boxing
-workaround `tools/harness/common.ts` applies (`[fn][0]`, zun#17) keeps
-`typeof === "function"` but produces a callable that the engine's
-`Promise.prototype.then` **silently will not invoke**.
-
-`common.mustCall()` is an object-literal method on the harness's `common`
-object, so *every* `.then(common.mustCall(...))` in Node's corpus registers an
-expectation that can never be met, and the test fails on the call count with
-every assertion in it having passed.
-
-```js
-// zun vs node — run with tools/bundle_node_test.sh
-function makeTop(tag) { return function () { console.log(tag); }; }
-const asMethod = { make(tag) { return function () { console.log(tag); }; } };
-const asProp = { make: makeTop };
-const boxed = { make(tag) { return [function () { console.log(tag); }][0]; } };
-
-const a = makeTop('TOP');          // zun: typeof "function"   node: "function"
-const b = asMethod.make('METHOD'); // zun: typeof "object"     node: "function"
-const c = asProp.make('PROP');     // zun: typeof "object"     node: "function"
-const d = boxed.make('BOXED');     // zun: typeof "function"   node: "function"
-
-Promise.resolve().then(a);   // zun: runs     node: runs
-Promise.resolve().then(b);   // zun: SILENT   node: runs
-Promise.resolve().then(c);   // zun: SILENT   node: runs
-Promise.resolve().then(d);   // zun: SILENT   node: runs
-d();                         // zun: runs     node: runs
-```
-
-Two facts narrow it down. The value is callable *directly* (`d()` works, and so
-does `d(...args)`) — it is only the `then` intrinsic that refuses it. And a
-**class** method's return does not degrade at all:
-
-```js
-class C { make(tag) { return function () { console.log(tag); }; } }
-const e = new C().make('CLASS');  // zun: typeof "function"
-Promise.resolve().then(e);        // zun: runs
-```
-
-So the degradation is specific to a call whose callee was read from an
-`any`-typed object, and the fix is likely the same path that already works for
-a class method. Until then the six tests below are unreachable, and a harness
-whose `common` object became a class instance would unblock the same pattern
-across every module's corpus.
-
-Code site: the call-return lowering in `crates/zun_interp` (read-only here),
-together with `Promise.prototype.then`'s callee check — the `then` intrinsic
-accepts a plain function and a locally boxed one but not the degraded value.
-
-### 3. `--dns-result-order` is a CLI flag the engine has no equivalent of (3 tests)
-
-`test-dns-default-order-{ipv4,ipv6,verbatim}.js` each open with
-`// Flags: --dns-result-order=…` and assert that `dns.lookup` passes the
-matching `DNS_ORDER_*` to the binding. The flag seeds Node's module-level
-`dnsOrder` before any user code runs; neither the engine nor
-`tools/run_node_tests.sh` has a way to deliver it, so the default
-(`verbatim`) is what the module starts with and the assertion fails on the
-first `checkParameter`. `dns.setDefaultResultOrder()` — the programmatic half of
-the same knob — is implemented and is what `test-dns-set-default-order.js`
-exercises (that file is blocked by cause 2 instead).
-
-### The remaining three
+None of the five is in this module.
 
 | Test | Blocker |
 |---|---|
-| `test-dns-lookup-promises.js` | **Arity is enforced on a plain function** — the test declares `function getaddrinfoPositive(addresses)` and calls it as `getaddrinfoPositive(['127.0.0.1'], { family: 4 })`; the checker rejects the program with `'getaddrinfoPositive' expects 0 to 1 argument(s), found 2`, where JavaScript ignores the extra argument. Every assertion in the file is about this module's result shapes, so it would otherwise be a strong test of them. |
-| `test-dns-memory-error.js` | **`new <object>.Ctor()` does not reach a constructor** ([zun#18](https://github.com/UrubuCode/zun/issues/18)): the test does `new errors.DNSException(UV_EAI_MEMORY, 'fhqwhgads')` through the `internal/errors` module object. It then asserts on `err.stack.split('\n')[1]`, which needs named stack frames the engine does not produce either. |
-| `test-dns-perf_hooks.js` | **A spread into a method call is not lowered**: `entries.push(...items.getEntries())`. Behind that there is also a real gap — `src/dns/dns.ts` does not feed the performance timeline, because `src/perf_hooks/perf_hooks.ts` has no `startPerf`/`stopPerf` seam and both files are *conditional*, so `dns` cannot name a symbol that may be absent from its bundle. Wiring the two would need a seam in `perf_hooks` that is more than a localized change. |
+| `test-dns.js` | **An accessor on an array index reads back as the engine's internal record** ([zun#132](https://github.com/UrubuCode/zun/issues/132)): the test defines a getter on `servers[2]` that truncates the array mid-walk, and `servers[2]` yields `{ __elemAcc: true, v: ... }` instead of the getter's string, so `validateString` rejects it. Holes in the array are handled (`setServers` skips them, as `ArrayPrototypeForEach` does). |
+| `test-dns-channel-cancel.js` | `TypeError: apply is not a function`, raised inside `resolver.resolve4('example0.org', next)` where `next` is a rest-parameter arrow that spreads into a `common.mustCall` wrapper and is defined inside an `async` `mustCall` callback. Every smaller reduction of that shape runs correctly, so it is not yet isolated well enough for an engine issue; `test-dns-channel-cancel-promise.js` and `test-dns-cancel-reverse-lookup.js` cover the same `cancel()` path and pass. |
+| `test-dns-lookup-promises.js` | **Arity is enforced on a plain function** — `function getaddrinfoPositive(addresses)` is called with two arguments and the checker rejects the program (`expects 0 to 1 argument(s), found 2`). |
+| `test-dns-memory-error.js` | Needs named stack frames (`err.stack.split('\n')[1]` must match `/^ {4}at Object/`), which the engine does not produce. |
+| `test-dns-perf_hooks.js` | **A spread into a method call is not lowered** (`entries.push(...items.getEntries())`). Behind it is a real gap: `dns` does not feed the performance timeline. |
+
+## What moved the count from 6 to 22
+
+* **The asynchronous transport** (below) — the nine fake-server files.
+* **`tools/harness/dns.ts`**, a port of `test/common/dns.js`
+  (`parseDNSPacket` / `writeDNSPacket` / `errorLookupMock`), registered in
+  `tools/bundle_node_test.sh` as `../common/dns`. Its module object is a class
+  instance, because a `Buffer` passed to a plain function stored in an
+  object-literal property arrives without its `Buffer` identity.
+* **The carrier escapes NUL and the separators.** A TXT chunk is arbitrary
+  bytes; a NUL in one made the C-string return slot drop the whole payload.
+* **`--dns-result-order`** is read from `NODE_OPTIONS` and the engine's option
+  vector at load, and `tools/run_node_tests.sh` forwards that one flag from a
+  test's `// Flags:` line through `NODE_OPTIONS` (the three `default-order`
+  files).
+* The engine fixes since the last measurement (a `mustCall` wrapper is now
+  invokable by `Promise.prototype.then`) unblocked the six files that cause
+  used to account for.
 
 ## Design notes worth knowing when reading the source
 
@@ -152,16 +86,23 @@ and binding entry point is invoked as `__evCall(fn, [args])` — the house patte
 from `src/events/events.ts`. Five tests moved from failing to passing on that
 change alone.
 
-### The queries are synchronous
+### The queries are asynchronous when the I/O loop is present
 
-ABI v1 gives an extension no way to complete a call later: there is no handle
-the host could poll and no callback it could be given. Every native blocks, and
-the *observable* asynchrony is restored on the TypeScript side — a resolution is
-delivered through `process.nextTick`, so a callback runs on a later tick than
-its caller and a `Resolver` has a real pending-query window for `setServers` to
-refuse (which is exactly what `test-dns-setserver-when-querying.js` asserts, and
-it passes). What is not restored is concurrency: two queries issued back to back
-run one after the other.
+The original design was "synchronous natives, asynchronous API": `dnsQuery`
+blocks and the result is delivered through `process.nextTick`. That cannot
+serve a server living in the same process — nine files in the corpus answer
+from their own `dgram` socket, and nothing runs while a native blocks.
+
+So whenever `src/io/` is available (a bundle run with `--ext`), a query is sent
+and received in `src/dns/dns.ts` over a non-blocking `node:io` datagram socket,
+and only the wire format is native: `dnsEncodeQuery(name, rrtype)` and
+`dnsDecodeResponse(base64, rrtype, id)` in `src/dns/resolve.rs`. This gives real
+concurrency, a `cancel()` that completes in-flight queries with `ECANCELLED`
+immediately (as `ares_cancel` does), and c-ares' schedule: each server is asked
+`tries` times, attempt `n` waits `timeout * 2^n` ms capped at `maxTimeout`,
+`timeout: -1` is 5 s. A truncated answer is re-asked over TCP through the
+blocking native, against that one server. Without the extension the blocking
+path remains.
 
 ### `isIP` and the `setServers` grammar are hand-written parsers
 
@@ -171,15 +112,6 @@ Node spells both as regular expressions. `test-dns.js` feeds `setServers`
 every walk here is a single pass and cannot have that failure mode at all. The
 accepted grammars are the regexes' own, including the `%zone` suffix Node's
 IPv6 pattern allows.
-
-### Known divergence: a sparse `servers` array
-
-Node's `setServers` iterates with `ArrayPrototypeForEach`, which skips holes, so
-`servers[0] = a; servers[2] = b` yields two entries. This implementation walks
-`0 … length - 1`, so a hole is an `undefined` element and
-`validateString(undefined, 'servers[1]')` throws. Only `test-dns.js` exercises
-it (it also defines an index as a *getter* that truncates the array mid-walk),
-and that file is blocked on `node:dgram` regardless.
 
 ## The natives
 

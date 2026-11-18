@@ -267,3 +267,22 @@ fn system_servers_are_addresses_on_port_fifty_three() {
         assert_eq!(server.port, 53);
     }
 }
+
+#[test]
+fn async_transport_round_trips_its_own_request() {
+    use super::resolve::{build_request, decode_response, MISMATCH, TRUNCATED};
+    let (id, request) = build_request("example.org", "A").unwrap();
+    assert_eq!(u16::from_be_bytes([request[0], request[1]]), id);
+    // Turn the request into an answer carrying one A record, compressed name.
+    let mut reply = request.clone();
+    reply[2] = 0x81;
+    reply[3] = 0x80;
+    reply[7] = 1; // ANCOUNT
+    reply.extend_from_slice(&[0xc0, 12, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 1, 2, 3, 4]);
+    let records = decode_response(&reply, "A", i64::from(id)).unwrap();
+    assert_eq!(records, vec![vec!["1.2.3.4".to_string(), "60".to_string()]]);
+    assert_eq!(decode_response(&reply, "A", i64::from(id ^ 1)), Err(MISMATCH));
+    reply[2] |= 0x02;
+    assert_eq!(decode_response(&reply, "A", i64::from(id)), Err(TRUNCATED));
+    assert!(build_request("example.org", "BOGUS").is_err());
+}
