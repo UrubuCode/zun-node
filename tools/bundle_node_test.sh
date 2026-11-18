@@ -127,6 +127,41 @@ TEST_DIR="$(dirname "$TEST_PATH")"
 if command -v cygpath >/dev/null 2>&1; then TEST_DIR="$(cygpath -w "$(dirname "$(cygpath -u "$TEST_PATH")")")"; fi
 json_string() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/' -e 's/$/"/'; }
 
+# ES modules.
+#
+# A `.mjs` file (a test fixture `node --test` discovers, a file `run()` is
+# handed) is lowered to the CommonJS spelling the rest of this bundler
+# understands, one static `import` declaration per line:
+#
+#   import X from 'm';            ->  const X = require('m');
+#   import * as X from 'm';       ->  const X = require('m');
+#   import { a, b as c } from 'm' ->  const { a, b: c } = require('m');
+#   import X, { a } from 'm';     ->  const X = require('m'); const { a } = require('m');
+#   import 'm';                   ->  require('m');
+#
+# and a leading `export ` is dropped. Anything else ESM-only (`import.meta`,
+# top-level `await`, minified multi-import lines) is left as written. The
+# lowered copy is a temporary file; `__filename`, `__dirname` and the fixture
+# directory were taken from the original above.
+SRC_DIR="$(dirname "$SRC")"
+case "$SRC" in
+  *.mjs)
+    ESM_SRC="$(mktemp)"
+    perl -pe '
+      if (/^\s*import\s/) {
+        s/^(\s*)import\s+\*\s+as\s+([A-Za-z_\$][\w\$]*)\s+from\s+(["\x27][^"\x27]+["\x27])\s*;?/$1const $2 = require($3);/
+        or s/^(\s*)import\s+([A-Za-z_\$][\w\$]*)\s*,\s*\{([^}]*)\}\s*from\s+(["\x27][^"\x27]+["\x27])\s*;?/my ($i,$d,$n,$m)=($1,$2,$3,$4); $n =~ s#\bas\b#:#g; "${i}const $d = require($m); const {$n} = require($m);"/e
+        or s/^(\s*)import\s+\{([^}]*)\}\s*from\s+(["\x27][^"\x27]+["\x27])\s*;?/my ($i,$n,$m)=($1,$2,$3); $n =~ s#\bas\b#:#g; "${i}const {$n} = require($m);"/e
+        or s/^(\s*)import\s+([A-Za-z_\$][\w\$]*)\s+from\s+(["\x27][^"\x27]+["\x27])\s*;?/$1const $2 = require($3);/
+        or s/^(\s*)import\s+(["\x27][^"\x27]+["\x27])\s*;?/$1require($2);/;
+        s/require\("([^"]*)"\)/require(\x27$1\x27)/g;
+      }
+      s/^(\s*)export\s+default\s+/$1module.exports = /;
+      s/^(\s*)export\s+(?=(const|let|var|function|class|async)\b)/$1/;
+    ' "$SRC" > "$ESM_SRC"
+    SRC="$ESM_SRC";;
+esac
+
 # ---------------------------------------------------------------------------
 # The module table: <specifier> <module object> <canonical binding>
 #
@@ -882,7 +917,7 @@ esac
 # the only way to carry them out of it.
 REWRITE="$(mktemp)"
 LATE="$(mktemp)"
-trap 'rm -f "$REWRITE" "$LATE"' EXIT
+trap 'rm -f "$REWRITE" "$LATE" ${ESM_SRC:+"$ESM_SRC"}' EXIT
 
 # Every per-module rule below matches only that module's own `require(...)`
 # call, so a module the test never requires contributes nothing;
@@ -1484,7 +1519,7 @@ perl -pi -e 's/^(\s+(?:static\s+|async\s+)*)__zunShadow_(\w+)(\s*\([^()]*\)\s*(?
 # `.json` file as a parenthesized expression, a `.js` file as an IIFE that
 # hands its `module.exports` back. A missing fixture is left alone and fails
 # the unresolved-require check below.
-FIXTURE_DIR="$(cd "$(dirname "$SRC")/.." 2>/dev/null && pwd)/fixtures"
+FIXTURE_DIR="$(cd "$SRC_DIR/.." 2>/dev/null && pwd)/fixtures"
 if grep -q "fixtures\.path" "$OUT"; then
   FIXTURE_DIR="$FIXTURE_DIR" perl -0pi -e '
     sub __fixture {

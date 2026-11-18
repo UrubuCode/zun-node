@@ -282,7 +282,8 @@ function __zunHarnessStep(): void {
   const io: number = __ioPendingRefs();
   if (io > 0) {
     if (Number(__harnessLoop.deadline) === 0) {
-      __harnessLoop.deadline = Number(Date.now()) + __IO_DEADLINE_MS;
+      const budget: number = Number(__ioDeadlineOverride.ms) > 0 ? Number(__ioDeadlineOverride.ms) : __IO_DEADLINE_MS;
+      __harnessLoop.deadline = Number(Date.now()) + budget;
     }
   } else {
     __harnessLoop.rounds = Number(__harnessLoop.rounds) + 1;

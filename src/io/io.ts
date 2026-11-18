@@ -133,6 +133,13 @@ const __IO_STEP_IDLE: number = 10;
 //   handles  — every registered handle, keyed by `String(id)`.
 //   ids      — the handle ids in registration order, so dispatch is stable.
 //   refs     — how many registered handles are ref'd.
+// How long the harness settle loop may keep waiting on live I/O handles
+// before it gives up (tools/harness/common.ts' `__IO_DEADLINE_MS`), when a
+// library module knows better: `node:test`'s `run()` (src/test/run.ts) waits
+// on one child process per test file, and a few of those, each bundled and
+// started on demand, outlast the default. `0` means "use the default".
+const __ioDeadlineOverride: any = { ms: 0 };
+
 const __ioState: any = {
   ops: null,
   handles: {},

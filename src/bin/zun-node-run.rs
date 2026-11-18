@@ -43,9 +43,20 @@
 //! child is the bundle (not the original file); `__filename` and `__dirname`
 //! are the original's, because the bundler embeds them.
 //!
-//! What this is **not**: a Node. Node flags other than `-e`/`-p` are accepted
-//! and ignored, there is no REPL and no stdin script, and `--require`/`--import`
-//! preloads are skipped. It exists for the harness; it is a development tool.
+//! `zun-node-run --test [flags] [files...]` is Node's test-runner CLI: the
+//! launcher writes a two-line script that hands the `--test-*` flags and the
+//! files (none: Node's default discovery from the working directory) to
+//! `node:test`'s `run()` (src/test/run.ts' `__ntCli`), and runs that script as
+//! above.
+//!
+//! Every Node flag the launcher sees before the script reaches the child as
+//! its `process.execArgv`, through `ZUN_NODE_EXEC_ARGV` (`"A"` then the flags,
+//! `U+001F`-separated: the `ZUN_NODE_ARGV` convention).
+//!
+//! What this is **not**: a Node. Node flags other than `-e`/`-p`/`--test` are
+//! accepted and passed on as `execArgv`, but otherwise ignored; there is no REPL
+//! and no stdin script, and `--require`/`--import` preloads are skipped. It
+//! exists for the harness; it is a development tool.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -63,7 +74,62 @@ const VALUE_FLAGS: &[&str] = &[
     "--max-old-space-size",
     "--stack-size",
     "--title",
+    "--test-reporter",
+    "--test-reporter-destination",
+    "--test-name-pattern",
+    "--test-skip-pattern",
+    "--test-concurrency",
+    "--test-timeout",
+    "--test-shard",
+    "--test-isolation",
+    "--test-coverage-include",
+    "--test-coverage-exclude",
+    "--experimental-config-file",
 ];
+
+/// The Node flags before the script: every flag in `--test` mode, where the
+/// positional arguments are test files rather than a script.
+fn exec_flags(args: &[String]) -> Vec<String> {
+    let test_mode = args.iter().any(|a| a == "--test");
+    let mut out = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        if arg == "--" || matches!(arg, "-e" | "--eval" | "-p" | "--print" | "-pe" | "-ep") {
+            break;
+        }
+        if VALUE_FLAGS.contains(&arg) {
+            out.push(arg.to_owned());
+            if let Some(value) = args.get(index + 1) {
+                out.push(value.clone());
+            }
+            index += 2;
+        } else if arg.starts_with('-') && arg != "-" {
+            out.push(arg.to_owned());
+            index += 1;
+        } else if test_mode {
+            index += 1;
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+/// `value` as a JavaScript string literal.
+fn js_string(value: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
 
 fn fail(message: &str) -> ExitCode {
     eprintln!("zun-node-run: {message}");
@@ -78,10 +144,32 @@ enum Source {
     File(PathBuf),
     /// `-e` (`false`) or `-p` (`true`): the program text and whether to print it.
     Text(String, bool),
+    /// `--test [files...]`: the test-runner CLI over these files.
+    Test(Vec<String>),
 }
 
 /// Split Node's command line into the program and the arguments it receives.
 fn parse(args: &[String]) -> Option<(Source, Vec<String>)> {
+    if args.iter().any(|a| a == "--test") {
+        let mut files = Vec::new();
+        let mut index = 0;
+        while index < args.len() {
+            let arg = args[index].as_str();
+            if arg == "--" {
+                files.extend(args[index + 1..].iter().cloned());
+                break;
+            }
+            if VALUE_FLAGS.contains(&arg) {
+                index += 2;
+                continue;
+            }
+            if !(arg.starts_with('-') && arg != "-") {
+                files.push(arg.to_owned());
+            }
+            index += 1;
+        }
+        return Some((Source::Test(files), Vec::new()));
+    }
     let mut index = 0;
     while index < args.len() {
         let arg = args[index].as_str();
@@ -198,9 +286,30 @@ fn main() -> ExitCode {
     };
 
     // `-e`/`-p` text becomes a file of its own so the bundler can take it.
-    let is_eval = matches!(source, Source::Text(..));
+    let flags = exec_flags(&args);
+    let is_eval = matches!(source, Source::Text(..) | Source::Test(..));
     let script = match source {
         Source::File(path) => path,
+        Source::Test(files) => {
+            let files: Vec<String> = files.iter().map(|f| js_string(f)).collect();
+            let quoted: Vec<String> = flags.iter().map(|f| js_string(f)).collect();
+            let text = format!(
+                "const {{ run }} = require('node:test');\n__ntCli(run, [{}], [{}]);\n",
+                quoted.join(", "),
+                files.join(", ")
+            );
+            let mut hasher = DefaultHasher::new();
+            text.hash(&mut hasher);
+            let directory = cache_dir();
+            if std::fs::create_dir_all(&directory).is_err() {
+                return fail("cannot create the cache directory");
+            }
+            let file = directory.join(format!("test-cli-{:016x}.js", hasher.finish()));
+            if std::fs::write(&file, text).is_err() {
+                return fail("cannot write the test-runner script");
+            }
+            file
+        }
         Source::Text(text, print) => {
             let mut hasher = DefaultHasher::new();
             text.hash(&mut hasher);
@@ -239,6 +348,7 @@ fn main() -> ExitCode {
     tail.extend(rest.iter().cloned());
     command.env("ZUN_NODE_ARGV", format!("A{}", tail.join("\u{1f}")));
     command.env("ZUN_NODE_DEPTH", (depth + 1).to_string());
+    command.env("ZUN_NODE_EXEC_ARGV", format!("A{}", flags.join("\u{1f}")));
     command.arg(&bundled);
     match command.status() {
         Ok(status) => match status.code() {

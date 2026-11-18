@@ -258,6 +258,8 @@ esac
 # A re-executed child is bundled first (about five seconds), so the
 # `child_process` corpus gets a longer default budget than the 20 s of the rest.
 if [ "$MODULE" = child_process ] && [ "$TIMEOUT" = 20 ]; then TIMEOUT=60; fi
+# `node:test` files spawn `node --test` children, each bundled on demand.
+if [ "$MODULE" = test_runner ] && [ "$TIMEOUT" = 20 ]; then TIMEOUT=180; fi
 [ -n "$ZUN" ] || { echo "usage: --zun <path> [--ext <lib>] [--module fs|path|events|os|buffer|string_decoder]" >&2; exit 2; }
 case "$KIND" in
   extension)

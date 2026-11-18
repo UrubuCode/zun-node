@@ -27,6 +27,19 @@ class TestsStream extends EventEmitter {
     this._waiters = [];
     this._ended = false;
     this._piped = [];
+    // An own property: `for await` does not find a class instance's
+    // `Symbol.asyncIterator` through the prototype in this engine.
+    const self: any = this;
+    (this as any)[Symbol.asyncIterator] = function (...a: any[]): any {
+      return {
+        next(): any {
+          return self.next();
+        },
+        return(): any {
+          return Promise.resolve({ value: undefined, done: true });
+        },
+      };
+    };
   }
   _push(type: string, data: any): void {
     const event: any = { type: type, data: data };
@@ -67,18 +80,6 @@ class TestsStream extends EventEmitter {
     return out.pipe(destination);
   }
 }
-
-(TestsStream.prototype as any)[Symbol.asyncIterator] = function (this: any): any {
-  const self: any = this;
-  return {
-    next(): any {
-      return self.next();
-    },
-    return(): any {
-      return Promise.resolve({ value: undefined, done: true });
-    },
-  };
-};
 
 // `stream.compose(reporter)`: a readable of the reporter's output chunks,
 // which can be piped, iterated, or listened to with 'data'.
@@ -251,7 +252,7 @@ function __ntPatternArgs(name: string, value: any): string[] {
   return out;
 }
 
-function __ntRunFile(stream: any, file: string, opts: any, totals: any): any {
+function __ntRunFile(stream: any, file: string, opts: any, totals: any, sink: any): any {
   return new Promise((resolve: any) => {
     const args: string[] = [];
     if (opts.only === true) args.push("--test-only");
@@ -273,7 +274,7 @@ function __ntRunFile(stream: any, file: string, opts: any, totals: any): any {
       }
       const nesting = data !== null && data !== undefined ? Number(data.nesting) : 0;
       if (type === "test:summary" || type === "test:complete") {
-        if (type === "test:complete") stream._push(type, data);
+        if (type === "test:complete") sink(type, data);
         return;
       }
       if (nesting === 0 && type === "test:diagnostic" && /^(tests|suites|pass|fail|cancelled|skipped|todo|duration_ms) \S+$/.test(String(data.message))) {
@@ -282,11 +283,7 @@ function __ntRunFile(stream: any, file: string, opts: any, totals: any): any {
       if (nesting === 0 && type === "test:plan") return;
       if (type === "test:pass" || type === "test:fail") {
         state.reported = Number(state.reported) + 1;
-        if (nesting === 0) {
-          totals.topLevel = Number(totals.topLevel) + 1;
-          data.testNumber = totals.topLevel;
-          if (type === "test:fail") state.failedTop = true;
-        }
+        if (nesting === 0 && type === "test:fail") state.failedTop = true;
         const dtype: any = data.details !== undefined && data.details !== null ? data.details.type : undefined;
         if (dtype === "suite") {
           totals.suites = Number(totals.suites) + 1;
@@ -302,7 +299,7 @@ function __ntRunFile(stream: any, file: string, opts: any, totals: any): any {
         }
       }
       if (data !== null && data !== undefined && data.file === undefined) data.file = absolute;
-      stream._push(type, data);
+      sink(type, data);
     };
     const flushOut = (all: boolean): void => {
       let text: string = state.out;
@@ -327,7 +324,7 @@ function __ntRunFile(stream: any, file: string, opts: any, totals: any): any {
             parsed = null;
           }
           if (plain !== "") {
-            stream._push("test:stdout", { file: absolute, message: plain });
+            sink("test:stdout", { file: absolute, message: plain });
             plain = "";
           }
           if (parsed !== null) handleEvent(parsed);
@@ -335,7 +332,7 @@ function __ntRunFile(stream: any, file: string, opts: any, totals: any): any {
           plain = plain + line + "\n";
         }
       }
-      if (plain !== "") stream._push("test:stdout", { file: absolute, message: plain });
+      if (plain !== "") sink("test:stdout", { file: absolute, message: plain });
     };
     const finishFile = (code: any, signal: any, spawnError: any): void => {
       if (state.done) return;
@@ -343,7 +340,7 @@ function __ntRunFile(stream: any, file: string, opts: any, totals: any): any {
       if (state.timer !== null) __timerRealClearTimeout(state.timer);
       flushOut(true);
       if (state.err !== "") {
-        stream._push("test:stderr", { file: absolute, message: state.err });
+        sink("test:stderr", { file: absolute, message: state.err });
         state.err = "";
       }
       const failedOutside = spawnError !== null || (code !== 0 && code !== null && !state.failedTop) || (signal !== null && signal !== undefined);
@@ -361,14 +358,13 @@ function __ntRunFile(stream: any, file: string, opts: any, totals: any): any {
           error.exitCode = code;
           error.signal = signal === undefined ? null : signal;
         }
-        totals.topLevel = Number(totals.topLevel) + 1;
         const details: any = { passed: error === null, duration_ms: 0, type: "test" };
         if (error !== null) details.error = error;
         const data: any = {
-          name: fileTestName, nesting: 0, testNumber: totals.topLevel, details: details,
+          name: fileTestName, nesting: 0, testNumber: 0, details: details,
           file: absolute, line: 1, column: 1,
         };
-        stream._push("test:start", { name: fileTestName, nesting: 0, file: absolute, line: 1, column: 1 });
+        sink("test:start", { name: fileTestName, nesting: 0, file: absolute, line: 1, column: 1 });
         if (error === null) {
           totals.passed = Number(totals.passed) + 1;
         } else if (error.failureType === __NT_kTestTimeoutFailure) {
@@ -377,7 +373,7 @@ function __ntRunFile(stream: any, file: string, opts: any, totals: any): any {
           totals.failed = Number(totals.failed) + 1;
         }
         totals.tests = Number(totals.tests) + 1;
-        stream._push(error === null ? "test:pass" : "test:fail", data);
+        sink(error === null ? "test:pass" : "test:fail", data);
       }
       resolve(undefined);
     };
@@ -442,13 +438,18 @@ function __ntDeserializeError(raw: any): any {
 
 function __ntRunMain(options?: any): any {
   const opts: any = __ntRunValidate(options);
+  // Every file is a child process the harness loop has to wait for.
+  __ioDeadlineOverride.ms = 600000;
   const stream: any = new TestsStream();
   let files: string[] = [];
   if (opts.files !== undefined) {
     for (const f of opts.files) files.push(String(f));
   } else {
     const cwd: string = opts.cwd === undefined ? String(process.cwd()) : String(opts.cwd);
-    __ntDiscover(cwd, false, files);
+    const found: string[] = [];
+    __ntDiscover(cwd, false, found);
+    found.sort();
+    for (const f of found) files.push(String(__node_path.relative(cwd, f)));
   }
   const totals: any = __ntNewCounters();
   const start = __ntNow();
@@ -462,12 +463,45 @@ function __ntRunMain(options?: any): any {
     const limit: number = opts.concurrency === true ? Infinity
       : typeof opts.concurrency === "number" ? Number(opts.concurrency) : 1;
     let index = 0;
+    // Node reports files in order however many run at once: each file's
+    // events wait in its slot until every earlier file has been reported.
+    const slots: any[] = [];
+    for (let i = 0; i < Number(files.length); i++) slots.push({ events: [], done: false });
+    const order: any = { next: 0 };
+    const flush = (): void => {
+      while (Number(order.next) < Number(slots.length)) {
+        const slot: any = slots[Number(order.next)];
+        while (Number(slot.events.length) > 0) {
+          const event: any = slot.events.shift();
+          const data: any = event.data;
+          if ((event.type === "test:pass" || event.type === "test:fail") && data !== null && data !== undefined && Number(data.nesting) === 0) {
+            totals.topLevel = Number(totals.topLevel) + 1;
+            data.testNumber = totals.topLevel;
+          }
+          stream._push(event.type, data);
+        }
+        if (!slot.done) return;
+        order.next = Number(order.next) + 1;
+      }
+    };
     const runNext = async (): Promise<any> => {
       while (index < Number(files.length)) {
-        const file = files[index];
+        const at = index;
+        const file = files[at];
         index++;
-        if (opts.signal !== undefined && opts.signal !== null && opts.signal.aborted) continue;
-        await __ntRunFile(stream, file, opts, totals);
+        const slot: any = slots[at];
+        if (opts.signal !== undefined && opts.signal !== null && opts.signal.aborted) {
+          slot.done = true;
+          flush();
+          continue;
+        }
+        const sink = (type: string, data: any): void => {
+          slot.events.push({ type: type, data: data });
+          flush();
+        };
+        await __ntRunFile(stream, file, opts, totals, sink);
+        slot.done = true;
+        flush();
       }
     };
     const workers: any[] = [];
@@ -500,3 +534,136 @@ function __ntRunMain(options?: any): any {
 }
 
 __ntRunImpl.run = __ntRunMain;
+
+// ---------------------------------------------------------------------------
+// `node --test [flags] [files...]` (lib/internal/main/test_runner.js)
+// ---------------------------------------------------------------------------
+//
+// src/bin/zun-node-run.rs turns that command line into a two-line script that
+// calls this with the Node flags it saw and the positional file arguments.
+
+function __ntCliFlag(flags: string[], name: string): any {
+  // The last occurrence wins, as with Node's option parser; a flag spelled
+  // `--name value` or `--name=value`. `true` for a bare boolean flag.
+  let value: any = undefined;
+  const n = Number(flags.length);
+  for (let i = 0; i < n; i++) {
+    const f = String(flags[i]);
+    if (f === name) {
+      if (i + 1 < n && String(flags[i + 1]).charAt(0) !== "-") {
+        value = String(flags[i + 1]);
+        i++;
+      } else {
+        value = true;
+      }
+    } else if (f.indexOf(name + "=") === 0) {
+      value = f.slice(name.length + 1);
+    }
+  }
+  return value;
+}
+
+function __ntCliFlagAll(flags: string[], name: string): string[] {
+  const out: string[] = [];
+  const n = Number(flags.length);
+  for (let i = 0; i < n; i++) {
+    const f = String(flags[i]);
+    if (f === name && i + 1 < n) {
+      out.push(String(flags[i + 1]));
+      i++;
+    } else if (f.indexOf(name + "=") === 0) {
+      out.push(f.slice(name.length + 1));
+    }
+  }
+  return out;
+}
+
+function __ntCli(run: any, flags: string[], files: string[]): void {
+  const isolationFlag: any = __ntCliFlag(flags, "--test-isolation");
+  const isolation: string = isolationFlag === undefined || isolationFlag === true ? "process" : String(isolationFlag);
+  const concurrencyFlag: any = __ntCliFlag(flags, "--test-concurrency");
+  let concurrency: any = concurrencyFlag === undefined || concurrencyFlag === true ? true : Number(concurrencyFlag);
+  if (isolation === "none") concurrency = 1;
+  const timeoutFlag: any = __ntCliFlag(flags, "--test-timeout");
+  const timeout: any = timeoutFlag === undefined || timeoutFlag === true || Number(timeoutFlag) === 0 ? Infinity : Number(timeoutFlag);
+  const reporters: string[] = __ntCliFlagAll(flags, "--test-reporter");
+  if (Number(reporters.length) === 0) reporters.push("spec");
+  const destinations: string[] = __ntCliFlagAll(flags, "--test-reporter-destination");
+  const namePatterns: string[] = __ntCliFlagAll(flags, "--test-name-pattern");
+  const skipPatterns: string[] = __ntCliFlagAll(flags, "--test-skip-pattern");
+  const only: boolean = __ntCliFlag(flags, "--test-only") === true && isolation === "none";
+  const forceExit: boolean = __ntCliFlag(flags, "--test-force-exit") === true;
+
+  // The flags a file's child also needs: everything that is not the CLI's
+  // own `--test*` configuration.
+  const forwarded: string[] = [];
+  for (const f of flags) {
+    const s = String(f);
+    if (s === "--test" || s.indexOf("--test-") === 0) continue;
+    forwarded.push(s);
+  }
+  if (__ntCliFlag(flags, "--test-only") === true) forwarded.push("--test-only");
+
+  const options: any = {
+    isTestRunner: true,
+    concurrency: concurrency,
+    coverage: false,
+    coverageExcludeGlobs: undefined,
+    coverageIncludeGlobs: undefined,
+    destinations: Number(destinations.length) > 0 ? destinations : ["stdout"],
+    forceExit: forceExit,
+    isolation: isolation,
+    only: only,
+    reporters: reporters,
+    shard: undefined,
+    sourceMaps: false,
+    testNamePatterns: Number(namePatterns.length) > 0 ? namePatterns : null,
+    testSkipPatterns: Number(skipPatterns.length) > 0 ? skipPatterns : null,
+    timeout: timeout,
+    updateSnapshots: false,
+    watch: false,
+    globPatterns: files,
+  };
+  try {
+    const debug: any = __node_util.debuglog("test_runner");
+    debug("test runner configuration:", options);
+  } catch (e) {}
+
+  const runOptions: any = {
+    concurrency: concurrency === true ? 4 : concurrency,
+    timeout: timeout,
+    isolation: isolation,
+    execArgv: forwarded,
+  };
+  if (Number(files.length) > 0) runOptions.files = files;
+  if (Number(namePatterns.length) > 0) runOptions.testNamePatterns = namePatterns;
+  if (Number(skipPatterns.length) > 0) runOptions.testSkipPatterns = skipPatterns;
+  if (Number(files.length) > 0) {
+    for (const f of files) {
+      if (!__node_fs.existsSync(f)) {
+        process.stderr.write("Could not find '" + String(__node_path.resolve(f)) + "'\n");
+        process.exitCode = 1;
+        return;
+      }
+    }
+  }
+  const stream: any = run(runOptions);
+  stream.on("test:summary", (data: any) => {
+    if (data.file === undefined && !data.success) process.exitCode = 1;
+  });
+  const n = Number(reporters.length);
+  for (let i = 0; i < n; i++) {
+    const name = String(reporters[i]);
+    const dest: string = i < Number(destinations.length) ? String(destinations[i]) : "stdout";
+    const composed: any = stream.compose(__node_test_reporters[name] !== undefined ? name : "spec");
+    if (dest === "stdout") {
+      composed.pipe(process.stdout);
+    } else if (dest === "stderr") {
+      composed.pipe(process.stderr);
+    } else {
+      const chunks: string[] = [];
+      composed.on("data", (c: any) => { chunks.push(String(c)); });
+      composed.on("end", () => { __node_fs.writeFileSync(dest, chunks.join("")); });
+    }
+  }
+}
