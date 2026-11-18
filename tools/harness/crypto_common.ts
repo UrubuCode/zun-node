@@ -7,12 +7,10 @@
 // answer is `true`, and `hasOpenSSL(major, minor, patch)` is the predicate
 // behind it.
 //
-// The rest of Node's file — `testEncryptDecrypt`, `testSignVerify`, the
-// PEM regular expressions, `modp2buf`, `opensslCli` — is asymmetric-key
-// machinery for the `keygen`/`dh`/`rsa` corpora, which `src/crypto/crypto.ts`
-// does not implement at all (see its header). Those files fail on the first
-// `generateKeyPair`, so stubbing the helpers would change nothing; they are
-// left out rather than written to be unreachable.
+// The asymmetric-key helpers the `keygen`/`dh`/`rsa` corpora take —
+// `testEncryptDecrypt`, `testSignVerify`, `assertApproximateSize`, the PEM
+// regular expressions and `modp2buf` — follow below, as Node writes them.
+// `opensslCli` is `false`: there is no OpenSSL command line in this build.
 //
 // `process.versions.openssl` is not a real OpenSSL version here (there is no
 // OpenSSL in this build — see ../../Cargo.toml), so the version this reports

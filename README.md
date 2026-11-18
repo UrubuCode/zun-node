@@ -948,7 +948,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-crypto:start -->
 ### Node.js v25 `crypto` compatibility
 
-`█████░░░░░░░░░░░░░░░░░░░` **22.6%** — 26 / 115 Node `test-crypto*` tests passing
+`████████████░░░░░░░░░░░░` **51.3%** — 59 / 115 Node `test-crypto*` tests passing
 <!-- node-crypto:end -->
 
 > `crypto` covers the symmetric half of Node's module end to end: `createHash`

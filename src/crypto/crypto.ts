@@ -102,12 +102,12 @@
 // What is not here
 // ---------------------------------------------------------------------------
 //
-// Asymmetric cryptography in all its forms: `generateKeyPair`, `createSign` /
-// `createVerify` / `sign` / `verify`, `publicEncrypt` / `privateDecrypt`,
-// `createDiffieHellman` / `createECDH` / `diffieHellman`, `X509Certificate`,
-// `createPublicKey` / `createPrivateKey`, `checkPrime` / `generatePrime`, the
+// The asymmetric half covers RSA, RSA-PSS, EC (P-256/P-384/P-521/secp256k1),
+// Ed25519 and X25519 keys, sign/verify, RSA encryption, ECDH and classic
+// Diffie-Hellman (see `src/crypto/asym.rs`). Absent: DSA, Ed448/X448, `dh`
+// KeyObjects, `X509Certificate`, `checkPrime` / `generatePrime`, the
 // post-quantum families (ML-DSA, ML-KEM, SLH-DSA) and the full WebCrypto
-// surface. `KeyObject` exists for *secret* keys only. The symmetric gaps are
+// surface. The symmetric gaps are
 // the CCM, OCB, XTS and key-wrap modes and the legacy block ciphers (DES,
 // Camellia, ARIA, SM4), which `getCiphers()` still lists because that function
 // describes algorithms rather than capability — see `src/crypto/ciphers.rs`.
