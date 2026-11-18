@@ -225,7 +225,7 @@ internal/util/inspect __node_internal_util_inspect -
 [.][.]/common/arraystream __node_harness_arraystream ArrayStream
 [.][.]/common/countdown __node_harness_countdown Countdown
 vm __node_vm Script,compileFunction,createContext
-crypto __node_crypto Hash,Hmac,Cipheriv,Decipheriv,KeyObject
+crypto __node_crypto Hash,Hmac,Cipheriv,Decipheriv,KeyObject,Sign,Verify,ECDH,DiffieHellman,DiffieHellmanGroup
 [.][.]/common/crypto __node_harness_crypto -
 test __node_test test
 v8 __node_v8 Serializer,Deserializer,DefaultSerializer,DefaultDeserializer,GCProfiler

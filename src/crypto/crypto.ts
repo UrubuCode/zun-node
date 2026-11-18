@@ -102,12 +102,12 @@
 // What is not here
 // ---------------------------------------------------------------------------
 //
-// Asymmetric cryptography in all its forms: `generateKeyPair`, `createSign` /
-// `createVerify` / `sign` / `verify`, `publicEncrypt` / `privateDecrypt`,
-// `createDiffieHellman` / `createECDH` / `diffieHellman`, `X509Certificate`,
-// `createPublicKey` / `createPrivateKey`, `checkPrime` / `generatePrime`, the
+// The asymmetric half covers RSA, RSA-PSS, EC (P-256/P-384/P-521/secp256k1),
+// Ed25519 and X25519 keys, sign/verify, RSA encryption, ECDH and classic
+// Diffie-Hellman (see `src/crypto/asym.rs`). Absent: DSA, Ed448/X448, `dh`
+// KeyObjects, `X509Certificate`, `checkPrime` / `generatePrime`, the
 // post-quantum families (ML-DSA, ML-KEM, SLH-DSA) and the full WebCrypto
-// surface. `KeyObject` exists for *secret* keys only. The symmetric gaps are
+// surface. The symmetric gaps are
 // the CCM, OCB, XTS and key-wrap modes and the legacy block ciphers (DES,
 // Camellia, ARIA, SM4), which `getCiphers()` still lists because that function
 // describes algorithms rather than capability — see `src/crypto/ciphers.rs`.
@@ -275,6 +275,15 @@ function __cTakeError(): any {
   }
   if (code === "ERR_CRYPTO_INVALID_AUTH_TAG") return new ERR_CRYPTO_INVALID_AUTH_TAG("");
   if (code === "ERR_CRYPTO_INVALID_STATE") return new ERR_CRYPTO_INVALID_STATE("update");
+  // Node raises these as `TypeError`s.
+  if (
+    code === "ERR_CRYPTO_INVALID_CURVE" ||
+    code === "ERR_CRYPTO_INVALID_JWK" ||
+    code === "ERR_CRYPTO_INVALID_KEYTYPE" ||
+    code === "ERR_MISSING_PASSPHRASE" && message.indexOf("error:") !== 0
+  ) {
+    return new NodeTypeError(code, message);
+  }
   if (code.indexOf("ERR_OSSL_") === 0) {
     const parts: string[] = __cOsslParts(message);
     const library: string = parts[0];
@@ -929,43 +938,94 @@ function __cCipherInit(
 }
 
 // ---------------------------------------------------------------------------
-// KeyObject (secret keys)
+// KeyObject
 // ---------------------------------------------------------------------------
 //
-// Only the `'secret'` type exists here: `createPublicKey` / `createPrivateKey`
-// and every asymmetric operation are absent (see the header). A secret key is
-// a byte string plus the three members the corpus reads — `type`,
-// `symmetricKeySize` and `export()` — and it is the one key form `createHmac`
-// and `createCipheriv` accept in place of a Buffer.
+// One class for all three types. A `'secret'` key holds its bytes; a
+// `'private'` key holds its PKCS#8 document and a `'public'` key its SPKI
+// document, both DER, both base64 — the one canonical form `src/crypto/asym.rs`
+// parses on every call, so a key needs no native handle and no lifetime. Every
+// other encoding (PEM, PKCS#1, SEC1, encrypted PKCS#8, JWK) is converted on
+// the way in (`__cImportKey`) and on the way out (`export`).
+
+class ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE extends NodeTypeError {
+  constructor(actual: string, expected: string) {
+    super(
+      "ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE",
+      "Invalid key object type " + actual + ", expected " + expected + ".",
+    );
+  }
+}
+
+class ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS extends NodeError {
+  constructor(message: string) {
+    super("ERR_CRYPTO_INCOMPATIBLE_KEY_OPTIONS", message);
+  }
+}
 
 class KeyObject {
   type: any = "secret";
-  // The bytes, base64, which is how they reach the natives. Named with the
-  // module prefix because it is not part of Node's surface.
+  // The bytes (secret) or the DER document (asymmetric), base64. Named with
+  // the module prefix because it is not part of Node's surface.
   __cBase64: any = "";
+  __cInfo: any = undefined;
   constructor(type: any, base64: any) {
     this.type = type;
     this.__cBase64 = base64;
   }
 
   get symmetricKeySize(): any {
+    if (String(this.type) !== "secret") return undefined;
     const bytes: Buffer = Buffer.from(String(this.__cBase64), "base64");
     return Number(bytes.length);
   }
 
   get asymmetricKeyType(): any {
-    return undefined;
+    if (String(this.type) === "secret") return undefined;
+    return __cKeyInfo(this)[0];
+  }
+
+  get asymmetricKeyDetails(): any {
+    if (String(this.type) === "secret") return undefined;
+    const info: string[] = __cKeyInfo(this);
+    if (info[0] === "rsa" || (info[0] === "rsa-pss" && info[4] === "")) {
+      return {
+        modulusLength: Number(info[1]),
+        publicExponent: __cBigInt(info[2]),
+      };
+    }
+    if (info[0] === "rsa-pss") {
+      return {
+        modulusLength: Number(info[1]),
+        publicExponent: __cBigInt(info[2]),
+        hashAlgorithm: info[4],
+        mgf1HashAlgorithm: info[5],
+        saltLength: Number(info[6]),
+      };
+    }
+    if (info[0] === "ec") return { namedCurve: info[3] };
+    return {};
   }
 
   export(options?: any): any {
-    const bytes: Buffer = Buffer.from(String(this.__cBase64), "base64");
-    if (options !== undefined && options !== null && typeof options === "object") {
-      const format: any = options.format;
-      if (format !== undefined && String(format) !== "buffer") {
-        throw new ERR_CRYPTO_UNSUPPORTED_OPERATION();
+    const kind: string = String(this.type);
+    if (kind === "secret") {
+      const bytes: Buffer = Buffer.from(String(this.__cBase64), "base64");
+      if (options !== undefined && options !== null && typeof options === "object") {
+        const format: any = options.format;
+        if (format !== undefined && String(format) === "jwk") {
+          return { kty: "oct", k: __cBase64Url(String(this.__cBase64)) };
+        }
+        if (format !== undefined && String(format) !== "buffer") {
+          throw new ERR_INVALID_ARG_VALUE("options.format", format, "must be one of: 'buffer', 'jwk'");
+        }
       }
+      return bytes;
     }
-    return bytes;
+    let opts: any = options;
+    if (opts === undefined || opts === null) opts = {};
+    __cValidateObject(opts, "options");
+    return __cExportKey(this, opts, "options");
   }
 
   equals(other: any): boolean {
@@ -974,10 +1034,838 @@ class KeyObject {
     }
     const held: any = other;
     if (String(held.type) !== String(this.type)) return false;
-    return Boolean(
-      __cNative.cryptoTimingSafeEqual(String(this.__cBase64), String(held.__cBase64)),
+    const a: string = String(this.__cBase64);
+    const b: string = String(held.__cBase64);
+    if (String(this.type) !== "secret") return a === b;
+    const left: Buffer = Buffer.from(a, "base64");
+    const right: Buffer = Buffer.from(b, "base64");
+    if (Number(left.length) !== Number(right.length)) return false;
+    return Boolean(__cNative.cryptoTimingSafeEqual(a, b));
+  }
+}
+
+// `asymmetricKeyType`, modulus length, public exponent, curve — cached, since
+// a key is immutable.
+function __cKeyInfo(key: any): string[] {
+  if (key.__cInfo === undefined) {
+    const payload: string = __cPayload(
+      __cNative.cryptoKeyInfo(String(key.type), String(key.__cBase64)),
+    );
+    key.__cInfo = payload.split(__C_US);
+  }
+  const info: string[] = key.__cInfo;
+  return info;
+}
+
+function __cBigInt(decimal: string): any {
+  if (typeof BigInt === "function") return BigInt(decimal);
+  return Number(decimal);
+}
+
+// base64 → base64url without padding (JWK), and back.
+function __cBase64Url(base64: string): string {
+  return base64.split("+").join("-").split("/").join("_").split("=").join("");
+}
+
+function __cFromBase64Url(text: string): string {
+  return text.split("-").join("+").split("_").join("/");
+}
+
+// A key's bytes (`key`, possibly in `encoding`) as base64, for the import.
+function __cKeyBytes(data: any, encoding: any, name: string): string {
+  if (typeof data === "string") {
+    const text: string = data;
+    const bytes: Buffer = Buffer.from(text, __cInputEncoding(encoding));
+    return bytes.toString("base64");
+  }
+  if (data instanceof ArrayBuffer) {
+    const bytes: Buffer = Buffer.from(data);
+    return bytes.toString("base64");
+  }
+  if (__cIsByteView(data)) {
+    const view: Buffer = __cAsBuffer(data);
+    return view.toString("base64");
+  }
+  throw new ERR_INVALID_ARG_TYPE(
+    name,
+    ["string", "ArrayBuffer", "Buffer", "TypedArray", "DataView"],
+    data,
+  );
+}
+
+// Import any key input Node accepts, answering `[kind, der]`. With
+// `wantPrivate` false a private input still answers its own (private)
+// document: every native that takes a public key derives it.
+function __cImportKey(input: any, wantPrivate: boolean, name: string): string[] {
+  if (__cIsKeyObject(input)) {
+    const held: any = input;
+    const kind: string = String(held.type);
+    if (kind === "secret") {
+      throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(
+        "secret",
+        wantPrivate ? "private" : "private or public",
+      );
+    }
+    if (wantPrivate && kind !== "private") {
+      throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(kind, "private");
+    }
+    return [kind, String(held.__cBase64)];
+  }
+  let data: any = input;
+  let format: string = "pem";
+  let type: string = "";
+  let passphrase: string = "";
+  let hasPassphrase: boolean = false;
+  let encoding: any = undefined;
+  if (
+    input !== null &&
+    typeof input === "object" &&
+    !__cIsByteView(input) &&
+    !(input instanceof ArrayBuffer)
+  ) {
+    data = input.key;
+    if (__cIsKeyObject(data)) return __cImportKey(data, wantPrivate, name);
+    if (input.format !== undefined) format = String(input.format);
+    if (input.type !== undefined) type = String(input.type);
+    encoding = input.encoding;
+    if (input.passphrase !== undefined && input.passphrase !== null) {
+      passphrase = __cKeyBytes(input.passphrase, undefined, "options.passphrase");
+      hasPassphrase = true;
+    }
+    if (format === "jwk") {
+      __cValidateObject(data, name + ".key");
+      return __cImportJwk(data, wantPrivate);
+    }
+    if (format !== "pem" && format !== "der") {
+      throw new ERR_INVALID_ARG_VALUE(name + ".format", input.format, "must be one of: 'pem', 'der', 'jwk'");
+    }
+    if (format === "der" && type === "") {
+      throw new ERR_INVALID_ARG_VALUE(name + ".type", input.type, "must be one of: 'pkcs1', 'spki', 'pkcs8', 'sec1'");
+    }
+  } else if (
+    typeof input !== "string" &&
+    !__cIsByteView(input) &&
+    !(input instanceof ArrayBuffer)
+  ) {
+    throw new ERR_INVALID_ARG_TYPE(
+      name,
+      ["string", "ArrayBuffer", "Buffer", "TypedArray", "DataView", "KeyObject", "CryptoKey"],
+      input,
     );
   }
+  const bytes: string = __cKeyBytes(data, encoding, name);
+  const payload: string = __cPayload(
+    __cNative.cryptoKeyImport(bytes, format, type, passphrase, hasPassphrase, wantPrivate),
+  );
+  return payload.split(__C_US);
+}
+
+function __cJwkField(jwk: any, field: string): string {
+  const value: any = jwk[field];
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") {
+    throw new ERR_INVALID_ARG_TYPE("key." + field, "string", value);
+  }
+  const text: string = value;
+  return text;
+}
+
+function __cImportJwk(jwk: any, wantPrivate: boolean): string[] {
+  const kty: any = jwk.kty;
+  if (kty !== "RSA" && kty !== "EC" && kty !== "OKP") {
+    throw new ERR_INVALID_ARG_VALUE("key.kty", kty, "must be one of: 'RSA', 'EC', 'OKP'");
+  }
+  const names: string[] = ["kty", "crv", "n", "e", "d", "p", "q", "dp", "dq", "qi", "x", "y"];
+  const fields: string[] = [];
+  for (const field of names) {
+    const raw: string = __cJwkField(jwk, field);
+    fields.push(field === "kty" || field === "crv" ? raw : __cFromBase64Url(raw));
+  }
+  if (wantPrivate && fields[4] === "") {
+    throw new ERR_INVALID_ARG_VALUE("key.d", undefined, "must be a string");
+  }
+  const payload: string = __cPayload(
+    __cNative.cryptoKeyImportJwk(fields.join(__C_US), wantPrivate),
+  );
+  return payload.split(__C_US);
+}
+
+// `keyObject.export(options)` (and the `*KeyEncoding` options of
+// `generateKeyPair`) for an asymmetric key.
+function __cExportKey(key: any, options: any, name: string): any {
+  const kind: string = String(key.type);
+  const format: any = options.format === undefined ? "pem" : options.format;
+  if (format === "jwk") {
+    const payload: string = __cPayload(
+      __cNative.cryptoKeyJwk(kind, String(key.__cBase64)),
+    );
+    const f: string[] = payload.split(__C_US);
+    const names: string[] = ["kty", "crv", "n", "e", "d", "p", "q", "dp", "dq", "qi", "x", "y"];
+    const jwk: any = {};
+    for (let i: number = 0; i < names.length; i++) {
+      if (f[i] !== "") jwk[names[i]] = f[i];
+    }
+    if (kind === "public") delete jwk.d;
+    return jwk;
+  }
+  if (format !== "pem" && format !== "der") {
+    throw new ERR_INVALID_ARG_VALUE(name + ".format", format, "must be one of: 'pem', 'der', 'jwk'");
+  }
+  let type: any = options.type;
+  if (type === undefined) type = kind === "public" ? "spki" : "pkcs8";
+  if (kind === "public" && type !== "spki" && type !== "pkcs1") {
+    throw new ERR_INVALID_ARG_VALUE(name + ".type", type, "must be one of: 'pkcs1', 'spki'");
+  }
+  if (kind === "private" && type !== "pkcs8" && type !== "pkcs1" && type !== "sec1") {
+    throw new ERR_INVALID_ARG_VALUE(name + ".type", type, "must be one of: 'pkcs1', 'pkcs8', 'sec1'");
+  }
+  let cipher: string = "";
+  let passphrase: string = "";
+  if (kind === "private" && options.cipher !== undefined && options.cipher !== null) {
+    __cValidateString(options.cipher, name + ".cipher");
+    cipher = options.cipher;
+    if (options.passphrase === undefined || options.passphrase === null) {
+      throw new ERR_INVALID_ARG_VALUE(name + ".passphrase", options.passphrase, "must be a string or a buffer");
+    }
+    passphrase = __cKeyBytes(options.passphrase, undefined, name + ".passphrase");
+  }
+  const payload: string = __cPayload(
+    __cNative.cryptoKeyExport(kind, String(key.__cBase64), String(type), String(format), cipher, passphrase),
+  );
+  const bytes: Buffer = Buffer.from(payload, "base64");
+  if (format === "pem") return bytes.toString("utf8");
+  return bytes;
+}
+
+function __cCreatePrivateKey(key: any): any {
+  if (__cIsKeyObject(key)) {
+    const held: any = key;
+    throw new ERR_INVALID_ARG_TYPE("key", ["string", "ArrayBuffer", "Buffer", "TypedArray", "DataView"], held);
+  }
+  const parts: string[] = __cImportKey(key, true, "key");
+  return new KeyObject("private", parts[1]);
+}
+
+function __cCreatePublicKey(key: any): any {
+  if (__cIsKeyObject(key)) {
+    const held: any = key;
+    if (String(held.type) !== "private") {
+      throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(String(held.type), "private");
+    }
+    return new KeyObject(
+      "public",
+      __cPayload(__cNative.cryptoKeyDerivePublic(String(held.__cBase64))),
+    );
+  }
+  const parts: string[] = __cImportKey(key, false, "key");
+  if (parts[0] === "private") {
+    return new KeyObject("public", __cPayload(__cNative.cryptoKeyDerivePublic(parts[1])));
+  }
+  return new KeyObject("public", parts[1]);
+}
+
+// ---------------------------------------------------------------------------
+// generateKeyPair
+// ---------------------------------------------------------------------------
+
+function __cKeyEncoding(options: any, field: string, kind: string): any {
+  const encoding: any = options[field];
+  if (encoding === undefined || encoding === null) return undefined;
+  __cValidateObject(encoding, "options." + field);
+  const format: any = encoding.format;
+  if (format !== "pem" && format !== "der" && format !== "jwk") {
+    throw new ERR_INVALID_ARG_VALUE("options." + field + ".format", format, "must be one of: 'pem', 'der', 'jwk'");
+  }
+  if (format !== "jwk") {
+    const type: any = encoding.type;
+    const allowed: boolean = kind === "public"
+      ? type === "spki" || type === "pkcs1"
+      : type === "pkcs8" || type === "pkcs1" || type === "sec1";
+    if (!allowed) {
+      throw new ERR_INVALID_ARG_VALUE("options." + field + ".type", type, "is invalid");
+    }
+  }
+  return encoding;
+}
+
+function __cGenerateKeyPair(type: any, options: any): any {
+  __cValidateString(type, "type");
+  const kind: string = type;
+  let opts: any = options;
+  if (opts === undefined) opts = {};
+  __cValidateObject(opts, "options");
+  let bits: number = 0;
+  let exponent: number = 65537;
+  let curve: string = "";
+  if (kind === "rsa" || kind === "rsa-pss") {
+    bits = __cValidateUint32(opts.modulusLength, "options.modulusLength");
+    if (opts.publicExponent !== undefined) {
+      exponent = __cValidateUint32(opts.publicExponent, "options.publicExponent");
+    }
+    if (kind === "rsa-pss") {
+      // The native reads `hash US mgf1 US saltLength` from the curve slot.
+      let hash: string = "";
+      let mgf1: string = "";
+      let saltLength: string = "";
+      if (opts.hashAlgorithm !== undefined) {
+        __cValidateString(opts.hashAlgorithm, "options.hashAlgorithm");
+        hash = opts.hashAlgorithm;
+      }
+      if (opts.mgf1HashAlgorithm !== undefined) {
+        __cValidateString(opts.mgf1HashAlgorithm, "options.mgf1HashAlgorithm");
+        mgf1 = opts.mgf1HashAlgorithm;
+      }
+      if (opts.saltLength !== undefined) {
+        const n: number = __cValidateInt32(opts.saltLength, "options.saltLength");
+        saltLength = "" + n;
+      }
+      curve = hash + __C_US + mgf1 + __C_US + saltLength;
+    }
+  } else if (kind === "ec") {
+    __cValidateString(opts.namedCurve, "options.namedCurve");
+    curve = opts.namedCurve;
+  } else if (kind === "ed25519" || kind === "x25519") {
+    // No parameters.
+  } else if (
+    kind === "dsa" || kind === "dh" || kind === "ed448" || kind === "x448"
+  ) {
+    throw new ERR_CRYPTO_UNSUPPORTED_OPERATION();
+  } else {
+    throw new ERR_INVALID_ARG_VALUE("type", type, "must be a supported key type");
+  }
+  const publicEncoding: any = __cKeyEncoding(opts, "publicKeyEncoding", "public");
+  const privateEncoding: any = __cKeyEncoding(opts, "privateKeyEncoding", "private");
+  // JWK names only four Weierstrass curves; any other is refused at export.
+  if (
+    kind === "ec" &&
+    ((publicEncoding !== undefined && publicEncoding.format === "jwk") ||
+      (privateEncoding !== undefined && privateEncoding.format === "jwk")) &&
+    ["prime256v1", "P-256", "secp256r1", "secp384r1", "P-384", "secp521r1", "P-521", "secp256k1"]
+      .indexOf(curve) < 0
+  ) {
+    throw new NodeError("ERR_CRYPTO_JWK_UNSUPPORTED_CURVE", "Unsupported JWK EC curve: " + curve + ".");
+  }
+  const payload: string = __cPayload(__cNative.cryptoKeyGenerate(kind, bits, exponent, curve));
+  const parts: string[] = payload.split(__C_US);
+  const privateKey: any = new KeyObject("private", parts[0]);
+  const publicKey: any = new KeyObject("public", parts[1]);
+  const pub: any = publicEncoding === undefined
+    ? publicKey
+    : __cExportKey(publicKey, publicEncoding, "options.publicKeyEncoding");
+  const priv: any = privateEncoding === undefined
+    ? privateKey
+    : __cExportKey(privateKey, privateEncoding, "options.privateKeyEncoding");
+  return { publicKey: pub, privateKey: priv };
+}
+
+// ---------------------------------------------------------------------------
+// Signatures
+// ---------------------------------------------------------------------------
+
+// `padding US saltLength US dsaEncoding`, from a key options object.
+function __cSignOptions(key: any): string {
+  let padding: string = "";
+  let salt: string = "";
+  let p1363: number = 0;
+
+
+  if (
+    key !== null &&
+    typeof key === "object" &&
+    !__cIsKeyObject(key) &&
+    !__cIsByteView(key)
+  ) {
+    if (key.padding !== undefined) {
+      const n: number = __cValidateInt32(key.padding, "key.padding");
+      padding = "" + n;
+    }
+    if (key.saltLength !== undefined) {
+      const n: number = __cValidateInt32(key.saltLength, "key.saltLength");
+      salt = "" + n;
+    }
+    const encoding: any = key.dsaEncoding;
+    if (encoding !== undefined) {
+      if (encoding === "ieee-p1363") {
+        p1363 = 1;
+      } else if (encoding !== "der") {
+        throw new ERR_INVALID_ARG_VALUE("options.dsaEncoding", encoding, "is invalid");
+      }
+    }
+  }
+  return padding + __C_US + salt + __C_US + String(p1363);
+}
+
+function __cDigestName(algorithm: any): string {
+  if (algorithm === undefined || algorithm === null) return "";
+  __cValidateString(algorithm, "algorithm");
+  const name: string = algorithm;
+  return name;
+}
+
+function __cSignBytes(algorithm: string, dataBase64: string, key: any): string {
+  const parts: string[] = __cImportKey(key, true, "key");
+  return __cPayload(
+    __cNative.cryptoSign(algorithm, parts[1], dataBase64, __cSignOptions(key)),
+  );
+}
+
+function __cVerifyBytes(
+  algorithm: string,
+  dataBase64: string,
+  key: any,
+  signatureBase64: string,
+): boolean {
+  const parts: string[] = __cImportKey(key, false, "key");
+  const payload: string = __cPayload(
+    __cNative.cryptoVerify(
+      algorithm,
+      parts[0],
+      parts[1],
+      dataBase64,
+      signatureBase64,
+      __cSignOptions(key),
+    ),
+  );
+  return payload === "1";
+}
+
+function __cSignData(data: any): string {
+  if (!__cIsByteView(data) && typeof data !== "string") {
+    throw new ERR_INVALID_ARG_TYPE("data", ["Buffer", "TypedArray", "DataView"], data);
+  }
+  return __cToBase64(data, undefined, "data");
+}
+
+// `Sign` / `Verify`: the data is buffered (as base64 chunks) and the one-shot
+// natives run at `sign()` / `verify()`.
+class Sign {
+  __cAlgorithm: string = "";
+  __cChunks: string[] = [];
+  constructor(algorithm: any, options?: any) {
+    __cValidateString(algorithm, "algorithm");
+    const name: string = algorithm;
+    if (__cMaybePayload(__cNative.cryptoHashOne(name, "", -1)) === undefined) {
+      throw new Error("Invalid digest: " + name);
+    }
+    this.__cAlgorithm = name;
+  }
+  update(data: any, encoding?: any): any {
+    this.__cChunks.push(__cToBase64(data, encoding, "data"));
+    return this;
+  }
+  write(data: any, encoding?: any): boolean {
+    this.update(data, encoding);
+    return true;
+  }
+  end(data?: any, encoding?: any): any {
+    if (data !== undefined && data !== null) this.update(data, encoding);
+    return this;
+  }
+  sign(privateKey: any, outputEncoding?: any): any {
+    if (privateKey === undefined || privateKey === null) {
+      throw new ERR_CRYPTO_SIGN_KEY_REQUIRED();
+    }
+    const signature: string = __cSignBytes(this.__cAlgorithm, __cJoinChunks(this.__cChunks), privateKey);
+    return __cFromBase64(signature, outputEncoding);
+  }
+}
+
+class Verify {
+  __cAlgorithm: string = "";
+  __cChunks: string[] = [];
+  constructor(algorithm: any, options?: any) {
+    __cValidateString(algorithm, "algorithm");
+    const name: string = algorithm;
+    if (__cMaybePayload(__cNative.cryptoHashOne(name, "", -1)) === undefined) {
+      throw new Error("Invalid digest: " + name);
+    }
+    this.__cAlgorithm = name;
+  }
+  update(data: any, encoding?: any): any {
+    this.__cChunks.push(__cToBase64(data, encoding, "data"));
+    return this;
+  }
+  write(data: any, encoding?: any): boolean {
+    this.update(data, encoding);
+    return true;
+  }
+  end(data?: any, encoding?: any): any {
+    if (data !== undefined && data !== null) this.update(data, encoding);
+    return this;
+  }
+  verify(publicKey: any, signature: any, signatureEncoding?: any): boolean {
+    const sig: string = __cToBase64(signature, signatureEncoding, "signature");
+    return __cVerifyBytes(this.__cAlgorithm, __cJoinChunks(this.__cChunks), publicKey, sig);
+  }
+}
+
+class ERR_CRYPTO_SIGN_KEY_REQUIRED extends NodeError {
+  constructor() {
+    super("ERR_CRYPTO_SIGN_KEY_REQUIRED", "No key provided to sign");
+  }
+}
+
+function __cJoinChunks(chunks: string[]): string {
+  if (chunks.length === 1) return chunks[0];
+  const views: Buffer[] = [];
+  for (const chunk of chunks) {
+    const bytes: Buffer = Buffer.from(chunk, "base64");
+    views.push(bytes);
+  }
+  const joined: Buffer = Buffer.concat(views);
+  return joined.toString("base64");
+}
+
+// ---------------------------------------------------------------------------
+// RSA encryption
+// ---------------------------------------------------------------------------
+
+function __cRsaCrypt(op: string, key: any, buffer: any, defaultPadding: number): any {
+  const wantPrivate: boolean = op === "privateDecrypt" || op === "privateEncrypt";
+  const parts: string[] = __cImportKey(key, wantPrivate, "key");
+  let padding: number = defaultPadding;
+  let hash: string = "";
+  let label: string = "";
+  if (
+    key !== null &&
+    typeof key === "object" &&
+    !__cIsKeyObject(key) &&
+    !__cIsByteView(key)
+  ) {
+    if (key.padding !== undefined) {
+      const n: number = __cValidateInt32(key.padding, "key.padding");
+      padding = "" + n;
+    }
+    if (key.oaepHash !== undefined) {
+      __cValidateString(key.oaepHash, "key.oaepHash");
+      hash = key.oaepHash;
+    }
+    if (key.oaepLabel !== undefined) label = __cKeyBytes(key.oaepLabel, key.encoding, "key.oaepLabel");
+  }
+  const data: string = __cToBase64(buffer, undefined, "buffer");
+  const opts: string = String(padding) + __C_US + hash + __C_US + label;
+  const payload: string = __cPayload(
+    __cNative.cryptoRsaCrypt(op, parts[0], parts[1], data, opts),
+  );
+  return Buffer.from(payload, "base64");
+}
+
+// ---------------------------------------------------------------------------
+// ECDH
+// ---------------------------------------------------------------------------
+
+class ERR_CRYPTO_ECDH_INVALID_FORMAT extends NodeTypeError {
+  constructor(format: any) {
+    super("ERR_CRYPTO_ECDH_INVALID_FORMAT", "Invalid ECDH format: " + String(format));
+  }
+}
+
+const __C_ECDH_CURVES: string[] = ["prime256v1", "secp256r1", "secp384r1", "secp521r1", "secp256k1"];
+
+function __cEcdhFormat(format: any): string {
+  if (format === undefined || format === null) return "uncompressed";
+  if (format === "compressed" || format === "uncompressed" || format === "hybrid") {
+    const text: string = format;
+    return text;
+  }
+  throw new ERR_CRYPTO_ECDH_INVALID_FORMAT(format);
+}
+
+// An uncompressed point (base64) re-encoded in `format`.
+function __cEcdhPoint(curve: string, uncompressed: string, format: string): string {
+  if (format === "uncompressed") return uncompressed;
+  if (format === "compressed") {
+    return __cPayload(__cNative.cryptoEcdhConvert(curve, uncompressed, true));
+  }
+  const bytes: Buffer = Buffer.from(uncompressed, "base64");
+  const last: number = Number(bytes[Number(bytes.length) - 1]);
+  bytes[0] = (last & 1) === 1 ? 7 : 6;
+  return bytes.toString("base64");
+}
+
+class ECDH {
+  __cCurve: string = "";
+  __cPrivate: string = "";
+  __cPublic: string = "";
+  constructor(curve: any) {
+    __cValidateString(curve, "curve");
+    const name: string = curve;
+    // Any curve `getCurves()` lists is accepted here, as in Node; the ones
+    // with no implementation behind them fail at their first operation.
+    if (
+      __C_ECDH_CURVES.indexOf(name) < 0 &&
+      __cNames(__cPayload(__cNative.cryptoCurveNames())).indexOf(name) < 0
+    ) {
+      throw new NodeTypeError("ERR_CRYPTO_INVALID_CURVE", "Invalid EC curve name");
+    }
+    this.__cCurve = name;
+  }
+  generateKeys(encoding?: any, format?: any): any {
+    const parts: string[] = __cPayload(__cNative.cryptoEcdhKeys(this.__cCurve, "")).split(__C_US);
+    this.__cPrivate = parts[0];
+    this.__cPublic = parts[1];
+    return this.getPublicKey(encoding, format);
+  }
+  computeSecret(key: any, inputEncoding?: any, outputEncoding?: any): any {
+    const peer: string = __cToBase64(key, inputEncoding, "key");
+    // OpenSSL's `EC_KEY_check_key`: a public key set by `setPublicKey` must
+    // still belong to the private key.
+    if (this.__cPrivate !== "") {
+      const own: string[] = __cPayload(
+        __cNative.cryptoEcdhKeys(this.__cCurve, this.__cPrivate),
+      ).split(__C_US);
+      if (own[1] !== this.__cPublic) throw new Error("Invalid key pair");
+    }
+    const secret: string = __cPayload(
+      __cNative.cryptoEcdhCompute(this.__cCurve, this.__cPrivate, peer),
+    );
+    return __cFromBase64(secret, outputEncoding);
+  }
+  getPublicKey(encoding?: any, format?: any): any {
+    if (this.__cPublic === "") {
+      throw new Error("Failed to get ECDH public key");
+    }
+    const point: string = __cEcdhPoint(this.__cCurve, this.__cPublic, __cEcdhFormat(format));
+    return __cFromBase64(point, encoding);
+  }
+  getPrivateKey(encoding?: any): any {
+    if (this.__cPrivate === "") {
+      throw new Error("Failed to get ECDH private key");
+    }
+    return __cFromBase64(this.__cPrivate, encoding);
+  }
+  setPrivateKey(key: any, encoding?: any): any {
+    const raw: string = __cToBase64(key, encoding, "key");
+    const parts: string[] = __cPayload(__cNative.cryptoEcdhKeys(this.__cCurve, raw)).split(__C_US);
+    this.__cPrivate = parts[0];
+    this.__cPublic = parts[1];
+    return this;
+  }
+  setPublicKey(key: any, encoding?: any): any {
+    __cEmitWarning("DEP0031", "ecdh.setPublicKey() is deprecated.");
+    const point: string = __cToBase64(key, encoding, "key");
+    const converted: any = __cMaybePayload(__cNative.cryptoEcdhConvert(this.__cCurve, point, false));
+    if (converted === undefined) {
+      throw new NodeError("ERR_CRYPTO_OPERATION_FAILED", "Failed to convert Buffer to EC_POINT");
+    }
+    this.__cPublic = converted;
+    return this;
+  }
+  static convertKey(key: any, curve: any, inEnc?: any, outEnc?: any, format?: any): any {
+    __cValidateString(curve, "curve");
+    const name: string = curve;
+    const point: string = __cToBase64(key, inEnc, "key");
+    const shape: string = __cEcdhFormat(format);
+    const uncompressed: string = __cPayload(__cNative.cryptoEcdhConvert(name, point, false));
+    return __cFromBase64(__cEcdhPoint(name, uncompressed, shape), outEnc);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Finite-field Diffie-Hellman
+// ---------------------------------------------------------------------------
+
+const __C_DH_GROUPS: string[] = [
+  "modp1", "modp2", "modp5", "modp14", "modp15", "modp16", "modp17", "modp18",
+];
+
+// A non-negative integer as minimal big-endian bytes, base64.
+function __cIntBytes(value: number): string {
+  const bytes: number[] = [];
+  let rest: number = value;
+  while (rest > 0) {
+    bytes.unshift(rest % 256);
+    rest = Math.floor(rest / 256);
+  }
+  if (bytes.length === 0) bytes.push(0);
+  const out: Buffer = Buffer.from(bytes);
+  return out.toString("base64");
+}
+
+// Strip leading zero bytes, as OpenSSL's `BN_bn2bin` writes a number.
+function __cTrimBase64(base64: string): string {
+  const bytes: Buffer = Buffer.from(base64, "base64");
+  let start: number = 0;
+  const length: number = Number(bytes.length);
+  while (start < length - 1 && Number(bytes[start]) === 0) start++;
+  const out: Buffer = bytes.subarray(start, length);
+  return out.toString("base64");
+}
+
+class __CryptoDhBase {
+  __cPrime: string = "";
+  __cGenerator: string = "";
+  __cPrivate: string = "";
+  __cPublic: string = "";
+  verifyError: number = 0;
+  generateKeys(encoding?: any): any {
+    if (this.__cPrivate === "") {
+      const length: number = Number(Buffer.from(this.__cPrime, "base64").length);
+      this.__cPrivate = __cTrimBase64(__cPayload(__cNative.cryptoRandomBytes(length)));
+    }
+    this.__cPublic = __cTrimBase64(
+      __cPayload(__cNative.cryptoModPow(this.__cGenerator, this.__cPrivate, this.__cPrime)),
+    );
+    return this.getPublicKey(encoding);
+  }
+  computeSecret(key: any, inputEncoding?: any, outputEncoding?: any): any {
+    const peer: string = __cToBase64(key, inputEncoding, "key");
+    const secret: string = __cPayload(
+      __cNative.cryptoModPow(peer, this.__cPrivate, this.__cPrime),
+    );
+    return __cFromBase64(secret, outputEncoding);
+  }
+  getPrime(encoding?: any): any {
+    return __cFromBase64(this.__cPrime, encoding);
+  }
+  getGenerator(encoding?: any): any {
+    return __cFromBase64(this.__cGenerator, encoding);
+  }
+  getPublicKey(encoding?: any): any {
+    if (this.__cPublic === "") {
+      throw new Error("No public key - did you forget to generate one?");
+    }
+    return __cFromBase64(this.__cPublic, encoding);
+  }
+  getPrivateKey(encoding?: any): any {
+    if (this.__cPrivate === "") {
+      throw new Error("No private key - did you forget to generate one?");
+    }
+    return __cFromBase64(this.__cPrivate, encoding);
+  }
+}
+
+class DiffieHellman extends __CryptoDhBase {
+  constructor(sizeOrKey: any, keyEncoding?: any, generator?: any, genEncoding?: any) {
+    super();
+    let gen: any = generator;
+    let genEnc: any = genEncoding;
+    let keyEnc: any = keyEncoding;
+    // `(prime, generator, genEncoding)`: Node shifts a second argument that
+    // is not an encoding name into the generator slot.
+    if (
+      keyEnc !== undefined &&
+      keyEnc !== null &&
+      (typeof keyEnc !== "string" ||
+        (keyEnc !== "buffer" && __bufNormalizeEncoding(keyEnc) === ""))
+    ) {
+      genEnc = gen;
+      gen = keyEnc;
+      keyEnc = undefined;
+    }
+    if (typeof sizeOrKey === "number") {
+      const bits: number = __cValidateInt32(sizeOrKey, "sizeOrKey");
+      if (bits < 2) {
+        throw new __CryptoOsslError(
+          "ERR_OSSL_DH_MODULUS_TOO_SMALL",
+          "error:0280007E:Diffie-Hellman routines::modulus too small",
+          "Diffie-Hellman routines",
+          "modulus too small",
+        );
+      }
+      this.__cPrime = __cPayload(__cNative.cryptoGeneratePrime(bits));
+    } else {
+      this.__cPrime = __cToBase64(sizeOrKey, keyEnc, "sizeOrKey");
+    }
+    if (gen === undefined || gen === null) {
+      this.__cGenerator = __cIntBytes(2);
+    } else if (typeof gen === "number") {
+      const g: number = __cValidateInt32(gen, "generator");
+      if (g < 2) {
+        throw new __CryptoOsslError(
+          "ERR_OSSL_DH_BAD_GENERATOR",
+          "error:028000B6:Diffie-Hellman routines::bad generator",
+          "Diffie-Hellman routines",
+          "bad generator",
+        );
+      }
+      this.__cGenerator = __cIntBytes(g);
+    } else {
+      this.__cGenerator = __cToBase64(gen, genEnc, "generator");
+      const bytes: Buffer = Buffer.from(this.__cGenerator, "base64");
+      let small: boolean = true;
+      const length: number = Number(bytes.length);
+      for (let i: number = 0; i < length; i++) {
+        const byte: number = Number(bytes[i]);
+        if (i < length - 1 ? byte !== 0 : byte > 1) small = false;
+      }
+      if (small) {
+        throw new __CryptoOsslError(
+          "ERR_OSSL_DH_BAD_GENERATOR",
+          "error:028000B6:Diffie-Hellman routines::bad generator",
+          "Diffie-Hellman routines",
+          "bad generator",
+        );
+      }
+    }
+    // OpenSSL's `DH_check` result. A generated prime is not checked: it is
+    // prime by construction, but not a *safe* prime (generating one of
+    // those is minutes of work), so checking it would report a flag Node's
+    // own generated groups never carry.
+    if (typeof sizeOrKey !== "number") {
+      this.verifyError = Number(
+        __cPayload(__cNative.cryptoDhCheck(this.__cPrime, this.__cGenerator)),
+      );
+    }
+  }
+  setPublicKey(key: any, encoding?: any): any {
+    this.__cPublic = __cToBase64(key, encoding, "key");
+    return this;
+  }
+  setPrivateKey(key: any, encoding?: any): any {
+    this.__cPrivate = __cToBase64(key, encoding, "key");
+    return this;
+  }
+}
+
+class DiffieHellmanGroup extends __CryptoDhBase {
+  constructor(name: any) {
+    super();
+    __cValidateString(name, "name");
+    const group: string = name;
+    if (__C_DH_GROUPS.indexOf(group) < 0) {
+      throw new NodeError("ERR_CRYPTO_UNKNOWN_DH_GROUP", "Unknown DH group");
+    }
+    this.__cPrime = __cPayload(__cNative.cryptoDhGroup(group));
+    this.__cGenerator = __cIntBytes(2);
+  }
+}
+
+// `crypto.diffieHellman({ privateKey, publicKey })`.
+function __cStatelessDh(options: any): any {
+  __cValidateObject(options, "options");
+  const privateKey: any = options.privateKey;
+  const publicKey: any = options.publicKey;
+  if (!__cIsKeyObject(privateKey)) {
+    throw new ERR_INVALID_ARG_VALUE("options.privateKey", privateKey, "is invalid");
+  }
+  if (!__cIsKeyObject(publicKey)) {
+    throw new ERR_INVALID_ARG_VALUE("options.publicKey", publicKey, "is invalid");
+  }
+  const priv: any = privateKey;
+  const pub: any = publicKey;
+  if (String(priv.type) !== "private") {
+    throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(String(priv.type), "private");
+  }
+  if (String(pub.type) !== "public" && String(pub.type) !== "private") {
+    throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(String(pub.type), "private or public");
+  }
+  let spki: string = String(pub.__cBase64);
+  if (String(pub.type) === "private") {
+    spki = __cPayload(__cNative.cryptoKeyDerivePublic(spki));
+  }
+  const privType: any = priv.asymmetricKeyType;
+  const pubType: any = pub.asymmetricKeyType;
+  if (privType !== pubType) {
+    throw new NodeError(
+      "ERR_CRYPTO_INCOMPATIBLE_KEY",
+      "Incompatible key types for Diffie-Hellman: " + String(privType) + " and " + String(pubType),
+    );
+  }
+  const secret: string = __cPayload(
+    __cNative.cryptoDiffieHellmanKeys(String(priv.__cBase64), spki),
+  );
+  return Buffer.from(secret, "base64");
 }
 
 // Is this a `KeyObject`? `x instanceof KeyObject` is a *runtime* failure in
@@ -1689,58 +2577,103 @@ const __node_crypto: any = {
   },
 
   // ---------------------------------------------------------------------
-  // The asymmetric surface, present but unimplemented (see the header).
+  // The asymmetric surface
   // ---------------------------------------------------------------------
-  createSign(): any {
-    return __cUnsupported();
+  Sign: Sign,
+  Verify: Verify,
+  ECDH: ECDH,
+  DiffieHellman: DiffieHellman,
+  DiffieHellmanGroup: DiffieHellmanGroup,
+
+  createSign(algorithm: any, options?: any): any {
+    return new Sign(algorithm, options);
   },
-  createVerify(): any {
-    return __cUnsupported();
+  createVerify(algorithm: any, options?: any): any {
+    return new Verify(algorithm, options);
   },
-  sign(): any {
-    return __cUnsupported();
+  sign(algorithm: any, data: any, key: any, callback?: any): any {
+    const name: string = __cDigestName(algorithm);
+    const bytes: string = __cSignData(data);
+    if (key === undefined || key === null) throw new ERR_CRYPTO_SIGN_KEY_REQUIRED();
+    const signature: string = __cSignBytes(name, bytes, key);
+    const answer: Buffer = Buffer.from(signature, "base64");
+    if (callback !== undefined) {
+      __cValidateFunction(callback, "callback");
+      __cTick(callback, null, answer);
+      return undefined;
+    }
+    return answer;
   },
-  verify(): any {
-    return __cUnsupported();
+  verify(algorithm: any, data: any, key: any, signature: any, callback?: any): any {
+    const name: string = __cDigestName(algorithm);
+    const bytes: string = __cSignData(data);
+    if (!__cIsByteView(signature)) {
+      throw new ERR_INVALID_ARG_TYPE("signature", ["Buffer", "TypedArray", "DataView"], signature);
+    }
+    const sig: string = __cToBase64(signature, undefined, "signature");
+    const answer: boolean = __cVerifyBytes(name, bytes, key, sig);
+    if (callback !== undefined) {
+      __cValidateFunction(callback, "callback");
+      __cTick(callback, null, answer);
+      return undefined;
+    }
+    return answer;
   },
-  createPublicKey(): any {
-    return __cUnsupported();
+  createPublicKey(key: any): any {
+    return __cCreatePublicKey(key);
   },
-  createPrivateKey(): any {
-    return __cUnsupported();
+  createPrivateKey(key: any): any {
+    return __cCreatePrivateKey(key);
   },
-  generateKeyPair(): any {
-    return __cUnsupported();
+  generateKeyPairSync(type: any, options?: any): any {
+    return __cGenerateKeyPair(type, options);
   },
-  generateKeyPairSync(): any {
-    return __cUnsupported();
+  generateKeyPair(type: any, options: any, callback?: any): void {
+    let opts: any = options;
+    let cb: any = callback;
+    if (__evIsFn(opts)) {
+      cb = opts;
+      opts = undefined;
+    }
+    __cValidateFunction(cb, "callback");
+    const pair: any = __cGenerateKeyPair(type, opts);
+    const fn: any = cb;
+    __processNextTick(function (): void {
+      __cInvoke(fn, [null, pair.publicKey, pair.privateKey]);
+    });
   },
-  publicEncrypt(): any {
-    return __cUnsupported();
+  publicEncrypt(key: any, buffer: any): any {
+    return __cRsaCrypt("publicEncrypt", key, buffer, 4);
   },
-  publicDecrypt(): any {
-    return __cUnsupported();
+  publicDecrypt(key: any, buffer: any): any {
+    return __cRsaCrypt("publicDecrypt", key, buffer, 1);
   },
-  privateEncrypt(): any {
-    return __cUnsupported();
+  privateEncrypt(key: any, buffer: any): any {
+    return __cRsaCrypt("privateEncrypt", key, buffer, 1);
   },
-  privateDecrypt(): any {
-    return __cUnsupported();
+  privateDecrypt(key: any, buffer: any): any {
+    return __cRsaCrypt("privateDecrypt", key, buffer, 4);
   },
-  createDiffieHellman(): any {
-    return __cUnsupported();
+  createDiffieHellman(sizeOrKey: any, keyEncoding?: any, generator?: any, genEncoding?: any): any {
+    return new DiffieHellman(sizeOrKey, keyEncoding, generator, genEncoding);
   },
-  createDiffieHellmanGroup(): any {
-    return __cUnsupported();
+  createDiffieHellmanGroup(name: any): any {
+    return new DiffieHellmanGroup(name);
   },
-  getDiffieHellman(): any {
-    return __cUnsupported();
+  getDiffieHellman(name: any): any {
+    return new DiffieHellmanGroup(name);
   },
-  diffieHellman(): any {
-    return __cUnsupported();
+  diffieHellman(options: any, callback?: any): any {
+    const secret: any = __cStatelessDh(options);
+    if (callback !== undefined) {
+      __cValidateFunction(callback, "callback");
+      __cTick(callback, null, secret);
+      return undefined;
+    }
+    return secret;
   },
-  createECDH(): any {
-    return __cUnsupported();
+  createECDH(curve: any): any {
+    return new ECDH(curve);
   },
   checkPrime(): any {
     return __cUnsupported();
@@ -1757,6 +2690,25 @@ const __node_crypto: any = {
 };
 
 // `constants` is a read-only property in Node, as in `node:zlib`.
+// `util.promisify(generateKeyPair)` resolves `{ publicKey, privateKey }`
+// rather than the callback's first value, through `promisify.custom`.
+const __cGenerateKeyPairFn: any = __node_crypto.generateKeyPair;
+__cGenerateKeyPairFn[Symbol.for("nodejs.util.promisify.custom")] = function (
+  type: any,
+  options: any,
+): any {
+  return new Promise(function (resolve: any, reject: any): void {
+    let pair: any = undefined;
+    try {
+      pair = __cGenerateKeyPair(type, options);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    resolve(pair);
+  });
+};
+
 Object.defineProperty(__node_crypto, "constants", {
   configurable: false,
   enumerable: true,

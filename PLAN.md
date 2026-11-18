@@ -1050,13 +1050,15 @@ gets deleted; nothing else in the tracker changes.
   differs, for the reason `zlib` gives: the natives are synchronous and there is
   no threadpool, so a KDF callback is computed now and delivered on the next
   tick.
-  **Three things are deliberately not here.** The whole asymmetric surface —
-  `generateKeyPair`, sign/verify, `publicEncrypt`/`privateDecrypt`,
-  Diffie-Hellman, ECDH, X.509, the post-quantum families — which 72 of the
-  115 corpus files reach for and a larger piece of work than the symmetric half; every one
-  of those entry points is present and raises
-  `ERR_CRYPTO_UNSUPPORTED_OPERATION` rather than being absent, so a program
-  that reaches for one gets a diagnosable error. The CCM/OCB/XTS/key-wrap modes
+  **The asymmetric half** is `src/crypto/asym.rs` over `rsa`,
+  `p256`/`p384`/`p521`/`k256`, `ed25519-dalek`, `x25519-dalek`, `pkcs8`,
+  `spki`: RSA, RSA-PSS, EC, Ed25519 and X25519 KeyObjects in every
+  PEM/DER/JWK encoding (encrypted ones included), `generateKeyPair`,
+  sign/verify, RSA encryption, ECDH, classic DH and the stateless
+  `diffieHellman`. A key crosses the ABI as one canonical PKCS#8/SPKI
+  document, so it needs no handle table. Corpus: 59/115 (was 26).
+  **Still not here:** DSA, Ed448/X448, `dh` KeyObjects, X.509, primes, the
+  post-quantum families, each raising `ERR_CRYPTO_UNSUPPORTED_OPERATION`. The CCM/OCB/XTS/key-wrap modes
   and the legacy block ciphers (DES, Camellia, ARIA, SM4), which
   `getCiphers()`/`getCipherInfo()` still *list* with OpenSSL's real NIDs and
   sizes because those two functions describe algorithms rather than capability.

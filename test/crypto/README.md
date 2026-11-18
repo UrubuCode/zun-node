@@ -105,22 +105,33 @@ and HKDF are written out over `DynDigest` rather than taken from
 a handle table cannot hold one. 24 Rust tests pin the bytes against the
 published vectors — see **Verified outside the corpus** below.
 
+**Asymmetric keys** (`src/crypto/asym.rs`). `KeyObject` of all three types,
+`createPublicKey` / `createPrivateKey` from PEM (every label, including
+`CERTIFICATE`), DER (`pkcs1`, `pkcs8`, `spki`, `sec1`) and JWK, with encrypted
+PKCS#8 (PBES2) and RFC 1421 encrypted PEM (`Proc-Type: 4,ENCRYPTED`) both
+ways; `export()` in every format; `asymmetricKeyType` / `asymmetricKeyDetails`.
+Key types: RSA, RSA-PSS (with the `RSASSA-PSS-params` restriction), EC over
+`prime256v1`, `secp384r1`, `secp521r1` and `secp256k1`, Ed25519, X25519.
+`generateKeyPair` / `generateKeyPairSync` for those types (with
+`promisify.custom`), `sign` / `verify` and `Sign` / `Verify` (PKCS#1 v1.5, PSS
+with every salt-length constant, ECDSA in DER and IEEE P1363, Ed25519),
+`publicEncrypt` / `privateDecrypt` / `privateEncrypt` / `publicDecrypt`
+(PKCS#1 v1.5, OAEP with `oaepHash`/`oaepLabel`, raw), `createECDH` / `ECDH`
+with `convertKey` and all three point formats, `createDiffieHellman` /
+`DiffieHellmanGroup` (the RFC 2409/3526 MODP primes, derived from pi rather
+than transcribed, and OpenSSL's `DH_check` flags as `verifyError`), and the
+stateless `diffieHellman` for EC and X25519 keys. RustCrypto again: `rsa`,
+`p256`/`p384`/`p521`/`k256`, `ed25519-dalek`, `x25519-dalek`, `pkcs8`, `spki`,
+`cbc`, `num-bigint-dig`. A key crosses the boundary as one canonical DER
+document (PKCS#8 or SPKI), so there is no key handle table.
+
 ## What is not implemented
 
-**Asymmetric cryptography, in all its forms.** `generateKeyPair`,
-`createSign` / `createVerify` / `sign` / `verify`, `publicEncrypt` /
-`privateDecrypt`, `createPublicKey` / `createPrivateKey`,
-`createDiffieHellman` / `createECDH` / `diffieHellman`, `X509Certificate`,
-`checkPrime` / `generatePrime`, the post-quantum families (ML-DSA, ML-KEM,
-SLH-DSA) and the key-encapsulation API. Each of those entry points is
-*present* and raises `ERR_CRYPTO_UNSUPPORTED_OPERATION`, so a program that
-reaches for one gets a diagnosable error rather than
-`undefined is not a function`. **72 of the 115 files** reach for it, and all but
-`test-crypto-keygen-missing-oid.js` (which asserts an error) fail there: every
-`test-crypto-keygen*` (32), `test-crypto-dh*` (14), `test-crypto-pqc-*` (7),
-`test-crypto-ecdh-*` (2), the sign/verify, public-encrypt, prime,
-encapsulation, SPKAC, key-wrap and X.509 files. It is a larger piece of work
-than the symmetric half and was deliberately deferred.
+**The rest of the asymmetric surface**: DSA, Ed448/X448, `dh` KeyObjects
+(`generateKeyPair('dh')`), `X509Certificate`, `Certificate` (SPKAC),
+`checkPrime` / `generatePrime`, the post-quantum families and the KEM API.
+`fixtures.readKey` is not in the harness: every file that calls it also needs
+DSA, Ed448 or WebCrypto. A generated DH prime is prime but not a safe prime.
 
 **The symmetric gaps**: the CCM, OCB, XTS and key-wrap modes, and the legacy
 block ciphers (DES/3DES, Camellia, ARIA, SM4, RC4, Blowfish). `getCiphers()`
@@ -143,8 +154,8 @@ asserts the absence — passes.
 
 Two things cap this corpus, and neither is the cryptography.
 
-**The asymmetric half is simply not written** (above), which accounts for about
-two thirds of the files.
+**The asymmetric half is partly written** (above): DSA, Ed448/X448, X.509 and WebCrypto still stop
+most of the remaining asymmetric files (see the table).
 
 **zun#38 — a typed array is opaque through an `any` binding**: no `length`, no
 indexing, no `toString`. Every `Buffer` this module hands back reaches a Node
@@ -210,7 +221,7 @@ that now passes because of it.
 
 ### Per-test blockers
 
-Remeasured 2026-11-18 against the current engine: **26 / 115** (was 15).
+Remeasured 2026-11-18 after the asymmetric half: **59 / 115** (was 26). Earlier: 26 (was 15).
 Eleven files moved to passing. Nine were unblocked by engine fixes. The other
 two, `test-crypto-pbkdf2.js` and `test-crypto-randomuuid.js`, needed fixes in
 this module:
@@ -277,13 +288,10 @@ longer apply.
 | `test-crypto-worker-thread.js` | requires `worker_threads` |
 | `test-crypto-x509.js` | requires `internal/crypto/x509`; `X509Certificate` is not implemented |
 
-| `test-crypto-keygen*.js` (32 files) | the asymmetric half is not implemented — `generateKeyPair` raises `ERR_CRYPTO_UNSUPPORTED_OPERATION` |
-| `test-crypto-dh*.js` (14 files) | the asymmetric half is not implemented — `createDiffieHellman / diffieHellman` raises `ERR_CRYPTO_UNSUPPORTED_OPERATION` |
-| `test-crypto-pqc-*.js` (7 files) | the post-quantum families (ML-DSA, ML-KEM, SLH-DSA) are not implemented |
-| `test-crypto-ecdh-convert-key.js`, `test-crypto-ecdh-setpublickey-deprecation.js` | the asymmetric half is not implemented — `createECDH` raises `ERR_CRYPTO_UNSUPPORTED_OPERATION` |
-| `test-crypto-sign-verify.js`, `test-crypto-async-sign-verify.js`, `test-crypto-psychic-signatures.js`, `test-crypto-rsa-dsa.js` | the asymmetric half is not implemented — `createSign / createVerify` raises `ERR_CRYPTO_UNSUPPORTED_OPERATION` |
-| `test-crypto-oaep-zero-length.js`, `test-crypto-private-decrypt-gh32240.js`, `test-crypto-publicDecrypt-fails-first-time.js` | the asymmetric half is not implemented — `publicEncrypt / privateDecrypt` raises `ERR_CRYPTO_UNSUPPORTED_OPERATION` |
-| `test-crypto-prime.js` | the asymmetric half is not implemented — `checkPrime / generatePrime` raises `ERR_CRYPTO_UNSUPPORTED_OPERATION` |
+| `test-crypto-keygen*.js`, `test-crypto-dh*.js`, `test-crypto-ecdh-*.js` | pass, except: DSA (`keygen-async-dsa*`, `keygen-bit-length`, `keygen-invalid-parameter-encoding-dsa`), Ed448/X448 (`keygen-eddsa`, `keygen-async-elliptic-curve-jwk`, `dh-stateless*`), `dh` KeyObjects (`keygen-dh-classic`), `keygen.js` (validation details plus DSA), `dh-constructor` ([zun#25](https://github.com/UrubuCode/zun/issues/25), class called without `new`), `dh-leak` (needs `gc`), `dh.js` (a symmetric error-code detail), `ecdh-convert-key` ([zun#34](https://github.com/UrubuCode/zun/issues/34)) |
+| `test-crypto-private-decrypt-gh32240.js` | [zun#34](https://github.com/UrubuCode/zun/issues/34): a top-level destructured `privateDecrypt` is not visible inside a function declaration |
+| `test-crypto-sign-verify.js`, `test-crypto-async-sign-verify.js`, `test-crypto-rsa-dsa.js`, `test-crypto-key-objects.js`, `test-crypto-oaep-zero-length.js`, `test-crypto-psychic-signatures.js` | `fixtures.readKey`, plus DSA, Ed448 or WebCrypto `importKey` |
+| `test-crypto-prime.js` | `checkPrime` / `generatePrime` are not implemented |
 | `test-crypto-encap-decap.js` | needs the key-encapsulation API (`encapsulate`/`decapsulate`) and top-level `await` |
 | `test-crypto-certificate.js` | needs `Certificate` (SPKAC), which is not implemented |
 | `test-crypto-aes-wrap.js`, `test-crypto-des3-wrap.js` | the AES and 3DES key-wrap modes are not implemented — `getCiphers()` lists them, `createCipheriv` answers `ERR_CRYPTO_UNSUPPORTED_OPERATION` |

@@ -76,8 +76,7 @@ zun_abi = { path = "../crates/zun_abi" }
 #     `uv_random`/OpenSSL's `RAND_bytes` draw from and the only acceptable one
 #     for `randomBytes`/`randomUUID`/`getRandomValues`.
 #
-# Not here, and absent from the module: asymmetric keys (RSA/EC/Ed25519),
-# X.509, Diffie-Hellman, the CCM/OCB/XTS/key-wrap modes and the legacy block
+# Not here, and absent from the module: X.509, DSA, the CCM/OCB/XTS/key-wrap modes and the legacy block
 # ciphers (DES, Camellia, ARIA, SM4). See test/crypto/README.md.
 digest = { version = "0.10", features = ["std", "mac"] }
 md-5 = { version = "0.10", default-features = false }
@@ -93,6 +92,36 @@ poly1305 = { version = "0.8", default-features = false }
 chacha20 = { version = "0.9", default-features = false }
 subtle = { version = "2", default-features = false }
 getrandom = { version = "0.2", default-features = false }
+
+# The asymmetric half (src/crypto/asym.rs), RustCrypto again:
+#
+#   * `rsa` -- RSA keys, PKCS#1 v1.5 / PSS signatures and PKCS#1 v1.5 / OAEP
+#     encryption, plus the PKCS#1 DER/PEM codecs.
+#   * `p256`, `p384`, `p521`, `k256` -- the four Weierstrass curves the corpus uses
+#     (`prime256v1`, `secp384r1`, `secp521r1`, `secp256k1`), each with ECDSA, ECDH and the
+#     SEC1/PKCS#8 codecs.
+#   * `ed25519-dalek`, `x25519-dalek` -- the two Edwards/Montgomery curves.
+#   * `pkcs8`, `spki` -- the key-container formats every key type crosses the
+#     boundary in; `pkcs8`'s `encryption` feature is PBES2, the encrypted
+#     PKCS#8 `-----BEGIN ENCRYPTED PRIVATE KEY-----` form.
+#   * `cbc` -- the legacy RFC 1421 encrypted PEM (`Proc-Type: 4,ENCRYPTED`).
+#   * `num-bigint-dig` -- the arbitrary-precision arithmetic behind classic
+#     Diffie-Hellman (modular exponentiation and prime generation); it is the
+#     bignum `rsa` itself is built on, so it adds no second copy.
+#   * `rand_core` -- `OsRng`, the `getrandom` source above behind the trait
+#     the key generators take.
+rsa = { version = "0.9", default-features = false, features = ["std", "pem", "u64_digit"] }
+p256 = { version = "0.13", default-features = false, features = ["std", "ecdsa", "ecdh", "pkcs8", "pem"] }
+p384 = { version = "0.13", default-features = false, features = ["std", "ecdsa", "ecdh", "pkcs8", "pem"] }
+k256 = { version = "0.13", default-features = false, features = ["std", "ecdsa", "ecdh", "pkcs8", "pem"] }
+p521 = { version = "0.13", default-features = false, features = ["std", "ecdsa", "ecdh", "pkcs8", "pem", "getrandom"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "pkcs8", "pem", "rand_core"] }
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets"] }
+pkcs8 = { version = "0.10", default-features = false, features = ["std", "pem", "encryption"] }
+spki = { version = "0.7", default-features = false, features = ["std", "pem"] }
+cbc = { version = "0.1", default-features = false, features = ["std"] }
+num-bigint-dig = { version = "0.8", default-features = false, features = ["std", "prime", "rand"] }
+rand_core = { version = "0.6", default-features = false, features = ["getrandom"] }
 
 
 # ---------------------------------------------------------------------------
