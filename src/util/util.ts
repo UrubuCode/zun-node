@@ -1735,12 +1735,120 @@ function __utilInspectKey(ctx: any, key: string): string {
   return __utilStylize(ctx, __utilStrEscape(key), "string");
 }
 
+// The own descriptor of `key`, or `undefined` when the engine cannot reflect
+// one (an exotic receiver); callers then fall back to a plain read.
+function __utilOwnDescriptor(value: any, key: any): any {
+  try {
+    return Object.getOwnPropertyDescriptor(value, key);
+  } catch (error) {
+    return undefined;
+  }
+}
+
+// `formatProperty`'s accessor branch (lib/internal/util/inspect.js):
+// `[Getter]`, `[Setter]`, `[Getter/Setter]`, and with `getters` set the
+// getter invoked against `receiver` -- `[Getter: 123]` for a primitive,
+// `[Getter] <formatted>` for an object, `<Inspection threw (...)>` on throw.
+function __utilFormatAccessor(ctx: any, receiver: any, desc: any, recurseTimes: number): string {
+  const hasSet = desc.set !== undefined;
+  if (desc.get !== undefined) {
+    const label = hasSet ? "Getter/Setter" : "Getter";
+    const g: any = ctx.getters;
+    if (g === true || (g === "get" && !hasSet) || (g === "set" && hasSet)) {
+      try {
+        const tmp: any = Reflect.apply(desc.get, receiver, []);
+        if (tmp === null) {
+          return __utilStylize(ctx, "[" + label + ":", "special") + " " +
+            __utilStylize(ctx, "null", "null") + __utilStylize(ctx, "]", "special");
+        }
+        if (typeof tmp === "object") {
+          return __utilStylize(ctx, "[" + label + "]", "special") + " " +
+            __utilFormatValue(ctx, tmp, recurseTimes);
+        }
+        return __utilStylize(ctx, "[" + label + ":", "special") + " " +
+          __utilFormatPrimitive(ctx, tmp) + __utilStylize(ctx, "]", "special");
+      } catch (error) {
+        const message: any = error !== null && typeof error === "object" ? error.message : error;
+        return __utilStylize(ctx, "[" + label + ": <Inspection threw (" + String(message) + ")>]", "special");
+      }
+    }
+    return __utilStylize(ctx, "[" + label + "]", "special");
+  }
+  if (hasSet) return __utilStylize(ctx, "[Setter]", "special");
+  return __utilStylize(ctx, "undefined", "undefined");
+}
+
+// Node's `addPrototypeProperties`: under `showHidden`, the non-function
+// properties a user class puts on its prototype chain (up to three levels,
+// stopping at a built-in constructor) are listed as `[name]: ...`, after the
+// own keys. `constructor`, methods and names the instance itself owns are
+// skipped.
+const __UTIL_BUILTIN_CTORS: string[] = [
+  "Object", "Array", "Function", "Error", "TypeError", "RangeError", "SyntaxError",
+  "ReferenceError", "EvalError", "URIError", "AggregateError", "Map", "Set",
+  "WeakMap", "WeakSet", "Promise", "Date", "RegExp", "Number", "String",
+  "Boolean", "Symbol", "BigInt", "ArrayBuffer", "SharedArrayBuffer", "DataView",
+  "Uint8Array", "Int8Array", "Uint16Array", "Int16Array", "Uint32Array",
+  "Int32Array", "Float32Array", "Float64Array", "BigInt64Array", "BigUint64Array",
+  "Uint8ClampedArray", "Proxy", "WeakRef", "FinalizationRegistry",
+];
+
+function __utilFormatProtoKeys(ctx: any, value: any, recurseTimes: number): string[] {
+  const output: string[] = [];
+  if (ctx.showHidden !== true) return output;
+  if (ctx.depth !== null && recurseTimes > Number(ctx.depth)) return output;
+  let proto: any = undefined;
+  try {
+    proto = Object.getPrototypeOf(value);
+  } catch (error) {
+    return output;
+  }
+  const seenKeys: string[] = [];
+  for (let level = 0; level < 3; level++) {
+    if (proto === null || proto === undefined || proto === Object.prototype) break;
+    const ctorDesc: any = __utilOwnDescriptor(proto, "constructor");
+    if (ctorDesc !== undefined && ctorDesc !== null && typeof ctorDesc.value === "function") {
+      const ctorName: any = ctorDesc.value.name;
+      if (__UTIL_BUILTIN_CTORS.indexOf(String(ctorName)) !== -1) break;
+    }
+    let names: any = [];
+    try {
+      names = Object.getOwnPropertyNames(proto);
+    } catch (error) {
+      names = [];
+    }
+    for (const key of names) {
+      if (key === "constructor") continue;
+      if (Object.prototype.hasOwnProperty.call(value, key)) continue;
+      if (seenKeys.indexOf(key) !== -1) continue;
+      const desc: any = __utilOwnDescriptor(proto, key);
+      if (desc === undefined || desc === null) continue;
+      if (typeof desc.value === "function") continue;
+      seenKeys.push(key);
+      const label = "[" + __utilInspectKey(ctx, key) + "]";
+      const str: string = desc.get !== undefined || desc.set !== undefined
+        ? __utilFormatAccessor(ctx, value, desc, recurseTimes + 1)
+        : __utilFormatValue(ctx, desc.value, recurseTimes + 1);
+      output.push(label + ": " + str);
+    }
+    proto = Object.getPrototypeOf(proto);
+  }
+  return output;
+}
+
 function __utilFormatKeys(ctx: any, value: any, recurseTimes: number, isError: boolean): string[] {
   const output: string[] = [];
   const keys: any = __utilOwnKeys(value);
   ctx.indentationLvl = Number(ctx.indentationLvl) + 2;
   for (const key of keys) {
     if (isError && (key === "stack" || key === "message")) continue;
+    const desc: any = __utilOwnDescriptor(value, key);
+    if (desc !== undefined && desc !== null && (desc.get !== undefined || desc.set !== undefined)) {
+      output.push(
+        __utilInspectKey(ctx, key) + ": " + __utilFormatAccessor(ctx, value, desc, recurseTimes + 1),
+      );
+      continue;
+    }
     output.push(
       __utilInspectKey(ctx, key) + ": " + __utilFormatValue(ctx, value[key], recurseTimes + 1),
     );
@@ -1760,6 +1868,7 @@ function __utilFormatKeys(ctx: any, value: any, recurseTimes: number, isError: b
     const label = "[" + __utilStylize(ctx, String(sym), "symbol") + "]";
     output.push(label + ": " + __utilFormatValue(ctx, value[sym], recurseTimes + 1));
   }
+  for (const entry of __utilFormatProtoKeys(ctx, value, recurseTimes)) output.push(entry);
   ctx.indentationLvl = Number(ctx.indentationLvl) - 2;
   return output;
 }
@@ -2265,15 +2374,23 @@ function __utilIsStreamLike(stream: any): boolean {
 
 // `lib/internal/util/colors.js`' `shouldColorize`, reduced to what is readable
 // here: the environment overrides plus the stream's own `hasColors`.
+// `lib/internal/util/colors.js`' `shouldColorize`: `FORCE_COLOR` decides on
+// its own (through `getColorDepth`'s reading of it, where only `0`/`false`
+// mean fewer than 16 colours), and otherwise the stream must be a TTY whose
+// own `getColorDepth` -- which consults `NO_COLOR`/`NODE_DISABLE_COLORS` --
+// answers more than 2.
 function __utilShouldColorize(stream: any): boolean {
-  if (__utilEnv("NODE_DISABLE_COLORS") !== undefined) return false;
-  if (__utilEnv("NO_COLOR") !== undefined) return false;
   const forced = __utilEnv("FORCE_COLOR");
-  if (forced !== undefined) return String(forced) !== "0";
-  if (stream !== null && stream !== undefined && __utilIsFn(stream["hasColors"])) {
-    return __utilCall(stream["hasColors"], []) === true;
+  if (forced !== undefined) {
+    const f: string = String(forced);
+    return f !== "0" && f !== "false";
   }
-  return false;
+  if (stream === null || stream === undefined) return false;
+  if (stream["isTTY"] !== true) return false;
+  if (__utilIsFn(stream["getColorDepth"])) {
+    return Number(stream.getColorDepth()) > 2;
+  }
+  return true;
 }
 
 function __utilEnv(name: string): any {
@@ -2525,6 +2642,12 @@ function promisify(original: any): any {
   const custom: any = original[__promisifyCustomSymbol];
   if (custom !== undefined && custom !== null) {
     __utilValidateFunction(custom, "util.promisify.custom");
+    // Node marks the custom function as its own promisified form, so
+    // `promisify(promisify(fn)) === fn[promisify.custom]`.
+    // A plain store rather than Node's non-enumerable `defineProperty`. Today
+    // the store is lost when `custom` arrived through the `Any` lane, whose
+    // function wrapper does not carry the caller's own properties (zun#50).
+    custom[__promisifyCustomSymbol] = custom;
     return __utilBox(custom);
   }
 
@@ -2578,9 +2701,11 @@ function callbackify(original: any): any {
   const callbackified: any = function (...passed: any[]): any {
     const maybeCb: any = passed.pop();
     __utilValidateFunction(maybeCb, "last argument");
-    const produced: any = __utilCall(state.original, passed);
+    const self: any = this;
+    const cb: any = maybeCb.bind(self);
+    const produced: any = Reflect.apply(state.original, self, passed);
     const onResolved: any = function (ret: any): any {
-      process.nextTick(__utilBox(maybeCb), null, ret);
+      process.nextTick(cb, null, ret);
       return undefined;
     };
     const onRejected: any = function (reason: any): any {
@@ -2588,12 +2713,31 @@ function callbackify(original: any): any {
       if (error === undefined || error === null || error === false || error === 0 || error === "") {
         error = new ERR_FALSY_VALUE_REJECTION(reason);
       }
-      process.nextTick(__utilBox(maybeCb), error);
+      process.nextTick(cb, error);
       return undefined;
     };
     produced.then(onResolved, onRejected);
     return undefined;
   };
+  // Node copies every own descriptor of `original`, with `length` one larger
+  // (the callback) and `name` suffixed `Callbackified`. The descriptors are
+  // read one name at a time: `Object.getOwnPropertyDescriptors` throws on a
+  // function (zun#121).
+  const descriptors: any = {};
+  for (const key of Object.getOwnPropertyNames(original)) {
+    descriptors[key] = Object.getOwnPropertyDescriptor(original, key);
+  }
+  if (descriptors.length !== undefined && typeof descriptors.length.value === "number") {
+    descriptors.length.value = descriptors.length.value + 1;
+  }
+  if (descriptors.name !== undefined && typeof descriptors.name.value === "string") {
+    descriptors.name.value = descriptors.name.value + "Callbackified";
+  }
+  // One `defineProperty` per key: `Object.defineProperties` also throws on a
+  // function target (zun#121).
+  for (const key of Object.keys(descriptors)) {
+    Object.defineProperty(callbackified, key, descriptors[key]);
+  }
   return __utilBox(callbackified);
 }
 
@@ -3622,6 +3766,9 @@ function getCallSites(frameCountOrOptions?: any, options?: any): any[] {
   const lines = stack.split("\n");
   for (let i = 1; i < Number(lines.length) && Number(out.length) < frameCount; i++) {
     const frame = __utilParseStackFrame(lines[i].trim());
+    // Node captures from the caller's frame: `getCallSites` itself is never
+    // one of the sites it reports.
+    if (frame !== undefined && Number(out.length) === 0 && frame.functionName === "getCallSites") continue;
     if (frame !== undefined) out.push(frame);
   }
   return out;

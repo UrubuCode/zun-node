@@ -67,7 +67,12 @@ fi
 # the human-readable form used in the README block and the results header.
 case "$MODULE" in
   path)   KIND="zun-ts";     PATTERNS="test-path";                        PATTERN="test-path";;
-  util)   KIND="zun-ts";     PATTERNS="test-util";                        PATTERN="test-util";;
+  # `util` is pure Zun TypeScript, but its kind is `zun-ts+ext` for the same
+  # reason `readline`'s is: the harness modules several files require
+  # (`internal/test/binding`, `child_process`, `fs`) are syscalls, and without
+  # `--ext` those bundles die on an undefined native rather than on their real
+  # blocker. Nothing in src/util imports a native.
+  util)   KIND="zun-ts+ext"; PATTERNS="test-util";                        PATTERN="test-util";;
   assert) KIND="zun-ts";     PATTERNS="test-assert";                      PATTERN="test-assert";;
   events) KIND="zun-ts";     PATTERNS="test-event-emitter- test-events-"; PATTERN="test-event-emitter-*|test-events-";;
   os)     KIND="zun-ts+ext"; PATTERNS="test-os";                          PATTERN="test-os";;
