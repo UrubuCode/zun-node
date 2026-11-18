@@ -1378,7 +1378,7 @@ gets deleted; nothing else in the tracker changes.
   are capped by the opaque-view-through-`any` gap. Table in
   `test/dgram/README.md`.
 - **`node:http`: implemented, TS over `net`, in `src/http/http.ts`
-  (77 / 379 of Node 25's `test-http-*`).**
+  (225 / 379 of Node 25's `test-http-*`).**
   No natives of its own: the parser Node gets from llhttp is an incremental
   HTTP/1.1 state machine here (start line, header block with `obs-fold`, four
   body framings — none, `Content-Length`, chunked with extensions and trailers,
@@ -1397,11 +1397,15 @@ gets deleted; nothing else in the tracker changes.
   `tools/harness/countdown.ts` is `common/countdown` and unblocked 33 files.
   **Documented deviations**: `http.Server` on the module object is a factory
   (a class cannot be called, and `new <module>.Ctor()` does not reach a
-  constructor, zun#18); `headersTimeout`/`requestTimeout`/
-  `connectionsCheckingInterval` are stored, not enforced; no Unix sockets; not
-  llhttp, so the smuggling-hardening files only partly pass. Most failures are
-  engine-side: ~92 read `this` in a listener, ~16 hit closure capture across
-  callbacks. Table in `test/http/README.md`.
+  constructor, zun#18); no Unix sockets / named pipes (`net` has no pipe
+  handle); not llhttp, though the smuggling cases the corpus checks (known
+  methods only, bare CR/LF, `chunked` placement, TE with CL, chunk-extension
+  cap) are reproduced. `headersTimeout`/`requestTimeout` are enforced by
+  Node's connection-checking sweep (`connectionsCheckingInterval`, `408`).
+  The remaining failures are mostly engine-side (compile-time rejections in
+  test bodies, `err.constructor === Error` zun#140, built-in methods through
+  `any` zun#17) or out of scope (`https`/`tls`/`cluster`, `internalBinding`).
+  Table in `test/http/README.md`.
 - **`node:vm`: complete, in `src/vm/vm.ts`.** It is the one module whose job
   *is* compiling at run time, and the platform has that path: the checker
   lowers `new Function(p1, ..., body)` to the `functionConstruct` intrinsic
