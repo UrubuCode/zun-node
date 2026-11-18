@@ -487,6 +487,16 @@ class ERR_METHOD_NOT_IMPLEMENTED extends NodeError {
   }
 }
 
+// `ERR_WORKER_UNSUPPORTED_OPERATION`: what a worker thread answers for the
+// process-wide state it does not own (`process.chdir`, setting the umask,
+// `process.abort`). It lives with the bases because `process` raises it and
+// `worker_threads` switches it on.
+class ERR_WORKER_UNSUPPORTED_OPERATION extends NodeTypeError {
+  constructor(name: string) {
+    super("ERR_WORKER_UNSUPPORTED_OPERATION", name + " is not supported in workers");
+  }
+}
+
 class AbortError extends NodeError {
   cause: any;
   constructor(message?: string, options?: any) {

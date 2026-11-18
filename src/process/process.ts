@@ -692,6 +692,11 @@ const __processState: any = {
   flags: undefined,
   execveWarned: false,
   loadedAt: Number(Date.now()),
+  // `true` inside a `worker_threads` worker (set by `__wtBootWorker`). A worker
+  // does not own the process state, so, as in Node's
+  // `lib/internal/bootstrap/switches/does_not_own_process_state.js`, the calls
+  // that would change it throw `ERR_WORKER_UNSUPPORTED_OPERATION`.
+  isWorker: false,
 };
 
 function __processPendingTicks(): number {
@@ -1166,6 +1171,9 @@ function __processConstrainedMemory(): number {
 // and CI image sets — and a program that *changes* it is remembered, so
 // `umask(m)` followed by `umask()` is consistent either way.
 function __processUmask(mask?: any): number {
+  if (__processState.isWorker && mask !== undefined) {
+    throw new ERR_WORKER_UNSUPPORTED_OPERATION("Setting process.umask()");
+  }
   if (mask === undefined || mask === null) {
     const ops: any = __procOps();
     if (ops === undefined) return Number(__processState.umask);
@@ -1186,6 +1194,7 @@ function __processUmask(mask?: any): number {
 }
 
 function __processChdir(directory: any): void {
+  if (__processState.isWorker) throw new ERR_WORKER_UNSUPPORTED_OPERATION("process.chdir()");
   __procValidateString(directory, "directory");
   const ops: any = __procOps();
   if (ops === undefined) throw new ERR_METHOD_NOT_IMPLEMENTED("process.chdir");
@@ -1244,6 +1253,7 @@ function __processRawKill(pid: any, signal: any): any {
 }
 
 function __processAbort(): void {
+  if (__processState.isWorker) throw new ERR_WORKER_UNSUPPORTED_OPERATION("process.abort()");
   const ops: any = __procOps();
   if (ops !== undefined) {
     ops.abort();
