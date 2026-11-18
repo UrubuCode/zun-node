@@ -22,7 +22,7 @@ bash tools/run_node_tests.sh \
     --module test_runner
 ```
 
-The kind is `zun-ts+ext` and the per-test timeout defaults to 180 s: every
+The kind is `zun-ts+ext` and the per-test timeout defaults to 300 s: every
 `node --test` child is bundled on first use, so a file that spawns a dozen
 children spends most of its time in the bundler.
 

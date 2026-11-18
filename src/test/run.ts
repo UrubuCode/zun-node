@@ -389,22 +389,46 @@ function __ntRunFile(stream: any, file: string, opts: any, totals: any, sink: an
       finishFile(null, null, err);
       return;
     }
+    // The file is finished when the child has exited *and* both pipes have
+    // ended: under load a last stdout chunk can still be in flight when
+    // 'close' is reported, and its events would be lost.
+    const ends: any = { out: child.stdout === null || child.stdout === undefined, err: child.stderr === null || child.stderr === undefined, exit: null, waited: 0 };
+    const maybeFinish = (): void => {
+      if (ends.exit === null) return;
+      if ((ends.out && ends.err) || Number(ends.waited) >= 50) {
+        finishFile(ends.exit.code, ends.exit.signal, null);
+        return;
+      }
+      ends.waited = Number(ends.waited) + 1;
+      __timerRealSetTimeout(() => { maybeFinish(); }, 10);
+    };
     if (child.stdout !== null && child.stdout !== undefined) {
+      child.stdout.setEncoding("utf8");
       child.stdout.on("data", (chunk: any) => {
         state.out = state.out + String(chunk);
         flushOut(false);
       });
+      child.stdout.on("end", () => {
+        ends.out = true;
+        maybeFinish();
+      });
     }
     if (child.stderr !== null && child.stderr !== undefined) {
+      child.stderr.setEncoding("utf8");
       child.stderr.on("data", (chunk: any) => {
         state.err = state.err + String(chunk);
+      });
+      child.stderr.on("end", () => {
+        ends.err = true;
+        maybeFinish();
       });
     }
     child.on("error", (err: any) => {
       finishFile(null, null, err);
     });
     child.on("close", (code: any, signal: any) => {
-      finishFile(code, signal, null);
+      ends.exit = { code: code, signal: signal };
+      maybeFinish();
     });
     if (opts.signal !== undefined && opts.signal !== null) {
       const signal: any = opts.signal;
