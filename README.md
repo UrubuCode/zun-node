@@ -570,7 +570,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-url:start -->
 ### Node.js v25 `url` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **36.3%** — 16 / 44 Node `test-url*|test-whatwg-url-*` tests passing
+`█████████░░░░░░░░░░░░░░░` **38.6%** — 17 / 44 Node `test-url*|test-whatwg-url-*` tests passing
 <!-- node-url:end -->
 
 > `url` is implemented end to end, on both of its halves. `src/url/url.ts` is

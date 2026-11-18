@@ -1622,6 +1622,14 @@ class ERR_INVALID_THIS extends NodeTypeError {
   }
 }
 
+// Reject a detached method called on something that is not a `URLSearchParams`
+// (or a `URL`), as Node's brand checks do. `this` arrives as an `any`: a typed
+// `this` lets the checker fold the `instanceof` to `true`.
+function __wuCheckThis(value: any, type: string): void {
+  const ok: boolean = type === "URL" ? value instanceof NodeURL : value instanceof NodeURLSearchParams;
+  if (!ok) throw new ERR_INVALID_THIS(type);
+}
+
 // `ToUSVString`-ish argument conversion. Node converts every
 // `URLSearchParams` argument with `String(x)`, and a symbol legitimately
 // throws rather than answering `Symbol(x)` — which `String(aSymbol)` would, so
@@ -1721,12 +1729,16 @@ class NodeURLSearchParams {
   // fewer arguments than it declares, on purpose, to see the
   // `ERR_MISSING_ARGS` it answers.
   append(...args: any[]): void {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (__wuALen(args) < 2) throw new ERR_MISSING_ARGS("name", "value");
     this.list.push([__wuToString(args[0]), __wuToString(args[1])]);
     this.update();
   }
 
   delete(...args: any[]): void {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (__wuALen(args) < 1) throw new ERR_MISSING_ARGS("name");
     const key = __wuToString(args[0]);
     const hasValue = __wuALen(args) > 1 && args[1] !== undefined;
@@ -1745,6 +1757,8 @@ class NodeURLSearchParams {
   }
 
   get(...args: any[]): any {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (__wuALen(args) < 1) throw new ERR_MISSING_ARGS("name");
     const key = __wuToString(args[0]);
     for (let i = 0; i < __wuALen(this.list); i++) {
@@ -1754,6 +1768,8 @@ class NodeURLSearchParams {
   }
 
   getAll(...args: any[]): any {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (__wuALen(args) < 1) throw new ERR_MISSING_ARGS("name");
     const key = __wuToString(args[0]);
     const out: string[] = [];
@@ -1764,6 +1780,8 @@ class NodeURLSearchParams {
   }
 
   has(...args: any[]): boolean {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (__wuALen(args) < 1) throw new ERR_MISSING_ARGS("name");
     const key = __wuToString(args[0]);
     const hasValue = __wuALen(args) > 1 && args[1] !== undefined;
@@ -1778,6 +1796,8 @@ class NodeURLSearchParams {
   }
 
   set(...args: any[]): void {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (__wuALen(args) < 2) throw new ERR_MISSING_ARGS("name", "value");
     const key = __wuToString(args[0]);
     const text = __wuToString(args[1]);
@@ -1802,6 +1822,8 @@ class NodeURLSearchParams {
   // not specified to be stable here, so the comparison falls back to the
   // original index.
   sort(): void {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     const n = __wuALen(this.list);
     const tagged: any = [];
     for (let i = 0; i < n; i++) tagged.push([this.list[i], i]);
@@ -1828,6 +1850,8 @@ class NodeURLSearchParams {
   // that `params.forEach()` with no argument is a compile error here rather
   // than the `ERR_MISSING_ARGS` Node answers.
   forEach(callback: any, ...rest: any[]): void {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     if (callback === undefined) throw new ERR_MISSING_ARGS("callback");
     // The list is re-read on every step, as the standard's iteration does, so
     // a callback that appends is observed.
@@ -1840,18 +1864,24 @@ class NodeURLSearchParams {
   }
 
   keys(): any {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     const out: string[] = [];
     for (let i = 0; i < __wuALen(this.list); i++) out.push(this.list[i][0] as string);
     return __wuMakeIterator(out, "URLSearchParams Iterator");
   }
 
   values(): any {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     const out: string[] = [];
     for (let i = 0; i < __wuALen(this.list); i++) out.push(this.list[i][1] as string);
     return __wuMakeIterator(out, "URLSearchParams Iterator");
   }
 
   entries(): any {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     const out: any = [];
     for (let i = 0; i < __wuALen(this.list); i++) {
       out.push([this.list[i][0] as string, this.list[i][1] as string]);
@@ -1859,11 +1889,23 @@ class NodeURLSearchParams {
     return __wuMakeIterator(out, "URLSearchParams Iterator");
   }
 
+  // The default iterator is `entries()`, as the standard says.
+  [Symbol.iterator](): any {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
+    const self: any = this;
+    return self.entries();
+  }
+
   get size(): number {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     return __wuALen(this.list);
   }
 
   toString(): string {
+    const thisArg: any = this;
+    __wuCheckThis(thisArg, "URLSearchParams");
     const out: string[] = [];
     for (let i = 0; i < __wuALen(this.list); i++) {
       if (i > 0) out.push("&");
@@ -1884,27 +1926,50 @@ class NodeURLSearchParams {
   }
 }
 
-// An iterator-ish object: `next()`, an `items` array (which is what a `for
-// (... of ...)` over it reaches for on this engine) and a `length`. A real
-// ECMAScript iterator would need `Symbol.iterator`, which is not available
-// here (see the header note).
-function __wuMakeIterator(items: any, tag: string): any {
-  let index = 0;
-  const it: any = {
-    items: items,
-    length: __wuALen(items),
-    tag: tag,
-    next: function (...rest: any[]): any {
-      if (index >= __wuALen(items)) {
-        return { value: undefined, done: true };
-      }
-      const value: any = items[index];
-      index = index + 1;
-      return { value: value, done: false };
-    },
-  };
-  return it;
+// `URLSearchParams Iterator`: a class instance, so `next` can reject a foreign
+// `this` and `Object.prototype.toString` can answer its tag. `items` and
+// `length` stay readable for the in-module callers that index the snapshot.
+class NodeURLSearchParamsIterator {
+  items: any = [];
+  length: number = 0;
+  index: number = 0;
+
+  constructor(items: any) {
+    this.items = items;
+    this.length = __wuALen(items);
+  }
+
+  next(): any {
+    const thisArg: any = this;
+    __wuCheckIter(thisArg);
+    if (this.index >= __wuALen(this.items)) return { value: undefined, done: true };
+    const value: any = this.items[this.index];
+    this.index = this.index + 1;
+    return { value: value, done: false };
+  }
+
+  [Symbol.iterator](): any {
+    return this;
+  }
 }
+
+function __wuMakeIterator(items: any, tag: string): any {
+  return new NodeURLSearchParamsIterator(items);
+}
+
+function __wuCheckIter(value: any): void {
+  if (!(value instanceof NodeURLSearchParamsIterator)) {
+    throw new ERR_INVALID_THIS("URLSearchParamsIterator");
+  }
+}
+
+// Engine workaround: a class with two computed `Symbol` members fails to load
+// ("duplicate module export: [symbol]@0@this"), so each tag is installed on
+// the prototype after the class instead of as a `get [Symbol.toStringTag]`.
+Object.defineProperty(NodeURLSearchParamsIterator.prototype, Symbol.toStringTag, {
+  value: "URLSearchParams Iterator",
+  configurable: true,
+});
 
 // ---------------------------------------------------------------------------
 // URL
@@ -2165,3 +2230,12 @@ function __wuRecordFrom(
   rec.path = path;
   return rec;
 }
+
+Object.defineProperty(NodeURLSearchParams.prototype, Symbol.toStringTag, {
+  value: "URLSearchParams",
+  configurable: true,
+});
+Object.defineProperty(NodeURL.prototype, Symbol.toStringTag, {
+  value: "URL",
+  configurable: true,
+});
