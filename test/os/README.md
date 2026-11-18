@@ -87,8 +87,11 @@ counted as a seventeenth processor.
 
 `RESULTS.md` was last regenerated on **Windows**; CI measures on
 **ubuntu-latest**. The only test whose result differs between the two is
-`test-os-process-priority.js`, noted in the table — so this corpus reads 1/7 on
-Windows and should read 2/7 on Linux.
+`test-os-process-priority.js`, noted in the table — which now passes on both: its
+multi-line `const { PRIORITY_* } = os.constants.priority;` is split into
+per-name bindings by the bundler's destructuring rewrite (the
+[zun#34](https://github.com/UrubuCode/zun/issues/34) workaround, which now
+also handles patterns spanning several lines), so this corpus reads 2/7.
 
 `test-os-eol.js` **passes now.** It was the one failure in this list that the
 library could fix: it asserts `assert.throws(() => { os.EOL = 123; }, TypeError)`,
@@ -102,13 +105,12 @@ resolve to a method` when the right-hand side is an `any`
 the `instanceof` against the literal class, which the checker resolves. That is
 `__matchesErrorConstructor` in `../../src/assert/assert.ts`.
 
-**Every remaining test failure is blocked outside this module**, in one of five
+**Every remaining test failure is blocked outside this module**, in one of these
 ways:
 
 | Test | Blocked by | What happens |
 |---|---|---|
 | `test-os.js` | **ToPrimitive on a function** — [zun#36](https://github.com/UrubuCode/zun/issues/36) | The callable-`assert` blocker is gone: [zun#14](https://github.com/UrubuCode/zun/issues/14) is fixed, `src/assert/assert.ts` is a real function carrying the methods, and the file's own `is` helper — built on the bare `assert(value, message)` form — now runs, as does every `assert(…)` after it. (That same fix is what turned `test-path-parse-format.js` into a pass.) The blocker behind it stands: the file's last third asserts `` `${os.hostname}` === os.hostname() `` for ten getters and `+os.totalmem === os.totalmem()`, and template interpolation of a function value still ignores the function's own `Symbol.toPrimitive`, `toString` and `valueOf` — `` `${os.hostname}` `` is the literal string `[function]`, so the run stops at `'[function]' !== '<this host>'`. The `Symbol.toPrimitive` block in `os.ts` is already the code Node writes; see the note below. |
-| `test-os-process-priority.js` *(Windows only)* | **destructured top-level bindings are invisible to functions** — [zun#34](https://github.com/UrubuCode/zun/issues/34) | **This test passes on Linux**, which is what the measurement above reports. On Windows it reaches line 110 of 145 — every priority constant, all four validation paths and the whole `PRIORITY_HIGHEST..PRIORITY_LOW` set/get sweep, including the Windows range mapping — and then `checkPriority()` throws `ReferenceError: PRIORITY_HIGH is not defined`. A top-level `const { PRIORITY_HIGH } = os.constants.priority;` never becomes a module global, so no function body can read it; only the Windows branch of `checkPriority` reads one, which is why Linux never hits it. |
 | `test-os-checked-function.js`, `test-os-fast.js` | **`internal/` modules** | Both require `internal/test/binding` to monkey-patch or instrument the `os` binding — a Node-internal binding, not a public module, so the bundler reports an unresolved require and fails the bundle rather than guessing. `test-os-fast.js` additionally needs V8 natives syntax (`eval('%OptimizeFunctionOnNextCall(…)')`). |
 | `test-os-homedir-no-envvar.js`, `test-os-userinfo-handles-getter-errors.js` | **`node:child_process`** | Both re-run the test body in a child process (`cp.spawnSync(process.execPath, …)`, `execFile(node, ['-e', script])`) to observe `os` with `HOME`/`USERPROFILE` deleted from the *real* environment, or a getter throwing in a fresh process. `child_process` is its own library and needs process spawning, which no native here provides; the harness reports `child_process is not available in the zun harness`. The behavior each one checks is covered by the differential run: `homedir()` falls back to the passwd entry / `GetUserProfileDirectoryW`, and a throwing `encoding` getter propagates out of `userInfo()`. |
 
