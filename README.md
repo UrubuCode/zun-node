@@ -1377,7 +1377,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-http:start -->
 ### Node.js v25 `http` compatibility
 
-`██████████░░░░░░░░░░░░░░` **43.2%** — 164 / 379 Node `test-http-*` tests passing
+`██████████████░░░░░░░░░░` **59.4%** — 225 / 379 Node `test-http-*` tests passing
 <!-- node-http:end -->
 
 > `http` is **Zun TypeScript over `net`**, with no natives of its own:
@@ -1389,13 +1389,14 @@ target/debug/zun run /tmp/bundle.ts
 > `Writable` with Node's implicit-header rules), `ClientRequest` with
 > `request`/`get`, an `Agent` with a real socket pool (`keepAlive` reuse,
 > `maxSockets`, `lifo`/`fifo`, `'free'`), `METHODS`, `STATUS_CODES` and the header
-> validators. **Documented deviations**: `http.Server` on the module object is a
-> factory (a class cannot be called, and `new <module>.Ctor()` does not reach a
-> constructor); `headersTimeout`/`requestTimeout` are stored but not enforced; no
-> Unix sockets; the parser is not llhttp. **Most of the 302 failures are not in
-> the module**: ~92 read `this.address()` inside a listener (`this` is
-> `undefined` for a function expression passed as an argument — the same blocker
-> as `net`), ~16 hit closure capture across callbacks, and ~37 are rejected at
-> compile time or need `https`/`tls`/`cluster`. Deviations, repros and the
+> validators; `headersTimeout`/`requestTimeout` are enforced by Node's
+> connection-checking sweep (`408`), and the parser rejects the smuggling cases
+> the corpus checks. **Documented deviations**: `http.Server` on the module
+> object is a factory (a class cannot be called, and `new <module>.Ctor()` does
+> not reach a constructor); no Unix sockets / named pipes; the parser is not
+> llhttp. **Most of the 154 failures are not in the module**: ~22 are rejected
+> at compile time in the test body, ~25 need `https`/`tls`/`cluster`/
+> `internalBinding`, and several hit engine identity gaps (`err.constructor ===
+> Error`, zun#140; built-in methods through `any`, zun#17). Deviations, repros and the
 > blocker table: [`test/http/README.md`](test/http/README.md); per-test
 > breakdown: [`test/http/RESULTS.md`](test/http/RESULTS.md).

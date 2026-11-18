@@ -731,6 +731,9 @@ class Socket extends Duplex {
   // here because an undeclared write on a class instance is a compile error.
   _httpMessage: any = null;
   _httpConn: any = null;
+  // `socket.parser` is the HTTP parser attached to the socket (Node exposes it;
+  // tests read `parser.incoming`).
+  parser: any = null;
   _hadError: any = false;
   // `allowHalfOpen` is read off the instance by `Duplex` itself.
   allowHalfOpen: any = false;

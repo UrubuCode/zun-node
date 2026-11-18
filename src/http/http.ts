@@ -374,6 +374,11 @@ function __httpNewParser(kind: number, handler: any): any {
     trailers: [],
     consumed: 0,
     lenient: false,
+    // Node's `parser.incoming`: the request being received or read.
+    incoming: null,
+    // The chunk handed to the last `__httpParse` (for errors' `rawPacket`).
+    lastInput: "",
+    errAt: -1,
   };
 }
 
@@ -381,13 +386,22 @@ function __httpParserError(p: any, code: string, reason: string): void {
   p.state = 7;
   const err: any = new __HttpSocketError(code, "Parse Error: " + reason);
   err.reason = reason;
-  err.bytesParsed = 0;
+  // Node reports the chunk being executed and how far into it parsing got.
+  const input: string = p.lastInput;
+  let parsed: number = Number(input.length) - Number(p.buf.length);
+  if (parsed < 0) parsed = 0;
+  // An error found at a known byte of the buffer (llhttp stops just past it).
+  if (Number(p.errAt) >= 0) parsed = parsed + Number(p.errAt);
+  p.errAt = -1;
+  err.bytesParsed = parsed;
+  err.rawPacket = __httpFromLatin1(input);
   p.handler.error(err);
 }
 
 // Feed more bytes (as latin1) into the parser.
 function __httpParse(p: any, input: string): void {
   if (Number(p.state) === 7) return;
+  p.lastInput = input;
   p.buf = p.buf + input;
   __httpDrive(p);
 }
@@ -416,13 +430,18 @@ function __httpDrive(p: any): void {
     }
     if (st === 2) {
       const eol: number = Number(buf.indexOf("\r\n"));
-      if (eol < 0) {
-        if (have > 1024) {
-          __httpParserError(p, "HPE_INVALID_CHUNK_SIZE", "Invalid character in chunk size");
-        }
+      // Node caps chunk extensions at 16 KiB (`kMaxChunkExtensionsSize`).
+      if ((eol < 0 && have > 16384) || eol > 16384) {
+        __httpParserError(p, "HPE_CHUNK_EXTENSIONS_OVERFLOW", "Chunk extensions overflow");
         return;
       }
+      if (eol < 0) return;
       let line: string = buf.slice(0, eol);
+      if (line.indexOf("\r") >= 0 || line.indexOf("\n") >= 0) {
+        // A bare CR or LF inside the size line (smuggling).
+        __httpParserError(p, "HPE_LF_EXPECTED", "Expected LF after chunk size");
+        return;
+      }
       const semi: number = Number(line.indexOf(";"));
       if (semi >= 0) line = line.slice(0, semi);
       line = line.trim();
@@ -523,6 +542,20 @@ function __httpParseHead(p: any): boolean {
   }
   p.buf = buf;
   if (Number(buf.length) === 0) return false;
+  // llhttp knows its methods and fails on the first byte that cannot start
+  // one, without waiting for the rest of the head.
+  if (Number(p.kind) === 0 && !__httpMethodPrefixOk(buf)) {
+    p.errAt = __httpMethodMatchLen(buf);
+    __httpParserError(p, "HPE_INVALID_METHOD", "Invalid method encountered");
+    return false;
+  }
+  if (Number(p.kind) === 1) {
+    const n: number = Number(buf.length) < 5 ? Number(buf.length) : 5;
+    if (buf.slice(0, n) !== "HTTP/".slice(0, n)) {
+      __httpParserError(p, "HPE_INVALID_CONSTANT", "Expected HTTP/, RTSP/ or ICE/");
+      return false;
+    }
+  }
   const end: number = Number(buf.indexOf("\r\n\r\n"));
   if (end < 0) {
     if (Number(buf.length) > Number(p.maxHeaderSize)) {
@@ -558,7 +591,7 @@ function __httpParseHead(p: any): boolean {
       return false;
     }
     const method: string = first.slice(0, sp1);
-    if (!__httpCheckIsToken(method)) {
+    if (__HTTP_METHODS.indexOf(method) < 0) {
       __httpParserError(p, "HPE_INVALID_METHOD", "Invalid method encountered");
       return false;
     }
@@ -582,7 +615,7 @@ function __httpParseHead(p: any): boolean {
     info.url = url;
   } else {
     if (first.slice(0, 5) !== "HTTP/") {
-      __httpParserError(p, "HPE_INVALID_CONSTANT", "Expected HTTP/");
+      __httpParserError(p, "HPE_INVALID_CONSTANT", "Expected HTTP/, RTSP/ or ICE/");
       return false;
     }
     const sp1: number = Number(first.indexOf(" "));
@@ -609,6 +642,7 @@ function __httpParseHead(p: any): boolean {
   // Header lines.
   let contentLength: number = -1;
   let chunked = false;
+  let hasTE = false;
   let connection: string = "";
   let upgradeHeader = false;
   let i = 1;
@@ -639,6 +673,21 @@ function __httpParseHead(p: any): boolean {
       return false;
     }
     const value: string = line.slice(colon + 1).trim();
+    // llhttp is strict about line endings and control characters in values: a
+    // bare CR or LF is how header smuggling hides a second header.
+    const badValue: number = __httpBadValueChar(line.slice(colon + 1));
+    if (badValue === 13) {
+      __httpParserError(p, "HPE_LF_EXPECTED", "Missing expected LF after header value");
+      return false;
+    }
+    if (badValue === 10) {
+      __httpParserError(p, "HPE_CR_EXPECTED", "Missing expected CR after header value");
+      return false;
+    }
+    if (badValue > 0) {
+      __httpParserError(p, "HPE_INVALID_HEADER_TOKEN", "Invalid header value char");
+      return false;
+    }
     info.headers.push(name);
     info.headers.push(value);
     const lname: string = name.toLowerCase();
@@ -654,12 +703,33 @@ function __httpParseHead(p: any): boolean {
       }
       contentLength = n;
     } else if (lname === "transfer-encoding") {
-      if (value.toLowerCase().indexOf("chunked") >= 0) chunked = true;
+      hasTE = true;
     } else if (lname === "connection") {
       connection = connection === "" ? value.toLowerCase() : connection + "," + value.toLowerCase();
     } else if (lname === "upgrade") {
       upgradeHeader = true;
     }
+  }
+
+  // Transfer codings, read after the loop so that an obs-fold continuation
+  // counts: `chunked` must be the final one.
+  let h = 0;
+  while (hasTE && h + 1 < Number(info.headers.length)) {
+    if (String(info.headers[h]).toLowerCase() === "transfer-encoding") {
+      const parts: string[] = String(info.headers[h + 1]).toLowerCase().split(",");
+      for (const part of parts) {
+        if (chunked) {
+          __httpParserError(p, "HPE_INVALID_TRANSFER_ENCODING", "Invalid `Transfer-Encoding` header value");
+          return false;
+        }
+        if (part.trim() === "chunked") chunked = true;
+      }
+    }
+    h = h + 2;
+  }
+  if (hasTE && contentLength >= 0) {
+    __httpParserError(p, "HPE_INVALID_TRANSFER_ENCODING", "Transfer-Encoding can't be present with Content-Length");
+    return false;
   }
 
   // Keep-alive, per RFC 7230 6.3.
@@ -687,6 +757,12 @@ function __httpParseHead(p: any): boolean {
     return false;
   }
   if (Number(p.state) === 7) return false;
+  if (hasTE && !chunked && Number(p.kind) === 0) {
+    // llhttp reports this after the head callback: the request is emitted,
+    // its body never arrives.
+    __httpParserError(p, "HPE_INVALID_TRANSFER_ENCODING", "Request has invalid `Transfer-Encoding`");
+    return false;
+  }
 
   const status: number = Number(info.statusCode);
   let noBody = false;
@@ -720,6 +796,50 @@ function __httpParseHead(p: any): boolean {
   // A response without a length runs until the connection closes.
   p.state = 6;
   return true;
+}
+
+// How many leading bytes of `buf` some known method still matches.
+function __httpMethodMatchLen(buf: string): number {
+  let best = 0;
+  for (const m of __HTTP_METHODS) {
+    let i = 0;
+    const n: number = Number(m.length) < Number(buf.length) ? Number(m.length) : Number(buf.length);
+    while (i < n && m.charAt(i) === buf.charAt(i)) i = i + 1;
+    if (i > best) best = i;
+  }
+  return best;
+}
+
+// `maxHeadersCount`: null/undefined is Node's default of 2000, 0 is no limit.
+function __httpLimitHeaders(raw: any, max: any): any {
+  let limit: number = max === null || max === undefined ? 2000 : Number(max);
+  if (!(limit > 0)) return raw;
+  if (Number(raw.length) <= limit * 2) return raw;
+  return raw.slice(0, limit * 2);
+}
+
+// Whether the start of a request buffer can still be (or is) a known method.
+function __httpMethodPrefixOk(buf: string): boolean {
+  const sp: number = Number(buf.indexOf(" "));
+  const head: string = sp >= 0 ? buf.slice(0, sp) : buf;
+  if (sp >= 0) return __HTTP_METHODS.indexOf(head) >= 0;
+  if (Number(head.length) > 24) return false;
+  for (const m of __HTTP_METHODS) {
+    if (m.slice(0, Number(head.length)) === head) return true;
+  }
+  return false;
+}
+
+// The first character a header value may not hold (a CTL other than HTAB), or 0.
+function __httpBadValueChar(text: string): number {
+  const n: number = Number(text.length);
+  let i = 0;
+  while (i < n) {
+    const c: number = __httpCc(text, i);
+    if ((c < 32 && c !== 9) || c === 127) return c;
+    i = i + 1;
+  }
+  return 0;
 }
 
 function __httpAllDigits(text: string): boolean {
@@ -809,7 +929,8 @@ class IncomingMessage extends Readable {
   constructor(socket?: any) {
     super({ autoDestroy: false });
     this._in = { paused: false };
-    this.socket = socket === undefined ? null : socket;
+    // Node leaves `socket` undefined on a message made without one.
+    this.socket = socket;
     this.client = this.socket;
     const self: any = this;
     __sSetOptFn(self, "read", function (n: any): void {
@@ -995,6 +1116,9 @@ class OutgoingMessage extends Writable {
   _removedConnection: any = false;
   _removedContLen: any = false;
   _removedTE: any = false;
+  _headersArray: any = null;
+  _maxRequestsPerSocket: any = 0;
+  _uniqueHeaders: any = null;
   strictContentLength: any = false;
   socket: any = null;
   _out: any = null;
@@ -1030,6 +1154,16 @@ class OutgoingMessage extends Writable {
 
   set connection(value: any) {
     this.socket = value;
+  }
+
+  // Legacy: Node's OutgoingMessage stays `writable` after `end()` (only a
+  // destroy clears it), which error detection in user code relies on.
+  get writable(): any {
+    return this.destroyed !== true;
+  }
+  set writable(value: any) {
+    const w: any = this._writableState;
+    if (w !== null && w !== undefined) w.writable = value === true;
   }
 
   get headersSent(): any {
@@ -1076,18 +1210,35 @@ class OutgoingMessage extends Writable {
 
   setHeaders(headers: any): any {
     if (this._header !== null && this._header !== undefined) throw __httpHeadersSent("set");
+    // A built-in method read off a `Map` through `any` answers undefined
+    // (zun#17) though calling it works, so a Map is recognised by
+    // `instanceof` and walked with `forEach`.
+    const isMap: boolean = headers instanceof Map;
     if (
       headers === null ||
       headers === undefined ||
       Array.isArray(headers) ||
-      headers.keys === undefined ||
-      headers.get === undefined
+      (!isMap && (headers.keys === undefined || headers.get === undefined))
     ) {
       throw new ERR_INVALID_ARG_TYPE("headers", ["Headers", "Map"], headers);
     }
-    const names: any[] = [];
-    for (const key of headers.keys()) names.push(key);
-    for (const key of names) this.setHeader(key, headers.get(key));
+    const pairs: any[] = [];
+    headers.forEach(function (value: any, key: any): void {
+      pairs.push([key, value]);
+    });
+    // Node: `set-cookie` values from a Headers object are kept apart.
+    const cookies: any[] = [];
+    for (const pair of pairs) {
+      if (String(pair[0]).toLowerCase() === "set-cookie") {
+        if (Array.isArray(pair[1])) {
+          for (const c of pair[1]) cookies.push(c);
+        } else {
+          cookies.push(pair[1]);
+        }
+      }
+      else this.setHeader(pair[0], pair[1]);
+    }
+    if (Number(cookies.length) > 0) this.setHeader("set-cookie", cookies);
     return this;
   }
 
@@ -1182,7 +1333,9 @@ class OutgoingMessage extends Writable {
       const value: any = pair[1];
       __httpValidateHeaderName(name, "Trailer name");
       __httpValidateHeaderValue(name, value);
-      if (Array.isArray(value)) {
+      if (Array.isArray(value) && __httpIsUniqueHeader(this, String(name).toLowerCase())) {
+        text = text + String(name) + ": " + value.join("; ") + "\r\n";
+      } else if (Array.isArray(value)) {
         for (const item of value) text = text + String(name) + ": " + String(item) + "\r\n";
       } else {
         text = text + String(name) + ": " + String(value) + "\r\n";
@@ -1332,6 +1485,22 @@ function __httpOutgoingDestroy(self: any, err: any, cb: any): any {
   return self;
 }
 
+const __HTTP_LINK_RE: RegExp = /^<[^>]*>(?:\s*;\s*[^;"\s]+(?:="[^;"\s]*"|=[^;"\s]*)?)*$/;
+
+// Node's `uniqueHeaders` option (server or request): lowercase names.
+function __httpParseUniqueHeaders(list: any): any {
+  if (list === undefined || list === null) return null;
+  if (!Array.isArray(list)) throw new ERR_INVALID_ARG_TYPE("options.uniqueHeaders", "Array", list);
+  const out: string[] = [];
+  for (const item of list) out.push(String(item).toLowerCase());
+  return out;
+}
+
+function __httpIsUniqueHeader(self: any, key: string): boolean {
+  const list: any = self._uniqueHeaders;
+  return Array.isArray(list) && list.indexOf(key) >= 0;
+}
+
 // Serialise the header block. `firstLine` includes its trailing CRLF.
 function __httpStoreHeader(self: any, firstLine: string): void {
   let header: string = firstLine;
@@ -1339,12 +1508,34 @@ function __httpStoreHeader(self: any, firstLine: string): void {
   let te = false;
   let connection = false;
   let date = false;
-  const keys: string[] = Object.keys(self._hdrs);
-  for (const key of keys) {
-    const entry: any = __httpHdr(self._hdrs, key);
-    const name: string = String(entry[0]);
-    const value: any = entry[1];
-    if (Array.isArray(value)) {
+  let keepAliveHdr = false;
+  // A declared `Trailer` needs chunked framing, never Content-Length.
+  let trailerHdr = false;
+  // A flat `[name, value, ...]` array given as `options.headers` goes out as
+  // written, in order (Node's `headersArray`); otherwise the header map.
+  const entries: any[] = [];
+  const raw: any = self._headersArray;
+  if (Array.isArray(raw)) {
+    let r = 0;
+    while (r + 1 < Number(raw.length)) {
+      entries.push([String(raw[r]), String(raw[r]).toLowerCase(), raw[r + 1]]);
+      r = r + 2;
+    }
+  } else {
+    const keys: string[] = Object.keys(self._hdrs);
+    for (const k of keys) {
+      const e: any = __httpHdr(self._hdrs, k);
+      entries.push([String(e[0]), k, e[1]]);
+    }
+  }
+  for (const item of entries) {
+    const name: string = String(item[0]);
+    const key: string = String(item[1]);
+    const value: any = item[2];
+    if (Array.isArray(value) && __httpIsUniqueHeader(self, key)) {
+      // `uniqueHeaders`: one line, values joined by "; ".
+      header = header + name + ": " + value.join("; ") + "\r\n";
+    } else if (Array.isArray(value)) {
       for (const item of value) header = header + name + ": " + String(item) + "\r\n";
     } else {
       header = header + name + ": " + String(value) + "\r\n";
@@ -1362,22 +1553,36 @@ function __httpStoreHeader(self: any, firstLine: string): void {
       self._contentLength = Number(value);
     } else if (key === "date") {
       date = true;
+    } else if (key === "keep-alive") {
+      // A caller-set `Keep-Alive` replaces the default one.
+      keepAliveHdr = true;
+    } else if (key === "trailer") {
+      trailerHdr = true;
     }
+  }
+  // Node's `writeHead`: a 204/304 must not be chunked, so the connection
+  // closes instead of keeping a framing the peer will not read.
+  const status: number = Number(self.statusCode);
+  if (self.chunkedEncoding === true && (status === 204 || status === 304)) {
+    self.chunkedEncoding = false;
+    self.shouldKeepAlive = false;
   }
   if (self.sendDate === true && !date) {
     header = header + "Date: " + new Date().toUTCString() + "\r\n";
   }
   if (self._removedConnection === true) {
-    self._last = true;
-    self.shouldKeepAlive = false;
+    // The header is not sent, but an HTTP/1.1 connection still persists.
+    self._last = self.shouldKeepAlive !== true;
   } else if (!connection) {
     const sendKeep: boolean =
       self.shouldKeepAlive === true &&
       (contLen || self.useChunkedEncodingByDefault === true || (self.agent !== undefined && self.agent !== null));
     if (sendKeep) {
       header = header + "Connection: keep-alive\r\n";
-      if (Number(self._keepAliveTimeout) > 0) {
-        header = header + "Keep-Alive: timeout=" + String(Math.floor(Number(self._keepAliveTimeout) / 1000)) + "\r\n";
+      if (Number(self._keepAliveTimeout) > 0 && !keepAliveHdr) {
+        let max = "";
+        if (Number(self._maxRequestsPerSocket) > 0) max = ", max=" + String(self._maxRequestsPerSocket);
+        header = header + "Keep-Alive: timeout=" + String(Math.floor(Number(self._keepAliveTimeout) / 1000)) + max + "\r\n";
       }
     } else {
       self._last = true;
@@ -1387,7 +1592,7 @@ function __httpStoreHeader(self: any, firstLine: string): void {
   if (!contLen && !te) {
     if (self._hasBody !== true) {
       self._last = true;
-    } else if (self._removedContLen !== true && typeof self._contentLength === "number") {
+    } else if (!trailerHdr && self._removedContLen !== true && typeof self._contentLength === "number") {
       header = header + "Content-Length: " + String(self._contentLength) + "\r\n";
     } else if (self._removedTE !== true && self.useChunkedEncodingByDefault === true) {
       header = header + "Transfer-Encoding: chunked\r\n";
@@ -1578,11 +1783,16 @@ class ServerResponse extends OutgoingMessage {
         if (Array.isArray(headers[0])) {
           for (const pair of headers) this.appendHeader(pair[0], pair[1]);
         } else {
-          const had: boolean = Number(Object.keys(this._hdrs).length) > 0;
+          // Node: these override earlier headers yet keep their own
+          // duplicates -- drop the conflicts first, then append.
           let i = 0;
           while (i + 1 < Number(headers.length)) {
-            if (had) this.setHeader(headers[i], headers[i + 1]);
-            else this.appendHeader(headers[i], headers[i + 1]);
+            if (headers[i]) this.removeHeader(headers[i]);
+            i = i + 2;
+          }
+          i = 0;
+          while (i + 1 < Number(headers.length)) {
+            this.appendHeader(headers[i], headers[i + 1]);
             i = i + 2;
           }
         }
@@ -1620,7 +1830,8 @@ class ServerResponse extends OutgoingMessage {
       let joined = "";
       for (const item of links) {
         const piece: string = String(item);
-        if (__httpInvalidHeaderChar(piece)) {
+        // Node's `validateLinkHeaderFormat`: `<uri>` then `; param[=value]`s.
+        if (typeof item !== "string" || !__HTTP_LINK_RE.test(piece) || __httpInvalidHeaderChar(piece)) {
           throw new __HttpTypeError("ERR_INVALID_ARG_VALUE", "The argument 'hints.link' is invalid. Received " + __evInspect(link));
         }
         joined = joined === "" ? piece : joined + ", " + piece;
@@ -1639,6 +1850,9 @@ class ServerResponse extends OutgoingMessage {
   }
 
   assignSocket(socket: any): void {
+    if (this.socket !== null && this.socket !== undefined) {
+      throw new NodeError("ERR_HTTP_SOCKET_ASSIGNED", "Response has already been assigned to a socket");
+    }
     this.socket = socket;
     this._flushQueueNow();
     this.emit("socket", socket);
@@ -1700,14 +1914,22 @@ class __HttpServer extends Server {
     });
     this._httpState = {
       conns: [],
+      checkTimer: null,
+      uniqueHeaders: __httpParseUniqueHeaders(opts.uniqueHeaders),
       joinDuplicateHeaders: opts.joinDuplicateHeaders === true,
       maxHeaderSize: opts.maxHeaderSize === undefined ? __HTTP_MAX_HEADER_SIZE : Number(opts.maxHeaderSize),
       incoming: opts.IncomingMessage !== undefined ? opts.IncomingMessage : null,
       response: opts.ServerResponse !== undefined ? opts.ServerResponse : null,
     };
     if (opts.keepAliveTimeout !== undefined) this.keepAliveTimeout = opts.keepAliveTimeout;
-    if (opts.headersTimeout !== undefined) this.headersTimeout = opts.headersTimeout;
+    // Node: `requestTimeout` defaults to five minutes, `headersTimeout` to the
+    // smaller of one minute and `requestTimeout`, and must not exceed it.
     if (opts.requestTimeout !== undefined) this.requestTimeout = opts.requestTimeout;
+    if (opts.headersTimeout !== undefined) this.headersTimeout = opts.headersTimeout;
+    else this.headersTimeout = Math.min(60000, Number(this.requestTimeout));
+    if (Number(this.requestTimeout) > 0 && Number(this.headersTimeout) > 0 && Number(this.headersTimeout) > Number(this.requestTimeout)) {
+      throw new ERR_OUT_OF_RANGE("headersTimeout", "<= requestTimeout", this.headersTimeout);
+    }
     if (opts.connectionsCheckingInterval !== undefined) this.connectionsCheckingInterval = opts.connectionsCheckingInterval;
     if (opts.requireHostHeader !== undefined) this.requireHostHeader = opts.requireHostHeader;
     if (opts.connectionsCheckingInterval !== undefined) this.connectionsCheckingInterval = opts.connectionsCheckingInterval;
@@ -1719,6 +1941,14 @@ class __HttpServer extends Server {
       __httpServerAttach(self, socket);
     });
     if (listener !== undefined && listener !== null) this.on("request", listener);
+    // The connection-checking sweep that enforces `headersTimeout` and
+    // `requestTimeout` (Node's `setupConnectionsTracking`).
+    this.on("listening", function (): void {
+      __httpServerStartChecking(self);
+    });
+    this.on("close", function (): void {
+      __httpServerStopChecking(self);
+    });
   }
 
   setTimeout(msecs?: any, callback?: any): any {
@@ -1730,7 +1960,9 @@ class __HttpServer extends Server {
   closeIdleConnections(): void {
     const conns: any = this._httpState.conns;
     for (const conn of conns.slice()) {
-      if (conn.current === null && Number(conn.waiting.length) === 0 && conn.req === null) {
+      // Idle as Node's connection list means it: no message being received
+      // (a fresh connection counts as receiving one) and no response pending.
+      if (conn.current === null && Number(conn.waiting.length) === 0 && conn.req === null && conn.msgStart === 0) {
         conn.socket.destroy();
       }
     }
@@ -1742,6 +1974,7 @@ class __HttpServer extends Server {
   }
 
   close(callback?: any): any {
+    __httpServerStopChecking(this);
     const result: any = super.close(callback);
     this.closeIdleConnections();
     return result;
@@ -1761,6 +1994,10 @@ function __httpServerAttach(server: any, socket: any): void {
     upgradeReq: null,
     requests: 0,
     ended: false,
+    // When the message being received began (0: none in progress) and whether
+    // its header block is complete; read by the connection-checking sweep.
+    msgStart: Date.now(),
+    headersDone: false,
   };
   server._httpState.conns.push(conn);
   const handler: any = {
@@ -1785,10 +2022,25 @@ function __httpServerAttach(server: any, socket: any): void {
   };
   conn.parser = __httpNewParser(0, handler);
   conn.parser.maxHeaderSize = Number(server._httpState.maxHeaderSize);
+  socket.parser = conn.parser;
+  // Node's `socketSetEncoding`: the byte stream is HTTP's.
+  socket.setEncoding = function (enc?: any): any {
+    throw new NodeError("ERR_HTTP_SOCKET_ENCODING", "Changing the socket encoding is not allowed per RFC7230 Section 3.");
+  };
 
   socket.on("data", function (chunk: any): void {
     if (conn.closed === true) return;
+    if (conn.msgStart === 0) {
+      conn.msgStart = Date.now();
+      conn.headersDone = false;
+    }
     __httpParse(conn.parser, __httpLatin1(chunk));
+    // A pipelined message that began in the same chunk as the end of the
+    // previous one is in progress too.
+    if (conn.msgStart === 0 && Number(conn.parser.buf.length) > 0) {
+      conn.msgStart = Date.now();
+      conn.headersDone = false;
+    }
   });
   socket.on("end", function (): void {
     __httpServerOnSocketEnd(conn);
@@ -1805,6 +2057,75 @@ function __httpServerAttach(server: any, socket: any): void {
   const timeout: number = Number(server.timeout);
   if (timeout > 0) socket.setTimeout(timeout);
   else if (Number(server.keepAliveTimeout) > 0) socket.setTimeout(Number(server.keepAliveTimeout));
+}
+
+// `require('_http_server').kConnectionsCheckingInterval`: the key the sweep's
+// interval is stored under on the server.
+const __httpKConnectionsCheckingInterval: any = Symbol("http.server.connectionsCheckingInterval");
+
+function __httpServerStartChecking(server: any): void {
+  __httpServerStopChecking(server);
+  const every: number = Number(server.connectionsCheckingInterval);
+  if (!(every > 0)) return;
+  const timer: any = setInterval(function (): void {
+    __httpServerCheckConnections(server);
+  }, every);
+  if (timer !== null && timer !== undefined && typeof timer.unref === "function") timer.unref();
+  server._httpState.checkTimer = timer;
+  server[__httpKConnectionsCheckingInterval] = timer;
+}
+
+function __httpServerStopChecking(server: any): void {
+  const timer: any = server._httpState.checkTimer;
+  if (timer !== undefined && timer !== null) {
+    clearInterval(timer);
+    server._httpState.checkTimer = null;
+  }
+}
+
+// Node's `checkConnections`: a connection whose header block (or whole request)
+// is still arriving past `headersTimeout` (or `requestTimeout`) gets a `408`.
+function __httpServerCheckConnections(server: any): void {
+  const headersTimeout: number = Number(server.headersTimeout);
+  const requestTimeout: number = Number(server.requestTimeout);
+  if (headersTimeout === 0 && requestTimeout === 0) return;
+  const now: number = Date.now();
+  const conns: any = server._httpState.conns;
+  for (const conn of conns.slice()) {
+    const start: number = Number(conn.msgStart);
+    if (start === 0 || conn.closed === true) continue;
+    const elapsed: number = now - start;
+    const headersLate: boolean = conn.headersDone !== true && headersTimeout > 0 && elapsed > headersTimeout;
+    const requestLate: boolean = requestTimeout > 0 && elapsed > requestTimeout;
+    if (!headersLate && !requestLate) continue;
+    conn.msgStart = 0;
+    conn.socket.setTimeout(0);
+    __httpServerOnRequestTimeout(conn);
+  }
+}
+
+// Node's guard before answering a client error: no response in flight, or none
+// of its bytes written yet (so the reply cannot corrupt the stream).
+function __httpServerNoInflightHeader(conn: any): boolean {
+  const cur: any = conn.current;
+  return cur === null || cur === undefined || cur.headersSent !== true;
+}
+
+class __HttpRequestTimeout extends NodeError {
+  constructor() {
+    super("ERR_HTTP_REQUEST_TIMEOUT", "Request timeout");
+  }
+}
+
+function __httpServerOnRequestTimeout(conn: any): void {
+  const server: any = conn.server;
+  const socket: any = conn.socket;
+  const err: any = new __HttpRequestTimeout();
+  if (server.emit("clientError", err, socket) === true) return;
+  if (socket.writable === true && __httpServerNoInflightHeader(conn)) {
+    socket.write("HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n", "latin1");
+  }
+  socket.destroy(err);
 }
 
 function __httpServerOnSocketTimeout(conn: any): void {
@@ -1829,11 +2150,12 @@ function __httpServerOnSocketError(conn: any, err: any): void {
 function __httpServerOnParseError(conn: any, err: any): void {
   const server: any = conn.server;
   const socket: any = conn.socket;
-  err.rawPacket = Buffer.alloc(0);
+  if (err.rawPacket === undefined || err.rawPacket === null) err.rawPacket = Buffer.alloc(0);
   if (server.emit("clientError", err, socket) === true) return;
-  if (socket.writable === true && Number(socket.bytesWritten) === 0) {
+  if (socket.writable === true && __httpServerNoInflightHeader(conn)) {
     let status = "400 Bad Request";
     if (err.code === "HPE_HEADER_OVERFLOW") status = "431 Request Header Fields Too Large";
+    else if (err.code === "HPE_CHUNK_EXTENSIONS_OVERFLOW") status = "413 Payload Too Large";
     socket.write("HTTP/1.1 " + status + "\r\nConnection: close\r\n\r\n", "latin1");
   }
   socket.destroy(err);
@@ -1908,6 +2230,7 @@ function __httpServerOnUpgrade(conn: any, info: any, rest: string): void {
   const socket: any = conn.socket;
   const req: any = conn.upgradeReq;
   conn.upgradeReq = null;
+  conn.msgStart = 0;
   conn.req = null;
   const head: Buffer = __httpFromLatin1(rest);
   const event: string = info.method === "CONNECT" ? "connect" : "upgrade";
@@ -1927,13 +2250,14 @@ function __httpServerOnUpgrade(conn: any, info: any, rest: string): void {
 function __httpServerOnHeaders(conn: any, info: any): any {
   const server: any = conn.server;
   const socket: any = conn.socket;
+  conn.headersDone = true;
   const req: any = new IncomingMessage(socket);
   req.httpVersionMajor = info.versionMajor;
   req.httpVersionMinor = info.versionMinor;
   req.httpVersion = String(info.versionMajor) + "." + String(info.versionMinor);
   req.url = info.url;
   req.method = info.method;
-  req.rawHeaders = info.headers;
+  req.rawHeaders = __httpLimitHeaders(info.headers, server.maxHeadersCount);
   req.joinDuplicateHeaders = server._httpState.joinDuplicateHeaders;
   req.upgrade = false;
   conn.requests = Number(conn.requests) + 1;
@@ -1953,12 +2277,15 @@ function __httpServerOnHeaders(conn: any, info: any): any {
   }
 
   conn.req = req;
+  conn.parser.incoming = req;
   socket.setTimeout(Number(server.timeout));
 
   const res: any = new ServerResponse(req);
   res._conn = conn;
   res.shouldKeepAlive = info.shouldKeepAlive;
   if (Number(server.keepAliveTimeout) > 0) res._keepAliveTimeout = Number(server.keepAliveTimeout);
+  if (Number(server.maxRequestsPerSocket) > 0) res._maxRequestsPerSocket = Number(server.maxRequestsPerSocket);
+  res._uniqueHeaders = server._httpState.uniqueHeaders;
   if (res.shouldKeepAlive === true && Number(server.maxRequestsPerSocket) > 0 && Number(conn.requests) >= Number(server.maxRequestsPerSocket)) {
     res.shouldKeepAlive = false;
     res._last = true;
@@ -2026,6 +2353,8 @@ function __httpServerOnBody(conn: any, chunk: any): void {
 function __httpServerOnComplete(conn: any, trailers: any): void {
   const req: any = conn.req;
   conn.req = null;
+  conn.msgStart = 0;
+  conn.headersDone = false;
   if (req === null || req === undefined) return;
   req.rawTrailers = trailers;
   req.complete = true;
@@ -2043,6 +2372,17 @@ function __httpServerResFinish(conn: any, res: any): void {
   }
   res.detachSocket(socket);
   if (conn.current === res) conn.current = null;
+  // Node's `clearIncoming`.
+  const parser: any = conn.parser;
+  if (req !== null && req !== undefined && parser.incoming === req) {
+    if (req.readableEnded === true) {
+      parser.incoming = null;
+    } else {
+      req.once("end", function (): void {
+        if (parser.incoming === req) parser.incoming = null;
+      });
+    }
+  }
   __httpTick(function (): void {
     if (res._closeEmitted !== true) {
       res._closeEmitted = true;
@@ -2126,12 +2466,12 @@ class Agent extends EventEmitter {
     this.maxTotalSockets = opts.maxTotalSockets === undefined ? Infinity : opts.maxTotalSockets;
     if (opts.scheduling !== undefined) {
       if (opts.scheduling !== "fifo" && opts.scheduling !== "lifo") {
-        throw new ERR_INVALID_ARG_VALUE("options.scheduling", opts.scheduling, "must be one of: 'fifo', 'lifo'");
+        throw new ERR_INVALID_ARG_VALUE("scheduling", opts.scheduling, "must be one of: 'fifo', 'lifo'");
       }
       this.scheduling = opts.scheduling;
     }
     if (opts.maxTotalSockets !== undefined) {
-      __httpValidateAgentNumber(opts.maxTotalSockets, "options.maxTotalSockets");
+      __httpValidateAgentNumber(opts.maxTotalSockets, "maxTotalSockets");
     }
     __httpValidateAgentNumber(this.maxSockets, "maxSockets");
     __httpValidateAgentNumber(this.maxFreeSockets, "maxFreeSockets");
@@ -2284,6 +2624,17 @@ function __httpAgentInstall(agent: any, s: any, options: any): void {
   s.on("agentRemove", function (): void {
     agent.removeSocket(s, options);
   });
+  // Node's agent `onTimeout`: an idle pooled socket that times out is closed.
+  s.on("timeout", function (): void {
+    const lists: any = agent.freeSockets;
+    const names: string[] = Object.keys(lists);
+    for (const name of names) {
+      if (Number(lists[name].indexOf(s)) >= 0) {
+        s.destroy();
+        return;
+      }
+    }
+  });
 }
 
 function __httpAgentOnFree(agent: any, socket: any, options: any): void {
@@ -2376,6 +2727,7 @@ class ClientRequest extends OutgoingMessage {
   _cs: any = null;
   _deferred: any = null;
   _timeoutArmed: any = false;
+  _timeoutCb: any = null;
   _errored: any = false;
   _hasBodyMethod: any = true;
 
@@ -2473,11 +2825,14 @@ function __httpClientSetSocketTimeout(sock: any, msecs: any): void {
 function __httpClientListenTimeout(req: any): void {
   if (req._timeoutArmed === true) return;
   req._timeoutArmed = true;
+  // Node's `listenSocketTimeout` delegates the socket's timeout once.
   const arm: any = function (s: any): void {
-    s.on("timeout", function (): void {
+    const onTimeout: any = function (): void {
       const cs: any = s._httpConn;
       if (cs !== null && cs !== undefined && cs.req === req) req.emit("timeout");
-    });
+    };
+    req._timeoutCb = onTimeout;
+    s.once("timeout", onTimeout);
   };
   if (req.socket !== null && req.socket !== undefined) arm(req.socket);
   else req.once("socket", arm);
@@ -2559,7 +2914,11 @@ function __httpIsUrlObject(value: any): boolean {
     typeof value.href === "string" &&
     typeof value.protocol === "string" &&
     typeof value.hostname === "string" &&
-    typeof value.pathname === "string"
+    typeof value.pathname === "string" &&
+    // Node's `isURL`: a legacy `url.parse()` object has `path` and `auth`
+    // (possibly `null`), so it is read as a plain options object instead.
+    value.path === undefined &&
+    value.auth === undefined
   );
 }
 
@@ -2624,10 +2983,13 @@ function __httpClientInit(self: any, input: any, opts: any, cb: any): void {
   } else if (agent === null || agent === undefined) {
     agent = null;
   } else if (!__httpIsObj(agent) || typeof agent.addRequest !== "function") {
-    throw new ERR_INVALID_ARG_TYPE("options.agent", ["Agent-like Object", "undefined", "false"], agent);
+    throw new __HttpTypeError(
+      "ERR_INVALID_ARG_TYPE",
+      'The "options.agent" property must be one of Agent-like Object, undefined, or false.' + __evReceived(agent),
+    );
   }
   self.agent = agent === null ? undefined : agent;
-  const agentProtocol: any = agent === null || agent.protocol === undefined ? defaultAgent.protocol : agent.protocol;
+  const agentProtocol: any = agent === null || agent.protocol === undefined || agent.protocol === null || agent.protocol === "" ? defaultAgent.protocol : agent.protocol;
 
   const protocol: string = options.protocol === undefined || options.protocol === null ? String(agentProtocol) : String(options.protocol);
   const expectedProtocol: string = String(agentProtocol);
@@ -2644,6 +3006,9 @@ function __httpClientInit(self: any, input: any, opts: any, cb: any): void {
   if (port === undefined || port === null || port === "") port = defaultPort;
   if (port === undefined || port === null) port = 80;
   options.port = port;
+  // Node's `validateHost`: a string, or nothing.
+  __httpValidateHost(options.hostname, "hostname");
+  __httpValidateHost(options.host, "host");
   const host: any =
     options.hostname !== undefined && options.hostname !== null && options.hostname !== ""
       ? options.hostname
@@ -2653,7 +3018,11 @@ function __httpClientInit(self: any, input: any, opts: any, cb: any): void {
   options.host = host;
   self.host = host;
 
-  if (options.timeout !== undefined) self.timeout = options.timeout;
+  if (options.timeout !== undefined) {
+    // Node's `getTimerDuration`.
+    if (typeof options.timeout !== "number") throw new ERR_INVALID_ARG_TYPE("timeout", "number", options.timeout);
+    self.timeout = options.timeout;
+  }
   if (options.maxHeaderSize !== undefined) {
     // accepted, applied by the response parser
   }
@@ -2702,9 +3071,11 @@ function __httpClientInit(self: any, input: any, opts: any, cb: any): void {
         }
         let h = 0;
         while (h + 1 < Number(headers.length)) {
-          self.appendHeader(headers[h], headers[h + 1]);
+          __httpValidateHeaderName(headers[h]);
+          __httpValidateHeaderValue(headers[h], headers[h + 1]);
           h = h + 2;
         }
+        self._headersArray = headers;
       }
     } else {
       const hk: string[] = Object.keys(headers);
@@ -2712,14 +3083,42 @@ function __httpClientInit(self: any, input: any, opts: any, cb: any): void {
     }
   }
 
-  if (host !== undefined && options.setHost !== false && !self.hasHeader("host")) {
+  self._uniqueHeaders = __httpParseUniqueHeaders(options.uniqueHeaders);
+  if (options.setDefaultHeaders === false) {
+    self._removedConnection = true;
+    self._removedContLen = true;
+    self._removedTE = true;
+  }
+  const setHost: boolean =
+    options.setHost === undefined ? options.setDefaultHeaders !== false : options.setHost === true;
+  // An object-form `headers.host` must be a single string (an array-form
+  // header list may repeat Host on purpose).
+  if (!Array.isArray(options.headers) && Array.isArray(self.getHeader("host"))) {
+    throw new ERR_INVALID_ARG_TYPE("options.headers.host", "string", self.getHeader("host"));
+  }
+  // Headers given as an array are the whole header set: no Host, no
+  // Authorization is derived for them.
+  const headersIsArray: boolean = Array.isArray(options.headers);
+  if (host !== undefined && setHost && !headersIsArray && !self.hasHeader("host")) {
     let hostHeader: string = String(host);
-    if (hostHeader.indexOf(":") !== -1 && hostHeader.charAt(0) !== "[") hostHeader = "[" + hostHeader + "]";
-    if (port && Number(port) !== Number(defaultPort)) hostHeader = hostHeader + ":" + String(port);
+    // Only an IPv6 literal (two colons or more) is bracketed.
+    const colon: number = Number(hostHeader.indexOf(":"));
+    if (colon !== -1 && hostHeader.indexOf(":", colon + 1) !== -1 && hostHeader.charAt(0) !== "[") {
+      hostHeader = "[" + hostHeader + "]";
+    }
+    // With `createConnection` and no agent Node has no default port, so the
+    // port is always spelled out.
+    const hostDefaultPort: any =
+      agent === null && __httpIsFn(options.createConnection) && (options.defaultPort === undefined || options.defaultPort === null)
+        ? undefined
+        : defaultPort;
+    if (port && (hostDefaultPort === undefined || Number(port) !== Number(hostDefaultPort))) {
+      hostHeader = hostHeader + ":" + String(port);
+    }
     self.setHeader("Host", hostHeader);
   }
 
-  if (options.auth !== undefined && options.auth !== null && !self.hasHeader("Authorization")) {
+  if (options.auth !== undefined && options.auth !== null && !headersIsArray && !self.hasHeader("Authorization")) {
     self.setHeader("Authorization", "Basic " + Buffer.from(String(options.auth)).toString("base64"));
   }
 
@@ -2783,6 +3182,12 @@ function __httpClientOnSocketNT(req: any, socket: any, err: any): void {
     return;
   }
   __httpClientTickOnSocket(req, socket);
+}
+
+function __httpValidateHost(host: any, name: string): void {
+  if (host !== null && host !== undefined && typeof host !== "string") {
+    throw new ERR_INVALID_ARG_TYPE("options." + name, ["string", "undefined", "null"], host);
+  }
 }
 
 function __httpClientTickOnSocket(req: any, socket: any): void {
@@ -2901,6 +3306,8 @@ function __httpClientOnParseError(cs: any, err: any): void {
   const req: any = cs.req;
   cs.socket._hadError = true;
   req._errored = true;
+  // Node frees the parser first: the socket no longer feeds it.
+  cs.socket.removeListener("data", cs.onData);
   req.emit("error", err);
   cs.socket.destroy();
 }
@@ -2913,7 +3320,7 @@ function __httpClientOnHeaders(cs: any, info: any): any {
   res.httpVersionMajor = info.versionMajor;
   res.httpVersionMinor = info.versionMinor;
   res.httpVersion = String(info.versionMajor) + "." + String(info.versionMinor);
-  res.rawHeaders = info.headers;
+  res.rawHeaders = __httpLimitHeaders(info.headers, req.maxHeadersCount);
   res.statusCode = status;
   res.statusMessage = info.statusMessage;
   res.req = req;
@@ -2976,6 +3383,12 @@ function __httpClientOnComplete(cs: any, trailers: any): void {
   }
   const res: any = cs.res;
   if (res === null || res === undefined) return;
+  // Node's `responseOnEnd`: the request's socket-timeout delegate goes.
+  const req: any = cs.req;
+  if (req._timeoutCb !== null && req._timeoutCb !== undefined) {
+    cs.socket.removeListener("timeout", req._timeoutCb);
+    req._timeoutCb = null;
+  }
   res.rawTrailers = trailers;
   res.complete = true;
   res.push(null);
@@ -3071,6 +3484,7 @@ function __httpPublicValidateValue(name: any, value: any): void {
 const __node_http: any = {
   METHODS: __HTTP_METHODS.slice(),
   STATUS_CODES: __HTTP_STATUS_CODES,
+  kConnectionsCheckingInterval: __httpKConnectionsCheckingInterval,
   Agent: Agent,
   ClientRequest: ClientRequest,
   IncomingMessage: IncomingMessage,
