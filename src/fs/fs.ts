@@ -123,6 +123,17 @@ class __FsUvError extends NodeError {
     this.syscall = syscall;
     if (path !== undefined) this.path = path;
     if (dest !== undefined) this.dest = dest;
+    // Node's uv exceptions are plain `Error`s (`lib/internal/errors.js`'
+    // `UVException`), and `test-fs-access.js` checks
+    // `err.constructor === Error`. An own, non-enumerable property, because
+    // the engine does not read `constructor` through a redefined prototype
+    // slot (zun#119).
+    Object.defineProperty(this, "constructor", {
+      value: Error,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
   }
 }
 
@@ -1076,9 +1087,11 @@ function __fsExistsSync(path: any): boolean {
 
 function __fsAccessSync(path: any, mode?: any): void {
   const resolved: string = __fsGetValidatedPath(path);
-  const resolvedMode: number = mode === undefined ? __FS_F_OK : Number(mode);
+  // `getValidMode`: an omitted or null mode is F_OK; anything else must
+  // already be an integer (no coercion).
+  const resolvedMode: any = mode === undefined || mode === null ? __FS_F_OK : mode;
   __fsValidateInteger(resolvedMode, "mode", 0, 7);
-  __fsVoid(__fsNative.fsAccess(resolved, resolvedMode));
+  __fsVoid(__fsNative.fsAccess(resolved, Number(resolvedMode)));
 }
 
 function __fsReadFileSync(path: any, options?: any): any {
@@ -1169,16 +1182,18 @@ function __fsTruncateSync(path: any, len?: any): void {
     return;
   }
   const resolved: string = __fsGetValidatedPath(path);
-  const length: number = len === undefined || len === null ? 0 : Number(len);
+  // Only an omitted length defaults; `null` is rejected by the integer check.
+  const length: any = len === undefined ? 0 : len;
   __fsValidateInteger(length, "len", -9007199254740991, 9007199254740991);
-  __fsVoid(__fsNative.fsTruncate(resolved, length));
+  __fsVoid(__fsNative.fsTruncate(resolved, Number(length)));
 }
 
 function __fsFtruncateSync(fd: any, len?: any): void {
   const resolvedFd: number = __fsGetValidatedFd(fd);
-  const length: number = len === undefined || len === null ? 0 : Number(len);
+  // Only an omitted length defaults; `null` is rejected by the integer check.
+  const length: any = len === undefined ? 0 : len;
   __fsValidateInteger(length, "len", -9007199254740991, 9007199254740991);
-  __fsVoid(__fsNative.fsFtruncate(resolvedFd, length));
+  __fsVoid(__fsNative.fsFtruncate(resolvedFd, Number(length)));
 }
 
 function __fsOpenSync(path: any, flags?: any, mode?: any): number {
@@ -1210,17 +1225,47 @@ function __fsReadSync(fd: any, buffer: any, offset?: any, length?: any, position
     resolvedLength = offset.length;
     resolvedPosition = offset.position;
   }
-  if (resolvedOffset === undefined || resolvedOffset === null) resolvedOffset = 0;
-  if (resolvedLength === undefined || resolvedLength === null) {
-    // zun#38: `buffer.length` through an `any` is `undefined`, so the view is
-    // re-typed before its room is measured.
-    resolvedLength = Number(__fsAsBuffer(buffer).length) - Number(resolvedOffset);
+  // `lib/fs.js`' `readSync` order from here: an integer offset >= 0, the
+  // length truncated to int32, an early 0 for an empty read, then the buffer,
+  // offset/length and position checks.
+  if (resolvedOffset === undefined || resolvedOffset === null) {
+    resolvedOffset = 0;
+  } else {
+    __fsValidateInteger(resolvedOffset, "offset", 0, 9007199254740991);
   }
-  if (resolvedPosition === undefined || resolvedPosition === null) resolvedPosition = -1;
-  if (typeof resolvedPosition === "bigint") resolvedPosition = Number(resolvedPosition);
-
-  const count: number = Number(resolvedLength);
+  // zun#38: `buffer.length` through an `any` is `undefined`, so the view is
+  // re-typed before its room is measured.
+  const byteLength: number = Number(__fsAsBuffer(buffer).length);
+  if (resolvedLength === undefined || resolvedLength === null) {
+    resolvedLength = byteLength - Number(resolvedOffset);
+  }
+  const count: number = Number(resolvedLength) | 0;
   if (count === 0) return 0;
+  if (byteLength === 0) {
+    throw new ERR_INVALID_ARG_VALUE("buffer", buffer, "is empty and cannot be written");
+  }
+  if (count < 0) throw new ERR_OUT_OF_RANGE("length", ">= 0", count);
+  if (Number(resolvedOffset) + count > byteLength) {
+    throw new ERR_OUT_OF_RANGE("length", "<= " + String(byteLength - Number(resolvedOffset)), count);
+  }
+  if (resolvedPosition === undefined || resolvedPosition === null) {
+    resolvedPosition = -1;
+  } else if (typeof resolvedPosition === "number") {
+    __fsValidateInteger(resolvedPosition, "position", -1, 9007199254740991);
+  } else if (typeof resolvedPosition === "bigint") {
+    // `validatePosition`'s bigint range, `-1n ..= 2n ** 63n - 1n - length`.
+    // Both sides are typed `bigint` locals (zun#105: arithmetic with an `any`
+    // BigInt operand throws).
+    const big: bigint = BigInt(resolvedPosition);
+    const maxPosition: bigint = BigInt(2) ** BigInt(63) - BigInt(1) - BigInt(count);
+    if (big < BigInt(-1) || big > maxPosition) {
+      throw new ERR_OUT_OF_RANGE("position", ">= -1 && <= " + String(maxPosition), resolvedPosition);
+    }
+    resolvedPosition = Number(big);
+  } else {
+    throw new ERR_INVALID_ARG_TYPE("position", ["integer", "bigint"], resolvedPosition);
+  }
+
   const piece: Buffer = __fsBufferOf(
     __fsOne(__fsNative.fsRead(resolvedFd, count, Number(resolvedPosition))),
   );
@@ -1241,12 +1286,25 @@ function __fsWriteSync(fd: any, data: any, a?: any, b?: any, c?: any): number {
   if (typeof data === "string") {
     let position: any = a;
     const encoding: any = b === undefined || b === null ? "utf8" : b;
+    // `validateEncoding`: an odd-length string has no hex decoding.
+    if (encoding === "hex" && Number(data.length) % 2 !== 0) {
+      throw new ERR_INVALID_ARG_VALUE(
+        "encoding",
+        encoding,
+        "is invalid for data of length " + String(data.length),
+      );
+    }
     if (position !== undefined && position !== null && typeof position === "object") {
       position = position.position;
     }
     if (position === undefined || position === null) position = -1;
     const base64: string = __fsDataToBase64(data, encoding);
     return Number(__fsOne(__fsNative.fsWrite(resolvedFd, base64, Number(position))));
+  }
+  // A `DataView` or a non-byte typed array is written as the bytes it views;
+  // offset and length then count those bytes, as Node's `byteLength` does.
+  if (!__fsIsUint8Array(data) && ArrayBuffer.isView(data)) {
+    data = Buffer.from(data.buffer, data.byteOffset, data.byteLength);
   }
   if (!__fsIsUint8Array(data)) {
     throw new ERR_INVALID_ARG_TYPE(
@@ -1263,12 +1321,27 @@ function __fsWriteSync(fd: any, data: any, a?: any, b?: any, c?: any): number {
     position = offset.position;
     offset = offset.offset;
   }
-  if (offset === undefined || offset === null) offset = 0;
-  if (length === undefined || length === null) {
-    // zun#38, as in `__fsReadSync`.
-    length = Number(__fsAsBuffer(data).length) - Number(offset);
+  // `lib/fs.js`' `write`/`writeSync` order: an integer offset >= 0, a length
+  // defaulted when it is not a number, then `validateOffsetLengthWrite`.
+  if (offset === undefined || offset === null || __evIsFn(offset)) {
+    offset = 0;
+  } else {
+    __fsValidateInteger(offset, "offset", 0, 9007199254740991);
   }
-  if (position === undefined || position === null) position = -1;
+  // zun#38, as in `__fsReadSync`: the byte length is read off the Buffer view.
+  const byteLength: number = Number(__fsAsBuffer(data).length);
+  if (typeof length !== "number") length = byteLength - Number(offset);
+  if (Number(offset) > byteLength) {
+    throw new ERR_OUT_OF_RANGE("offset", "<= " + String(byteLength), offset);
+  }
+  if (Number(length) > byteLength - Number(offset)) {
+    throw new ERR_OUT_OF_RANGE("length", "<= " + String(byteLength - Number(offset)), length);
+  }
+  if (Number(length) < 0) {
+    throw new ERR_OUT_OF_RANGE("length", ">= 0", length);
+  }
+  __fsValidateInteger(length, "length", 0, 2147483647);
+  if (typeof position !== "number") position = -1;
   const slice: Buffer = __fsSliceOfView(data, Number(offset), Number(length));
   return Number(
     __fsOne(__fsNative.fsWrite(resolvedFd, slice.toString("base64"), Number(position))),
@@ -1487,15 +1560,22 @@ function __fsReaddirInto(
   }
 }
 
-function __fsMkdtempSync(prefix: any, options?: any): any {
-  if (typeof prefix !== "string") {
-    throw new ERR_INVALID_ARG_TYPE("prefix", "string", prefix);
+let __fsMkdtempWarned: boolean = false;
+
+// `mkdtemp`'s prefix is a validated path since Node 24: a string, a Buffer, a
+// `Uint8Array` or a `file:` URL. A prefix ending in `X` warns once, because
+// some platforms' `mkdtemp(3)` would consume those as template characters.
+function __fsMkdtempSync(input: any, options?: any): any {
+  let source: any = input;
+  if (source instanceof Uint8Array && !Buffer.isBuffer(source)) {
+    source = Buffer.from(source.buffer, source.byteOffset, source.byteLength);
   }
-  if (Number(prefix.indexOf("\u0000")) !== -1) {
-    throw new ERR_INVALID_ARG_VALUE(
-      "prefix",
-      prefix,
-      "must be a string, Uint8Array, or URL without null bytes",
+  const prefix: string = __fsGetValidatedPath(source, "prefix");
+  if (prefix.endsWith("X") && !__fsMkdtempWarned) {
+    __fsMkdtempWarned = true;
+    process.emitWarning(
+      "mkdtemp() templates ending with X are not portable. " +
+        "For details see: https://nodejs.org/api/fs.html",
     );
   }
   const settings: any = __fsGetOptions(options, { encoding: "utf8" });
@@ -1503,10 +1583,36 @@ function __fsMkdtempSync(prefix: any, options?: any): any {
   return __fsName(created, settings.encoding);
 }
 
-function __fsRealpathSync(path: any, options?: any): any {
+function __fsRealpathNativeSync(path: any, options?: any): any {
   const resolved: string = __fsGetValidatedPath(path);
   const settings: any = __fsGetOptions(options, { encoding: "utf8" });
   return __fsName(__fsOne(__fsNative.fsRealpath(resolved)), settings.encoding);
+}
+
+// `fs.realpathSync` (not `.native`). Node's is a JavaScript walk that `lstat`s
+// each component, so a missing component fails with `syscall: 'lstat'` and the
+// path of the first prefix that does not exist. The answer itself is the
+// native one; only its failure is reshaped, by repeating that walk.
+function __fsRealpathSync(path: any, options?: any): any {
+  try {
+    return __fsRealpathNativeSync(path, options);
+  } catch (failure) {
+    if (!__fsIsOperationError(failure)) throw failure;
+    const full: string = __fsGetValidatedPath(path);
+    const sep: string = process.platform === "win32" ? "\\" : "/";
+    const parts: string[] = full.split(sep === "\\" ? /[\\/]/ : /\//);
+    // The first element is the root (`""` for `/x`, `C:` for `C:\x`): walking
+    // starts at it rather than lstat-ing it.
+    let prefix: string = parts[0] + sep;
+    const count: number = Number(parts.length);
+    for (let i = 1; i < count; i++) {
+      const part: string = parts[i];
+      if (part === "") continue;
+      prefix = prefix.endsWith(sep) ? prefix + part : prefix + sep + part;
+      __fsLstatSync(prefix);
+    }
+    throw failure;
+  }
 }
 
 function __fsReadlinkSync(path: any, options?: any): any {
@@ -1574,11 +1680,22 @@ function __fsOpendirSync(path: any, options?: any): any {
 // `readvSync(fd, buffers, position)` / `writevSync(fd, buffers, position)` —
 // one scatter/gather call in Node, a loop here, which is observably the same
 // for a regular file.
-function __fsReadvSync(fd: any, buffers: any, position?: any): number {
-  const resolvedFd: number = __fsGetValidatedFd(fd);
+// `validateBufferArray`: an array, every element of it a byte view.
+function __fsValidateBufferArray(buffers: any): void {
   if (!Array.isArray(buffers)) {
     throw new ERR_INVALID_ARG_TYPE("buffers", "ArrayBufferView[]", buffers);
   }
+  const count = Number(buffers.length);
+  for (let i = 0; i < count; i++) {
+    if (!ArrayBuffer.isView(buffers[i])) {
+      throw new ERR_INVALID_ARG_TYPE("buffers", "ArrayBufferView[]", buffers);
+    }
+  }
+}
+
+function __fsReadvSync(fd: any, buffers: any, position?: any): number {
+  const resolvedFd: number = __fsGetValidatedFd(fd);
+  __fsValidateBufferArray(buffers);
   let at: any = position === undefined || position === null ? -1 : Number(position);
   let total = 0;
   const count = Number(buffers.length);
@@ -1596,9 +1713,7 @@ function __fsReadvSync(fd: any, buffers: any, position?: any): number {
 
 function __fsWritevSync(fd: any, buffers: any, position?: any): number {
   const resolvedFd: number = __fsGetValidatedFd(fd);
-  if (!Array.isArray(buffers)) {
-    throw new ERR_INVALID_ARG_TYPE("buffers", "ArrayBufferView[]", buffers);
-  }
+  __fsValidateBufferArray(buffers);
   let at: any = position === undefined || position === null ? -1 : Number(position);
   let total = 0;
   const count = Number(buffers.length);
@@ -1814,6 +1929,58 @@ function __fsRunAsync(callback: any, work: any): void {
   __fsDeliver(target, [null, value]);
 }
 
+// `options.signal`, when `options` is an object that carries one.
+function __fsSignalOf(options: any): any {
+  if (options === null || options === undefined || typeof options !== "object") return undefined;
+  const signal: any = options.signal;
+  return signal === null ? undefined : signal;
+}
+
+// `__fsRunAsync` for the three whole-file operations that take an
+// `AbortSignal` (`readFile`, `writeFile`, `appendFile`). Node checks the
+// signal before the work starts and again between chunks, all of which happen
+// after the current tick; so with a signal the work is deferred one
+// `setImmediate`, which lets an `abort()` made synchronously or in a
+// `process.nextTick` after the call land first, and then fails with
+// `AbortError` exactly where Node's would.
+function __fsRunAbortable(callback: any, options: any, work: any): void {
+  const signal: any = __fsSignalOf(options);
+  if (signal === undefined) {
+    __fsRunAsync(callback, work);
+    return;
+  }
+  const target: any = __fsMakeCallback(callback);
+  setImmediate(function (): void {
+    if (signal.aborted === true) {
+      __evCall(target, [new AbortError(undefined, { cause: signal.reason })]);
+      return;
+    }
+    __fsRunAsync(target, work);
+  });
+}
+
+// `fsPromises.writeFile`/`appendFile` take a `FileHandle` where the callback
+// forms take a descriptor; the handle stands for its descriptor.
+function __fsHandleOrPath(file: any): any {
+  if (file instanceof FileHandle) return Number(file.fd);
+  return file;
+}
+
+// The promise form of `__fsRunAbortable`.
+function __fsPromiseAbortable(options: any, work: any): any {
+  const signal: any = __fsSignalOf(options);
+  if (signal === undefined) return __fsPromise(work);
+  return new Promise(function (resolve: any, reject: any): void {
+    setImmediate(function (): void {
+      if (signal.aborted === true) {
+        reject(new AbortError(undefined, { cause: signal.reason }));
+        return;
+      }
+      __fsPromise(work).then(resolve, reject);
+    });
+  });
+}
+
 // The options/callback tail every `fs` callback function accepts: the last
 // argument is the callback, and the one before it may be options.
 function __fsTail(options: any, callback: any): any[] {
@@ -1969,6 +2136,11 @@ const fs: any = {
   // ---- callbacks ----------------------------------------------------------
   access(path: any, mode?: any, callback?: any): void {
     const tail: any[] = __fsTail(mode, callback);
+    // Node validates the path and the mode before the callback.
+    __fsGetValidatedPath(path);
+    if (tail[0] !== undefined && tail[0] !== null) {
+      __fsValidateInteger(tail[0], "mode", 0, 7);
+    }
     __fsRunAsync(tail[1], function (): any {
       __fsAccessSync(path, tail[0]);
       return undefined;
@@ -1976,7 +2148,7 @@ const fs: any = {
   },
   appendFile(file: any, data: any, options?: any, callback?: any): void {
     const tail: any[] = __fsTail(options, callback);
-    __fsRunAsync(tail[1], function (): any {
+    __fsRunAbortable(tail[1], tail[0], function (): any {
       __fsAppendFileSync(file, data, tail[0]);
       return undefined;
     });
@@ -2068,6 +2240,9 @@ const fs: any = {
   },
   ftruncate(fd: any, len?: any, callback?: any): void {
     const tail: any[] = __fsTail(len, callback);
+    // Node validates the descriptor and the length before the callback.
+    __fsGetValidatedFd(fd);
+    if (tail[0] !== undefined) __fsValidateInteger(tail[0], "len", -9007199254740991, 9007199254740991);
     __fsRunAsync(tail[1], function (): any {
       __fsFtruncateSync(fd, tail[0]);
       return undefined;
@@ -2145,6 +2320,8 @@ const fs: any = {
   read(fd: any, buffer?: any, offset?: any, length?: any, position?: any, callback?: any): void {
     // Node accepts `(fd, buffer, offset, length, position, cb)`,
     // `(fd, buffer, options, cb)`, `(fd, options, cb)` and `(fd, cb)`.
+    // The descriptor is validated before anything else, as Node's is.
+    __fsGetValidatedFd(fd);
     let target: any = callback;
     let resolvedBuffer: any = buffer;
     let resolvedOffset: any = offset;
@@ -2161,10 +2338,9 @@ const fs: any = {
       if (!__fsIsUint8Array(buffer)) {
         // `(fd, options, cb)`.
         const settings: any = buffer === undefined || buffer === null ? {} : buffer;
-        resolvedBuffer =
-          settings.buffer === undefined || settings.buffer === null
-            ? Buffer.alloc(16384)
-            : settings.buffer;
+        // Only a missing `buffer` defaults; an explicit `null` is then
+        // rejected by the buffer check, as Node's destructuring default does.
+        resolvedBuffer = settings.buffer === undefined ? Buffer.alloc(16384) : settings.buffer;
         resolvedOffset = settings.offset;
         resolvedLength = settings.length;
         resolvedPosition = settings.position;
@@ -2179,7 +2355,7 @@ const fs: any = {
       resolvedOffset = settings.offset;
       resolvedLength = settings.length;
       resolvedPosition = settings.position;
-    } else if (__evIsFn(position)) {
+    } else if (__evIsFn(position) && callback === undefined) {
       target = position;
       resolvedPosition = null;
     }
@@ -2207,7 +2383,7 @@ const fs: any = {
   },
   readFile(path: any, options?: any, callback?: any): void {
     const tail: any[] = __fsTail(options, callback);
-    __fsRunAsync(tail[1], function (): any {
+    __fsRunAbortable(tail[1], tail[0], function (): any {
       return __fsReadFileSync(path, tail[0]);
     });
   },
@@ -2281,6 +2457,8 @@ const fs: any = {
   },
   truncate(path: any, len?: any, callback?: any): void {
     const tail: any[] = __fsTail(len, callback);
+    // Node validates the length before the callback.
+    if (tail[0] !== undefined) __fsValidateInteger(tail[0], "len", -9007199254740991, 9007199254740991);
     __fsRunAsync(tail[1], function (): any {
       __fsTruncateSync(path, tail[0]);
       return undefined;
@@ -2336,7 +2514,7 @@ const fs: any = {
   },
   writeFile(file: any, data: any, options?: any, callback?: any): void {
     const tail: any[] = __fsTail(options, callback);
-    __fsRunAsync(tail[1], function (): any {
+    __fsRunAbortable(tail[1], tail[0], function (): any {
       __fsWriteFileSync(file, data, tail[0]);
       return undefined;
     });
@@ -2406,17 +2584,36 @@ const fs: any = {
 // Node (the libuv one, with no JavaScript symlink walk). This implementation
 // *is* the libuv one, so both names are the same call.
 fs.realpathSync.native = function (path: any, options?: any): any {
-  return __fsRealpathSync(path, options);
+  return __fsRealpathNativeSync(path, options);
 };
 fs.realpath.native = function (path: any, options?: any, callback?: any): void {
   const tail: any[] = __fsTail(options, callback);
   __fsRunAsync(tail[1], function (): any {
-    return __fsRealpathSync(path, tail[0]);
+    return __fsRealpathNativeSync(path, tail[0]);
   });
 };
 
 // The classes Node exports off the module, which tests use for `instanceof`.
-fs.Stats = Stats;
+// Node's `fs.Stats` is a function-constructor behind `deprecate()` (DEP0180):
+// callable with or without `new`, warning once. A class value cannot be
+// called without `new`, so the export is a function that constructs the class
+// and shares its prototype, which keeps `instanceof fs.Stats` true for every
+// `Stats` this module makes.
+let __fsStatsWarned: boolean = false;
+const __fsStatsExport: any = function (
+  dev?: any, mode?: any, nlink?: any, uid?: any, gid?: any, rdev?: any,
+  blksize?: any, ino?: any, size?: any, blocks?: any, atimeMs?: any,
+  mtimeMs?: any, ctimeMs?: any, birthtimeMs?: any,
+): any {
+  if (!__fsStatsWarned) {
+    __fsStatsWarned = true;
+    process.emitWarning("fs.Stats constructor is deprecated.", "DeprecationWarning", "DEP0180");
+  }
+  return new Stats(dev, mode, nlink, uid, gid, rdev, blksize, ino, size, blocks,
+    atimeMs, mtimeMs, ctimeMs, birthtimeMs);
+};
+__fsStatsExport.prototype = Stats.prototype;
+fs.Stats = __fsStatsExport;
 fs.Dirent = Dirent;
 fs.Dir = Dir;
 fs.StatsFs = StatsFs;
@@ -2575,20 +2772,20 @@ class FileHandle {
   }
   readFile(options?: any): any {
     const fd: number = this.fd;
-    return __fsPromise(function (): any {
+    return __fsPromiseAbortable(options, function (): any {
       return __fsReadFileSync(fd, options);
     });
   }
   writeFile(data: any, options?: any): any {
     const fd: number = this.fd;
-    return __fsPromise(function (): any {
+    return __fsPromiseAbortable(options, function (): any {
       __fsWriteFileSync(fd, data, options);
       return undefined;
     });
   }
   appendFile(data: any, options?: any): any {
     const fd: number = this.fd;
-    return __fsPromise(function (): any {
+    return __fsPromiseAbortable(options, function (): any {
       __fsAppendFileSync(fd, data, options);
       return undefined;
     });
@@ -2609,8 +2806,8 @@ const __fsPromises: any = {
     });
   },
   appendFile(file: any, data: any, options?: any): any {
-    return __fsPromise(function (): any {
-      __fsAppendFileSync(file, data, options);
+    return __fsPromiseAbortable(options, function (): any {
+      __fsAppendFileSync(__fsHandleOrPath(file), data, options);
       return undefined;
     });
   },
@@ -2692,7 +2889,7 @@ const __fsPromises: any = {
     });
   },
   readFile(path: any, options?: any): any {
-    return __fsPromise(function (): any {
+    return __fsPromiseAbortable(options, function (): any {
       const handle: any = path;
       if (handle !== null && handle !== undefined && typeof handle === "object" && handle.fd !== undefined) {
         return __fsReadFileSync(Number(handle.fd), options);
@@ -2707,7 +2904,7 @@ const __fsPromises: any = {
   },
   realpath(path: any, options?: any): any {
     return __fsPromise(function (): any {
-      return __fsRealpathSync(path, options);
+      return __fsRealpathNativeSync(path, options);
     });
   },
   rename(from: any, to: any): any {
@@ -2763,8 +2960,8 @@ const __fsPromises: any = {
     });
   },
   writeFile(file: any, data: any, options?: any): any {
-    return __fsPromise(function (): any {
-      __fsWriteFileSync(file, data, options);
+    return __fsPromiseAbortable(options, function (): any {
+      __fsWriteFileSync(__fsHandleOrPath(file), data, options);
       return undefined;
     });
   },

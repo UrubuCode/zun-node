@@ -186,7 +186,7 @@ querystring __node_querystring -
 punycode __node_punycode -
 url __node_url Url
 internal/url __node_internal_url -
-fs __node_fs Stats,BigIntStats,Dirent,Dir,StatsFs,FSWatcher,StatWatcher
+fs __node_fs BigIntStats,Dirent,Dir,StatsFs,FSWatcher,StatWatcher
 internal/fs/utils __node_internal_fs_utils -
 fs/promises __node_fs_promises -
 timers __node_timers setTimeout

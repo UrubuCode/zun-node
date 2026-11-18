@@ -211,7 +211,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-fs:start -->
 ### Node.js v25 `fs` compatibility
 
-`███████████░░░░░░░░░░░░░` **49.7%** — 113 / 227 Node `test-fs-*` tests passing
+`█████████████░░░░░░░░░░░` **58.1%** — 132 / 227 Node `test-fs-*` tests passing
 <!-- node-fs:end -->
 
 > `fs` is implemented as **TS over natives**, the `os` kind: `src/fs/*.rs` holds
