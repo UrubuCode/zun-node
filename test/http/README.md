@@ -7,8 +7,8 @@ vendored. (`test-http2-*` and `test-https-*` are different modules and are not
 selected.) The per-test run of the last measurement is
 [`RESULTS.md`](RESULTS.md); this file says *why* the failing tests fail.
 
-**77 / 379 passing (20.3%)**, measured on Windows with the release engine built
-from zun `main` after the `call`/`apply` fix and a freshly built `zun_node.dll`.
+**164 / 379 passing (43.3%)**, measured on Windows with the release engine built
+from zun `main` (2026-11-18, after the zun#111 bundler workaround) and `zun_node.dll`.
 
 `http` is Zun TypeScript over `net` — [`../../src/http/http.ts`](../../src/http/http.ts)
 — and, like `net`, runs as `zun run --ext <lib> <bundle.ts>`: the sockets
@@ -67,34 +67,20 @@ parser written in TypeScript.
 | Sockets | `socketPath`/Unix domain sockets are unsupported (`net` has no pipes). Name resolution blocks, as in `net`. |
 | `OutgoingMessage` | A `Writable` rather than a legacy `Stream`; `'close'` is emitted by the module (`autoDestroy`/`emitClose` are off). `strictContentLength` and `Content-Length` mismatch errors are not enforced. `rejectNonStandardBodyWrites` is accepted, not applied. |
 | Not published | `HTTPParser`, `parsers`, `freeParser`, `WebSocket`, `MessageEvent`, `CloseEvent`, `kOutHeaders`-style internals, `https`/`http2`. |
+## What blocks the other 215 tests
 
-## What blocks the other 302 tests
-
-Almost none of them is an `http` gap. Counts are from [`RESULTS.md`](RESULTS.md).
+Counts are from [`RESULTS.md`](RESULTS.md). The `this`-in-a-callback and
+closure-capture blockers of the previous measurement are fixed in the engine.
 
 | Count | Blocker | Where it lives |
 |---:|---|---|
-| ~92 | `TypeError: Cannot read properties of undefined (reading 'address')` — the test writes `server.listen(0, function () { this.address() })` or `server.on('listening', function () { this.address() })`, and **`this` in a callback is `undefined`** | engine: a function *expression* passed as an argument has no `this` binding even through `fn.call(recv, ...)` (repro below). Same blocker as `net` and `dgram` |
-| ~16 | `ReferenceError: req/client/c/server is not defined` — a `const`/`let` declared in an outer callback and read from a callback nested inside it | engine: closure capture across callbacks run later |
-| ~38 | `mustCall` never satisfied / `mustNotCall` fired / `strictEqual` — a mix; a few are real `http` gaps (timeouts, `Content-Length` mismatch, smuggling hardening), many follow from the two rows above inside a multi-section test | mixed |
-| 7 + 4 + 6 | `Buffer size must be an integer`, `spread arguments are not lowered yet`, `duplicate class` — rejected at compile time **in the test body** | engine / bundler |
-| 20 | `unresolved require()` — `https`, `tls`, `cluster`, `../common/gc`, `../common/dns`, `../common/net`, `internal/http`, `internal/timers`, `internal/options`, `internal/async_hooks`, `internal/js_stream_socket` | not in scope |
-| ~20 | an error thrown at top level (`unhandled exception: Object`) — mostly `Function` being undefined, `http.Agent(opts)` called without `new`, and `Agent.prototype.x = ...` monkey-patching | engine |
-
-### Engine repro: `this` in a callback
-
-```ts
-const self: any = { name: "self" };
-const store: any = { list: [] };
-function reg(fn: any): void { store.list.push(fn); }
-reg(function (): any { return this === undefined ? "undef" : this.name; });
-const fn0: any = store.list[0];
-console.log(fn0.call(self)); // prints "undef"; Node prints "self"
-```
-
-The same function written as an object-literal property (`{ f: function () {...} }`)
-binds `this` through `f.call(self)`, so the gap is exactly "a function expression
-that is not a method".
+| ~49 | `mustCall` never satisfied / `mustNotCall` fired — a mix: unenforced timeouts (`headersTimeout`/`requestTimeout`, ~14 `test-http-server-*timeout*`), `Connection: close` decisions after `server.close()`, smuggling hardening, `Content-Length` mismatch; plus engine gaps inside multi-section tests | mixed |
+| ~39 | `strictEqual` / `deepStrictEqual` / `throws` mismatches — partly http gaps (error codes and messages of edge cases), partly engine: a `forEach` callback that mentions `this` gets its arguments shifted ([zun#117](https://github.com/UrubuCode/zun/issues/117), e.g. `test-http-request-methods`) | mixed |
+| ~10 | Monkey-patching a method on a typed instance (`agent.createSocket = ...`, `msg._implicitHeader = ...`) is a compile error ([zun#112](https://github.com/UrubuCode/zun/issues/112)); expandos on other modules' classes (`url.headers`, `stream.pause`) the same way | engine |
+| 5 + 4 | `duplicate class` (zun#108) and `spread arguments are not lowered yet` (zun#92) — rejected at compile time in the test body | engine |
+| ~25 | `unresolved require()` (`https`, `tls`, `cluster`, `internal/*`, `../common/*`), `internalBinding`, `WebSocket`, `async_hooks.createHook` | not in scope |
+| 4 | `socketPath` / named pipes (`options.path` unsupported by `net`) | `net` |
+| ~5 | `url.parse()` deprecation warning written to stderr makes the test fail its stderr check | `url` |
 
 ## Work the tests forced
 
