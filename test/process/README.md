@@ -162,6 +162,29 @@ run, so they — not this page — are the current number. What follows is the
 *cause* of each remaining failure, grouped, because the groups are what a reader
 can act on.
 
+### Latest measurement: 57 / 96 (Windows, rebuilt engine)
+
+Remeasured on Windows against the rebuilt engine (zun#111's bundler
+workaround applied): **53 / 96 before, 57 / 96 after** this round. The four
+files that turned green, and why:
+
+* `test-process-ref-unref.js` — `process.ref`/`unref` now call a
+  `Symbol.for('nodejs.ref')` hook with the object as `this`.
+* `test-process-getactivehandles.js` and
+  `test-process-getactiveresources-track-active-handles.js` —
+  `_getActiveHandles()` reports every `node:net` socket and server that owns an
+  open I/O handle (a registry `src/net/net.ts` feeds through
+  `__processHandleOpened`/`__processHandleClosed`), and `node:stream`'s
+  `once()` wrapper now calls the listener with the stream as `this`, which is
+  what `net.connect(port, function () { this })` reads.
+* `test-process-binding.js` — the harness serves `internalBinding('buffer')`
+  as a projection of the realm `Buffer`'s own `byteLength`/`compare`.
+
+Since the groups below were written, several harness modules have landed
+(`hijackstdio`, `tmpdir`, `net`, `internal/test/binding`), so a few of those
+files now fail further in; the per-file reason is in `RESULTS.md`. New engine
+bugs from this round are at the end of this page.
+
 ### Harness modules the bundler does not provide (17 files)
 
 The bundler fails a test loudly when it requires a module it does not know,
@@ -311,3 +334,13 @@ the constraint [zun#35](https://github.com/UrubuCode/zun/issues/35) imposes.
   `undefined`, so neither half of
   `test-process-env-allowed-flags.js`' immutability check can be satisfied by
   correct code.
+
+* **An inherited built-in method read through an instance is a fresh
+  function** — `({}).hasOwnProperty !== Object.prototype.hasOwnProperty`
+  ([zun#114](https://github.com/UrubuCode/zun/issues/114)); blocks
+  `test-process-env.js`.
+
+* **`super()` with no arguments in a class extending `Error` does not
+  compile** ([zun#115](https://github.com/UrubuCode/zun/issues/115)); the first
+  of three engine blockers in `test-process-emitwarning.js` (with zun#92's
+  spread arguments and zun#88's `Error.captureStackTrace`).
