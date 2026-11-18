@@ -171,10 +171,14 @@ function __commonMustNotCall(message?: any): any {
     message === undefined || message === null
       ? "function should not have been called"
       : String(message);
-  return function (): any {
+  const wrapper: any = function (): any {
     __harnessFail(label);
     throw new Error(label);
   };
+  // Node's helper is `function mustNotCall(...)`, and messages such as
+  // "Missing expected rejection (mustNotCall)." read that name.
+  Object.defineProperty(wrapper, "name", { value: "mustNotCall" });
+  return wrapper;
 }
 
 function __commonMustSucceed(fn?: any, exact?: any): any {
@@ -457,6 +461,7 @@ const common: any = {
       __harnessFail(label);
       throw new Error(label);
     };
+    Object.defineProperty(wrapper, "name", { value: "mustNotCall" });
     return __evBox(wrapper);
   },
 

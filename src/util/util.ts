@@ -1234,11 +1234,15 @@ function __utilFormatValue(ctx: any, value: any, recurseTimes: number): string {
     const maybeCustom: any = value[__inspectCustomSymbol];
     if (__utilIsFn(maybeCustom)) {
       const depth = ctx.depth === null ? null : Number(ctx.depth) - recurseTimes;
-      const produced: any = __utilCall(maybeCustom, [
+      // Node invokes the inspector with `this` bound to the inspected value
+      // (`maybeCustom.call(context, depth, options, inspect)`).
+      const customFn: any = __utilUnbox(maybeCustom);
+      const produced: any = customFn.call(
+        value,
         depth,
         __utilUserOptions(ctx, depth),
         __utilBox(inspect),
-      ]);
+      );
       if (produced !== value) {
         if (typeof produced !== "string") {
           return __utilFormatValue(ctx, produced, recurseTimes);
@@ -1549,7 +1553,27 @@ function __utilDateText(value: any): string {
   return String(value.toISOString());
 }
 
+// Set while `assert` renders two errors for its diff. Node's AssertionError
+// compares *copies* of the errors without their `stack`
+// (lib/internal/assert/assertion_error.js' `copyError`), so they print in the
+// stackless `[Error: a]` form. A copy cannot keep an engine error's identity
+// here, so the stack is skipped at the point of formatting instead.
+let __utilErrorStackless: boolean = false;
+
+function __utilSetErrorStackless(on: boolean): boolean {
+  const previous = __utilErrorStackless;
+  __utilErrorStackless = on;
+  return previous;
+}
+
 function __utilFormatError(ctx: any, value: any): string {
+  if (__utilErrorStackless) {
+    const n: any = value.name;
+    const m: any = value.message;
+    const lbl = typeof n === "string" && n !== "" ? n : "Error";
+    if (m === undefined || m === null || String(m) === "") return "[" + lbl + "]";
+    return "[" + lbl + ": " + String(m) + "]";
+  }
   const stack: any = value.stack;
   if (typeof stack === "string" && stack !== "") return stack;
   const name: any = value.name;
@@ -1720,6 +1744,17 @@ function __utilFormatKeys(ctx: any, value: any, recurseTimes: number, isError: b
     output.push(
       __utilInspectKey(ctx, key) + ": " + __utilFormatValue(ctx, value[key], recurseTimes + 1),
     );
+  }
+  // An error's `cause` is a non-enumerable own property in Node and is shown
+  // as `[cause]` (lib/internal/util/inspect.js' formatError). It is readable
+  // but not an enumerable key here, so it is surfaced from the read.
+  if (isError) {
+    const cause: any = value.cause;
+    let listed = false;
+    for (const key of keys) if (key === "cause") listed = true;
+    if ((cause !== undefined || Object.hasOwn(value, "cause")) && !listed) {
+      output.push("[cause]: " + __utilFormatValue(ctx, cause, recurseTimes + 1));
+    }
   }
   for (const sym of Object.getOwnPropertySymbols(value)) {
     const label = "[" + __utilStylize(ctx, String(sym), "symbol") + "]";
@@ -2294,6 +2329,9 @@ function __utilInnerDeepEqual(a: any, b: any, seen: any[], skipProto: boolean): 
   // Prototype identity: strict deep equality requires the same constructor,
   // unless `skipPrototype` asked for a structural comparison.
   if (!skipProto && __utilCtorName(a) !== __utilCtorName(b)) return false;
+  // Same constructor name is not the same prototype: two function
+  // constructors that happen to build alike-shaped objects differ in Node.
+  if (!skipProto && Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
 
   if (a instanceof Date) {
     return b instanceof Date && Number(a.getTime()) === Number(b.getTime());
@@ -2309,6 +2347,7 @@ function __utilInnerDeepEqual(a: any, b: any, seen: any[], skipProto: boolean): 
     // *readable* here but are not own properties — `Object.keys(new Error('a',
     // { cause: e }))` is empty — so the key walk below never reaches them and
     // two errors differing only in their cause used to compare equal.
+    if (Object.hasOwn(a, "cause") !== Object.hasOwn(b, "cause")) return false;
     if (!__utilInnerDeepEqual(a.cause, b.cause, seen, skipProto)) return false;
     if (!__utilInnerDeepEqual(a.errors, b.errors, seen, skipProto)) return false;
   }

@@ -6,7 +6,7 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-event-emitter-*|test-events-*.
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
 
-`███████████████░░░░░░░░░` **62.8%** — 22 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+`███████████████░░░░░░░░░` **65.7%** — 23 / 35 Node `test-event-emitter-*|test-events-*` tests passing
 <!-- node-events:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
@@ -14,8 +14,8 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | Test | Result | Why |
 |---|---|---|
 | `test-event-emitter-add-listeners.js` | ❌ assertion | AssertionError [strictEqual]: Expected "actual" to be reference-equal to "expected": |
-| `test-event-emitter-check-listener-leaks.js` | ❌ assertion | AssertionError [==]: false == true |
-| `test-event-emitter-emit-context.js` | ❌ type error | bundles/test-event-emitter-emit-context.ts:20464:24: error: [SEM0001] argument type DynamicObject does not mat |
+| `test-event-emitter-check-listener-leaks.js` | ✅ pass | |
+| `test-event-emitter-emit-context.js` | ✅ pass | |
 | `test-event-emitter-error-monitor.js` | ✅ pass | |
 | `test-event-emitter-errors.js` | ✅ pass | |
 | `test-event-emitter-get-max-listeners.js` | ✅ pass | |
@@ -27,24 +27,24 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-event-emitter-max-listeners-warning-for-symbol.js` | ✅ pass | |
 | `test-event-emitter-max-listeners-warning.js` | ✅ pass | |
 | `test-event-emitter-max-listeners.js` | ✅ pass | |
-| `test-event-emitter-method-names.js` | ✅ pass | |
+| `test-event-emitter-method-names.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-event-emitter-modify-in-emit.js` | ✅ pass | |
 | `test-event-emitter-no-error-provided-to-error-event.js` | ✅ pass | |
 | `test-event-emitter-num-args.js` | ✅ pass | |
 | `test-event-emitter-once.js` | ✅ pass | |
-| `test-event-emitter-prepend.js` | ❌ runtime | zun: failed to load module: duplicate module export: Readable |
+| `test-event-emitter-prepend.js` | ❌ runtime | Error [ERR_METHOD_NOT_IMPLEMENTED]: The _read() method is not implemented |
 | `test-event-emitter-remove-all-listeners.js` | ✅ pass | |
 | `test-event-emitter-remove-listeners.js` | ✅ pass | |
 | `test-event-emitter-set-max-listeners-side-effects.js` | ❌ assertion | AssertionError [==]: false == true |
 | `test-event-emitter-special-event-names.js` | ✅ pass | |
-| `test-event-emitter-subclass.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-event-emitter-subclass.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: call is not a function |
 | `test-event-emitter-symbols.js` | ✅ pass | |
-| `test-events-add-abort-listener.mjs` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-events-add-abort-listener.mjs` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: describe is not defined |
 | `test-events-customevent.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-events-customevent.js: |
 | `test-events-getmaxlisteners.js` | ✅ pass | |
 | `test-events-list.js` | ✅ pass | |
 | `test-events-listener-count-with-listener.js` | ✅ pass | |
 | `test-events-on-async-iterator.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-events-on-async-iterator.js: |
-| `test-events-once.js` | ❌ type error | bundles/test-events-once.ts:20609:6: error: [SEM0001] no field or setter 'addEventListener' on this type |
+| `test-events-once.js` | ❌ type error | bundles/test-events-once.ts:20873:6: error: [SEM0001] no field or setter 'addEventListener' on this type |
 | `test-events-static-geteventlisteners.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-events-static-geteventlisteners.js: |
-| `test-events-uncaught-exception-stack.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-events-uncaught-exception-stack.js` | ❌ runtime | zun: runtime error: unhandled exception: Error |

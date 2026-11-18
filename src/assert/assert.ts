@@ -620,6 +620,17 @@ function __asCreatePlainMessage(
 // constructor because a `super(...)` call must come first and this is several
 // screens of branching.
 function __asAssertionMessage(options: any): string {
+  // Node diffs two errors through stackless copies (`copyError`).
+  const bothErrors = __asIsError(options.actual) && __asIsError(options.expected);
+  const previous = __utilSetErrorStackless(bothErrors);
+  try {
+    return __asAssertionMessageInner(options);
+  } finally {
+    __utilSetErrorStackless(previous);
+  }
+}
+
+function __asAssertionMessageInner(options: any): string {
   const message: any = options.message;
   const operator: any = options.operator;
   const actual: any = options.actual;
@@ -670,6 +681,40 @@ class AssertionError extends Error {
   toString(): string {
     return this.name + " [" + this.code + "]: " + this.message;
   }
+
+  // `AssertionError.prototype[inspect.custom]`: long string `actual` /
+  // `expected` values are shortened while the error is inspected, then
+  // restored (lib/internal/assert/assertion_error.js).
+  [Symbol.for("nodejs.util.inspect.custom")](recurseTimes: any, ctx: any): any {
+    const tmpActual: any = this.actual;
+    const tmpExpected: any = this.expected;
+    if (typeof tmpActual === "string") this.actual = __asAddEllipsis(tmpActual);
+    if (typeof tmpExpected === "string") this.expected = __asAddEllipsis(tmpExpected);
+    const opts: any = {};
+    if (ctx !== undefined && ctx !== null) {
+      for (const key of Object.keys(ctx)) opts[key] = ctx[key];
+    }
+    opts.customInspect = false;
+    opts.depth = 0;
+    const result: any = inspect(this, opts);
+    this.actual = tmpActual;
+    this.expected = tmpExpected;
+    return result;
+  }
+}
+
+// Node's `addEllipsis`: more than ten lines keep the first ten; otherwise a
+// string over 512 characters keeps `slice(512)` (Node's own spelling, which
+// keeps the tail) followed by `...`.
+function __asAddEllipsis(text: string): string {
+  const lines = text.split("\n", 11);
+  if (Number(lines.length) > 10) {
+    return lines.slice(0, 10).join("\n") + "\n...";
+  }
+  if (Number(text.length) > 512) {
+    return text.slice(512) + "...";
+  }
+  return text;
 }
 
 // ---------------------------------------------------------------------------
@@ -724,14 +769,26 @@ function __asObjectIs(a: any, b: any): boolean {
   return Object.is(a, b);
 }
 
-// Is `value` a *constructor* rather than a predicate? A class value has a
-// `prototype`, a plain function does not — which is Node's own guard
-// (`expected.prototype !== undefined`). Here it also keeps a class value off
-// the predicate path, where calling one aborts the program uncatchably.
+// Is `value` a *constructor* rather than a predicate? Node's guard is
+// `expected.prototype !== undefined && actual instanceof expected`, and only an
+// `Error` subclass gets the "expected to be an instance of" message; any other
+// function is then called as a validator. Here every function expression
+// created inside another function carries a `prototype` (so the anonymous
+// wrappers `common.mustCall()` hands out would look like classes), and
+// *calling* a class value aborts the program uncatchably. So a value is taken
+// as a constructor when it has a `prototype` and is either an `Error`
+// subclass or carries a class-style (capitalised) name; an anonymous or
+// lower-case function is a validator, as Node treats it.
 function __asIsConstructor(value: any): boolean {
   if (value === null || value === undefined) return false;
   if (typeof value !== "function") return false;
-  return value.prototype !== undefined;
+  if (value.prototype === undefined) return false;
+  if (value === Error) return true;
+  if (value.prototype instanceof Error) return true;
+  const name: any = value.name;
+  if (typeof name !== "string" || name === "") return false;
+  const first = name.charCodeAt(0);
+  return first >= 65 && first <= 90;
 }
 
 function __asIsError(value: any): boolean {
@@ -793,8 +850,8 @@ class ERR_AMBIGUOUS_ARGUMENT extends NodeTypeError {
 // exposes. Keeping one implementation, in `util`, is the only arrangement where
 // `assert.deepStrictEqual(new Map(…), new Map(…))` and
 // `util.isDeepStrictEqual(new Map(…), new Map(…))` cannot disagree.
-function __asIsDeepStrictEqual(a: any, b: any): boolean {
-  return isDeepStrictEqual(a, b);
+function __asIsDeepStrictEqual(a: any, b: any, skipPrototype?: any): boolean {
+  return isDeepStrictEqual(a, b, skipPrototype ? true : false);
 }
 
 // The two modes `util` does not export, because nothing but `assert` asks for
@@ -1410,7 +1467,7 @@ function __asExpectsError(
     const wantedName: any = __asIsConstructor(expected)
       ? __asCtorName(expected)
       : (expected === null || expected === undefined ? undefined : expected.name);
-    if (wantedName !== undefined && wantedName !== null) {
+    if (wantedName !== undefined && wantedName !== null && String(wantedName) !== "") {
       details = details + " (" + String(wantedName) + ")";
     }
     details = details +
@@ -1620,9 +1677,10 @@ function __asNotDeepEqual(
 
 function __asDeepStrictEqual(
   actual: any, expected: any, message: any, argLen: number, diff: any,
+  skipPrototype?: any,
 ): void {
   if (argLen < 2) throw new ERR_MISSING_ARGS("actual", "expected");
-  if (!__asIsDeepStrictEqual(actual, expected)) {
+  if (!__asIsDeepStrictEqual(actual, expected, skipPrototype)) {
     __asInnerFail({
       actual: actual, expected: expected, message: message,
       operator: "deepStrictEqual", diff: diff,
@@ -1632,9 +1690,10 @@ function __asDeepStrictEqual(
 
 function __asNotDeepStrictEqual(
   actual: any, expected: any, message: any, argLen: number, diff: any,
+  skipPrototype?: any,
 ): void {
   if (argLen < 2) throw new ERR_MISSING_ARGS("actual", "expected");
-  if (__asIsDeepStrictEqual(actual, expected)) {
+  if (__asIsDeepStrictEqual(actual, expected, skipPrototype)) {
     __asInnerFail({
       actual: actual, expected: expected, message: message,
       operator: "notDeepStrictEqual", diff: diff,
@@ -1700,8 +1759,10 @@ function __asWaitForActual(promiseOrFn: any): any {
       try {
         subject = callable();
       } catch (caught) {
-        // A synchronous throw out of `promiseFn` is the rejection.
-        resolve(caught);
+        // A synchronous throw out of `promiseFn` escapes Node's `async
+        // waitForActual`, so it rejects the assertion's own promise with that
+        // error rather than being validated.
+        reject(caught);
         return undefined;
       }
       if (!__asIsThenable(subject)) {
@@ -1988,13 +2049,22 @@ assert.strict = strict;
 // How many values a caller actually passed, read back from three optional
 // parameters. It is what Node gets from the implicit call-value object, with
 // one seam: a trailing explicit `undefined` is indistinguishable from an
-// omitted value, so `new Assert().strictEqual(undefined)` compares rather than
-// raising `ERR_MISSING_ARGS`.
+// omitted value, so `new Assert().deepEqual(x, undefined)` raises
+// `ERR_MISSING_ARGS` as if `expected` had been left out.
 function __asArgCount(a: any, b: any, c: any): number {
   if (c !== undefined) return 3;
   if (b !== undefined) return 2;
   if (a !== undefined) return 1;
   return 0;
+}
+
+// The two-value comparisons resolve the seam the other way when *both* values
+// are `undefined`: `equal(undefined, undefined)` is a common, valid assertion
+// (Node's own test-assert-class.js makes it), while a bare `equal()` is a
+// programming error, so the pair is taken as passed.
+function __asPairCount(a: any, b: any, c: any): number {
+  const n = __asArgCount(a, b, c);
+  return n === 0 ? 2 : n;
 }
 
 // The extra values `throws`/`rejects` forward, as the array those helpers want.
@@ -2034,54 +2104,54 @@ class Assert {
 
   equal(a?: any, b?: any, c?: any): void {
     if (this.__strict) {
-      __asStrictEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+      __asStrictEqual(a, b, c, __asPairCount(a, b, c), this.__diff);
       return;
     }
-    __asEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+    __asEqual(a, b, c, __asPairCount(a, b, c), this.__diff);
   }
 
   notEqual(a?: any, b?: any, c?: any): void {
     if (this.__strict) {
-      __asNotStrictEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+      __asNotStrictEqual(a, b, c, __asPairCount(a, b, c), this.__diff);
       return;
     }
-    __asNotEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+    __asNotEqual(a, b, c, __asPairCount(a, b, c), this.__diff);
   }
 
   deepEqual(a?: any, b?: any, c?: any): void {
     if (this.__strict) {
-      __asDeepStrictEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+      __asDeepStrictEqual(a, b, c, __asPairCount(a, b, c), this.__diff, this.__skipPrototype);
       return;
     }
-    __asDeepEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+    __asDeepEqual(a, b, c, __asPairCount(a, b, c), this.__diff);
   }
 
   notDeepEqual(a?: any, b?: any, c?: any): void {
     if (this.__strict) {
-      __asNotDeepStrictEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+      __asNotDeepStrictEqual(a, b, c, __asPairCount(a, b, c), this.__diff, this.__skipPrototype);
       return;
     }
-    __asNotDeepEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+    __asNotDeepEqual(a, b, c, __asPairCount(a, b, c), this.__diff);
   }
 
   strictEqual(a?: any, b?: any, c?: any): void {
-    __asStrictEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+    __asStrictEqual(a, b, c, __asPairCount(a, b, c), this.__diff);
   }
 
   notStrictEqual(a?: any, b?: any, c?: any): void {
-    __asNotStrictEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+    __asNotStrictEqual(a, b, c, __asPairCount(a, b, c), this.__diff);
   }
 
   deepStrictEqual(a?: any, b?: any, c?: any): void {
-    __asDeepStrictEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+    __asDeepStrictEqual(a, b, c, __asPairCount(a, b, c), this.__diff, this.__skipPrototype);
   }
 
   notDeepStrictEqual(a?: any, b?: any, c?: any): void {
-    __asNotDeepStrictEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+    __asNotDeepStrictEqual(a, b, c, __asPairCount(a, b, c), this.__diff, this.__skipPrototype);
   }
 
   partialDeepStrictEqual(a?: any, b?: any, c?: any): void {
-    __asPartialDeepStrictEqual(a, b, c, __asArgCount(a, b, c), this.__diff);
+    __asPartialDeepStrictEqual(a, b, c, __asPairCount(a, b, c), this.__diff);
   }
 
   ifError(a?: any): void {
