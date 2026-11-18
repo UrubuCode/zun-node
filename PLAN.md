@@ -1168,14 +1168,15 @@ gets deleted; nothing else in the tracker changes.
   the corpus replace `getaddrinfo` / `getnameinfo` /
   `ChannelWrap.prototype.queryA` on it before loading the module —
   `tools/harness/binding.ts` serves `internal/test/binding` from that object.
-  The queries are synchronous (ABI v1 cannot complete a call later) and their
-  results are delivered through `process.nextTick`, so the callbacks still land
-  on a later tick and a `Resolver` still has a pending-query window for
-  `setServers` to refuse. 6/27, and the ceiling is elsewhere: nine tests need
-  `node:dgram`, three need `--dns-result-order`, and six are blocked by one
-  engine defect (a function returned across a dynamic call boundary becomes a
-  callable `Promise.prototype.then` will not invoke). Table in
-  `test/dns/README.md`.
+  With the shared I/O loop present (`--ext`) a query is sent and received in
+  TypeScript over a non-blocking `node:io` datagram socket, with only the wire
+  format native (`dnsEncodeQuery` / `dnsDecodeResponse`), so a resolver can
+  talk to a fake server in the same process, `cancel()` interrupts a query in
+  flight, and the c-ares timeout/backoff schedule holds; without it the
+  blocking `dnsQuery` path remains. `--dns-result-order` is read from
+  `NODE_OPTIONS`. 22/27; the five left are engine-side (zun#132, call arity,
+  spread into a method call, named stack frames, one unisolated `apply`
+  failure). Table in `test/dns/README.md`.
 - **`node:assert` (harness slice): `src/assert/assert.ts`.** `ok`, `equal`,
   `notEqual`, `strictEqual`, `notStrictEqual`, `deepStrictEqual`,
   `notDeepStrictEqual`, `throws`, `doesNotThrow`, `match`, `doesNotMatch`,
