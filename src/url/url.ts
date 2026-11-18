@@ -78,9 +78,8 @@
 //     the names Node uses. `tools/bundle_node_test.sh` rewrites `new URL(…)`,
 //     `URL.<static>` and `x instanceof URL` in a test body to the second name;
 //     see that file's header and ../../test/url/README.md.
-//   * **`URLPattern` is not implemented.** It is a separate WHATWG
-//     specification that Node implements in C++ (ada's `url_pattern`). The
-//     export is `undefined` and the gap is declared rather than faked.
+//   * **`URLPattern` lives in `src/url/urlpattern.ts`**: the URL Pattern
+//     Standard, built on `whatwg.ts`' basic URL parser.
 //   * **IDNA is punycode plus a finite slice of UTS#46, not ICU.** See the
 //     header of `src/url/whatwg.ts`: the ignored code points, the
 //     noncharacters and U+FFFD, the fullwidth and space-like mappings, and the
@@ -1879,10 +1878,10 @@ const url: any = {
   // `src/url/whatwg.ts`, declared there as `NodeURL`/`NodeURLSearchParams`
   // because those two names are prelude classes in this engine and a user class
   // of the same name is a "duplicate class" error; see that file's header.
-  // `URLPattern` is a declared gap, also documented there.
+  // `URLPattern` is the URL Pattern Standard in `src/url/urlpattern.ts`.
   URL: NodeURL,
   URLSearchParams: NodeURLSearchParams,
-  URLPattern: undefined,
+  URLPattern: URLPattern,
   domainToASCII: function (...rest: any[]): string {
     if (__urlALen(rest) < 1) throw new ERR_MISSING_ARGS("domain");
     return __urlDomainToASCII(rest[0]);
@@ -1914,7 +1913,7 @@ const __node_url: any = url;
 const __node_internal_url: any = {
   URL: NodeURL,
   URLSearchParams: NodeURLSearchParams,
-  URLPattern: undefined,
+  URLPattern: URLPattern,
   isURL: function (...rest: any[]): boolean {
     return __urlIsURL(rest[0]);
   },

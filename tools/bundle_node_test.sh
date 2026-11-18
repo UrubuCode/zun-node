@@ -265,6 +265,7 @@ src/path/path.ts
 src/querystring/querystring.ts
 src/punycode/punycode.ts
 src/url/whatwg.ts
+src/url/urlpattern.ts
 src/url/url.ts
 src/timers/timers.ts
 src/io/io.ts
