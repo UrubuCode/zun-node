@@ -806,6 +806,21 @@ $required
   fi;;
 esac
 
+# `common.spawnPromisified` (tools/harness/common.ts) spawns through
+# `child_process`, which a test calling only that helper never requires: the
+# module is appended for any test that names it, with the append-once rule.
+case "$SRC_TEXT" in *spawnPromisified*)
+  for required in src/buffer/buffer.ts src/string_decoder/string_decoder.ts src/stream/stream.ts \
+      src/child_process/child_process.ts; do
+    case "
+$FILES" in *"
+$required
+"*) continue;; esac
+    FILES="$FILES$required
+"
+  done;;
+esac
+
 # The `module` corpus always carries the resolver and the file system under it,
 # whether or not the test in hand spells `require('module')`; see
 # ZUN_NODE_REQUIRE above. The append-once rule is the loop's.

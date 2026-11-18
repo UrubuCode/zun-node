@@ -140,6 +140,13 @@ const __IO_STEP_IDLE: number = 10;
 // started on demand, outlast the default. `0` means "use the default".
 const __ioDeadlineOverride: any = { ms: 0 };
 
+// Library modules a bundle happens to carry, for code that is inlined into
+// every bundle and so cannot name a conditional module's object directly
+// (tools/harness/common.ts' `spawnPromisified` reaches `child_process` this
+// way). A module registers itself when it is inlined; absent means "not in
+// this bundle".
+const __libModules: any = {};
+
 const __ioState: any = {
   ops: null,
   handles: {},
