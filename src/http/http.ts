@@ -3022,7 +3022,9 @@ function __httpClientResponseKeepAlive(cs: any): void {
   __httpTick(function (): void {
     req._closed = true;
     req.emit("close");
-    if (socket.destroyed !== true) socket.emit("free");
+    // `emitFreeNT`: unconditional, even if the socket was destroyed meanwhile
+    // (the agent's handler drops a dead socket).
+    socket.emit("free");
   });
 }
 

@@ -1249,6 +1249,17 @@ trap 'rm -f "$REWRITE" "$LATE"' EXIT
     done
   done
 
+  # Node's `http` classes are callable without `new` (`http.Agent(opts)` is
+  # `new Agent(opts)` in `lib/_http_agent.js`), but a class cannot be invoked
+  # as a function here. After the alias rewrite above, such a call is a bare
+  # `Agent(`; prefix it with `new`. A preceding `new `, `.`, word character or
+  # `class`/`extends` keyword (a declaration or a base) is left alone.
+  if requires_module "http"; then
+    for ctor in Agent ClientRequest IncomingMessage OutgoingMessage ServerResponse; do
+      printf '%s\n' "s#\\(^\\|[^.A-Za-z0-9_\$ ]\\|[^.A-Za-z0-9_\$] \\)$ctor(#\\1new $ctor(#g"
+    done
+  fi
+
   # Engine workaround (https://github.com/UrubuCode/zun/issues/20): five of
   # `events`' module statics share a name with an `EventEmitter` *instance*
   # method -- `once`, `on`, `listenerCount`, `getMaxListeners` and
