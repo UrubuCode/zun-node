@@ -112,7 +112,7 @@ number.
 URL Pattern implementation is" below), so its three files are no longer a
 blocker. What is left is engine and harness work.
 
-### Engine and harness blockers (38 / 44 at the last measurement)
+### Engine and harness blockers (39 / 44 at the last measurement)
 
 The brand checks (`ERR_INVALID_THIS`, "Receiver must be an instance of class
 URL"), `Symbol.iterator`, `Symbol.toStringTag`, WebIDL-enumerable members, the
@@ -120,16 +120,16 @@ URL"), `Symbol.iterator`, `Symbol.toStringTag`, WebIDL-enumerable members, the
 iterable-or-record `URLSearchParams` constructor are all implemented now, and
 the bundler inlines `require(fixtures.path(...))` data fixtures (listed in
 [`NODE_FIXTURES.txt`](NODE_FIXTURES.txt)) and carries a `../common/wpt` harness
-(`tools/harness/wpt.ts`). What is left:
+(`tools/harness/wpt.ts`). What is left (the corpus runs with `--ext` since this measurement, so
+`test-url-parse-invalid-input.js` re-executes a real child and passes):
 
 | Test | Blocked by | What happens |
 |---|---|---|
-| `test-url-parse-invalid-input.js` | harness: `common.spawnPromisified` | re-runs the runtime through `child_process` to see `url.parse` fail in a fresh process; there is no subprocess here. |
-| `test-url-pathtofileurl.js` | [zun#92](https://github.com/UrubuCode/zun/issues/92) | top-level `String.fromCharCode(...Array.from(...))`: "spread arguments are not lowered yet". |
-| `test-whatwg-url-canparse.js` | `internal/test/binding` + V8 natives syntax | the binding pulls in `dns`, which needs the `--ext` natives this corpus does not load, and the file then drives `eval('%OptimizeFunctionOnNextCall(...)')`. |
-| `test-whatwg-url-custom-properties.js` | [zun#129](https://github.com/UrubuCode/zun/issues/129) | `delete url.href` on a typed instance is a compile error. |
+| `test-url-pathtofileurl.js` | [zun#158](https://github.com/UrubuCode/zun/issues/158) (cf. [#92](https://github.com/UrubuCode/zun/issues/92)) | top-level `String.fromCharCode(...Array.from(...))`: "spread arguments are not lowered yet". |
+| `test-whatwg-url-canparse.js` | V8 natives syntax (not an engine bug) | the file drives `eval('%OptimizeFunctionOnNextCall(...)')`. |
+| `test-whatwg-url-custom-properties.js` | [zun#129](https://github.com/UrubuCode/zun/issues/129), [zun#159](https://github.com/UrubuCode/zun/issues/159) | `delete url.href` on a typed instance is a compile error, and so is `url.origin = ...` on a getter-only accessor (which must be a run-time `TypeError`). |
 | `test-whatwg-url-custom-searchparams-constructor.js` | [zun#49](https://github.com/UrubuCode/zun/issues/49) | `Object.assign(() => {}, { [Symbol.iterator]... })` throws "Cannot convert undefined or null to object"; every later block passes. |
-| `test-whatwg-url-custom-searchparams.js` | typed member reads | `sp[Symbol.iterator] === sp.entries`: a typed read of a class member resolves to the class slot, so the prototype alias installed after the class is not what the test sees. Declaring `entries` only as the alias breaks every typed `params.entries()` call instead. |
+| `test-whatwg-url-custom-searchparams.js` | [zun#156](https://github.com/UrubuCode/zun/issues/156) | `sp[Symbol.iterator] === sp.entries`: a typed read of a class member resolves to the class slot, so the prototype alias installed after the class is not what the test sees. Declaring `entries` only as the alias breaks every typed `params.entries()` call instead. |
 
 Engine workarounds introduced with this work:
 [zun#124](https://github.com/UrubuCode/zun/issues/124) (a class may declare only

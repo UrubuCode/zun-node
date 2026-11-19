@@ -6,13 +6,13 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-string-decoder*.js`. Generated
 <!-- node-string_decoder:start -->
 ### Node.js v25 `string_decoder` compatibility
 
-`░░░░░░░░░░░░░░░░░░░░░░░░` **0.0%** — 0 / 3 Node `test-string-decoder*` tests passing
+`████████░░░░░░░░░░░░░░░░` **33.3%** — 1 / 3 Node `test-string-decoder*` tests passing
 <!-- node-string_decoder:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-string-decoder-end.js` | ❌ type error | bundles/test-string-decoder-end.ts:21882:55: error: [SEM0001] 'Buffer.from' expects a string, array or ArrayBu |
-| `test-string-decoder-fuzz.js` | ❌ type error | bundles/test-string-decoder-fuzz.ts:21866:34: error: [SEM0001] Buffer size must be an integer |
-| `test-string-decoder.js` | ❌ type error | bundles/test-string-decoder.ts:22131:26: error: [SEM0001] 'writeSequences' expects 0 to 3 argument(s), found 4 |
+| `test-string-decoder-end.js` | ✅ pass | |
+| `test-string-decoder-fuzz.js` | ❌ assertion | AssertionError [strictEqual]: Mismatch: |
+| `test-string-decoder.js` | ❌ type error | bundles/test-string-decoder.ts:24386:26: error: [SEM0001] 'writeSequences' expects 0 to 3 argument(s), found 4 |

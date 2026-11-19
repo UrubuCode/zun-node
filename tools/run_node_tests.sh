@@ -89,7 +89,10 @@ case "$MODULE" in
   # WHATWG `URL`/`URLSearchParams` surface, which `node:url` exports and
   # `src/url/whatwg.ts` implements -- so those 27 files are this module's bar
   # too, not the prelude's.
-  url)         KIND="zun-ts"; PATTERNS="test-url test-whatwg-url-";
+  # `url` is pure Zun TypeScript, but `test-url-parse-invalid-input.js` spawns a
+  # child and `test-whatwg-url-canparse.js` loads `internal/test/binding`
+  # (whose bundle pulls `dns`), both syscalls of the extension.
+  url)         KIND="zun-ts+ext"; PATTERNS="test-url test-whatwg-url-";
                PATTERN="test-url*|test-whatwg-url-";;
   # `stream`'s corpus is five prefixes, and naming each one is the point:
   # `test-stream-` is the bulk, `test-stream2-` and `test-stream3-` are the two
