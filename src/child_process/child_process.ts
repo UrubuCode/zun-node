@@ -29,9 +29,8 @@
 // its exit reach this file through the shared I/O loop (`src/io/`), over the
 // natives in `asyncp.rs`. See the header of that section.
 //
-// **Not here:** `fork()` and the IPC channel (`send`, `disconnect`, `'message'`,
-// `advanced` serialization). They need a duplex channel to a *Zun* child and
-// throw `ERR_METHOD_NOT_IMPLEMENTED`.
+// `fork()` and the IPC channel are at the end of this file ("The IPC
+// channel"). **Not here:** `serialization: 'advanced'` and handle passing.
 //
 // ---------------------------------------------------------------------------
 // `process.execPath` and Node's self-re-execution pattern
@@ -827,10 +826,8 @@ function execSync(command?: any, options?: any): any {
 //     (`setTimeout`, `address()`, ...) is absent.
 //   * `stdio` accepts 'pipe', 'overlapped', 'ignore', 'inherit' and a number or
 //     an object with a numeric `fd` in 0..2 (the parent's own stdio). Entries past
-//     the third are ignored; 'ipc' and an arbitrary stream are rejected.
-//   * `fork()` and the IPC channel (`send`, `disconnect`, `'message'`) are not
-//     implemented: they need a duplex channel to a *Zun* child, which also
-//     needs the re-execution entry point described at the top of this file.
+//     the third are ignored except one 'ipc' (see "The IPC channel"); an
+//     arbitrary stream is rejected.
 //   * `detached`, `uid` and `gid` are POSIX-only, as in Node.
 
 // The loop's native namespace, or null when the bundle has no extension.
@@ -1031,6 +1028,8 @@ class ChildProcess extends EventEmitter {
   stdio: any = [null, null, null];
   _closesNeeded: any = 1;
   _closesGot: any = 0;
+  // The IPC link of a `fork()` / `stdio: [..., 'ipc']` child, or null.
+  _ipc: any = null;
   killSignal: any = "SIGTERM";
 
   constructor() {
@@ -1058,18 +1057,18 @@ class ChildProcess extends EventEmitter {
     __cpSetRef(this, false);
   }
 
-  // The IPC channel is not implemented (see the header).
   get channel(): any {
-    return undefined;
+    const link: any = this._ipc;
+    if (link === null || link === undefined || link.closed === true) return undefined;
+    return link.channel;
   }
 
   send(message?: any, handle?: any, options?: any, callback?: any): boolean {
-    const _ignored: any = [message, handle, options, callback];
-    throw __cpNotImplemented("ChildProcess.send (there is no IPC channel)");
+    return __cpIpcSendApi(this, this._ipc, message, handle, options, callback);
   }
 
   disconnect(): void {
-    throw __cpNotImplemented("ChildProcess.disconnect (there is no IPC channel)");
+    __cpIpcDisconnectApi(this, this._ipc);
   }
 }
 
@@ -1146,6 +1145,12 @@ function __cpOnExit(child: any, exitCode: any, signalCode: any): void {
   }
   if (child.stdin !== null && child.stdin !== undefined) child.stdin.destroy();
   child._handle = null;
+  // A child that exits without ever connecting its channel never sends the
+  // EOF that would end it.
+  const link: any = child._ipc;
+  if (link !== null && link !== undefined && link.closed !== true && Number(link.id) === 0) {
+    __cpIpcClose(link, true);
+  }
   const state: any = child._cp;
   if (Number(state.proc) !== 0) {
     const id: number = Number(state.proc);
@@ -1252,14 +1257,14 @@ function __cpAsyncStdio(stdio: any): string[] {
   if (ipcCount > 1) {
     throw new NodeError("ERR_IPC_ONE_PIPE", "Child process can have only one IPC pipe");
   }
-  if (ipcCount === 1) {
-    throw __cpNotImplemented("the 'ipc' stdio entry (there is no IPC channel)");
-  }
-
   const out: string[] = [];
   for (let i = 0; i < 3; i++) {
     const entry: any = list[i];
-    if (entry === undefined || entry === null || entry === "pipe" || entry === "overlapped") {
+    if (entry === "ipc") {
+      // The channel is a loopback socket, not a descriptor (see "The IPC
+      // channel"), so the descriptor slot itself is left empty.
+      out.push("ignore");
+    } else if (entry === undefined || entry === null || entry === "pipe" || entry === "overlapped") {
       out.push("pipe");
     } else if (entry === "ignore") {
       out.push("ignore");
@@ -1309,6 +1314,12 @@ function __cpSpawnInto(child: any, o: any, killSignal: string): void {
   if (ops === null || ops === undefined) {
     throw __cpNotImplemented("child_process.spawn (this bundle has no extension)");
   }
+  let wantsIpc: boolean = false;
+  if (Array.isArray(o.stdio)) {
+    for (let i = 0; i < Number(o.stdio.length); i++) {
+      if (o.stdio[i] === "ipc") wantsIpc = true;
+    }
+  }
 
   const spawnargs: any[] = [];
   if (o.args !== undefined) {
@@ -1321,7 +1332,18 @@ function __cpSpawnInto(child: any, o: any, killSignal: string): void {
   // The program is `file`; `args[0]` is only argv[0] and is not executed.
   const argv: string[] = [String(o.file)];
   for (let i = 1; i < Number(spawnargs.length); i++) argv.push(String(spawnargs[i]));
-  const envPairs: any[] = o.envPairs === undefined ? [] : o.envPairs;
+  let envPairs: any[] = o.envPairs === undefined ? [] : o.envPairs;
+  let ipcLink: any = null;
+  if (wantsIpc) {
+    ipcLink = __cpIpcListen(child);
+    const withIpc: any[] = [];
+    for (let i = 0; i < Number(envPairs.length); i++) {
+      const pair: string = String(envPairs[i]);
+      if (pair.indexOf(__CP_IPC_ENV + "=") !== 0) withIpc.push(pair);
+    }
+    withIpc.push(__CP_IPC_ENV + "=" + String(ipcLink.port));
+    envPairs = withIpc;
+  }
 
   const header: any[] = [
     o.cwd === undefined || o.cwd === null ? "" : String(o.cwd),
@@ -1365,6 +1387,7 @@ function __cpSpawnInto(child: any, o: any, killSignal: string): void {
     for (const stream of [child.stdout, child.stderr]) {
       if (stream !== null) process.nextTick(__cpEndDead, stream);
     }
+    if (ipcLink !== null) __cpIpcClose(ipcLink, false);
     process.nextTick(__cpSpawnFailed, child);
     return;
   }
@@ -1392,6 +1415,13 @@ function __cpSpawnInto(child: any, o: any, killSignal: string): void {
     child._closesNeeded = Number(child._closesNeeded) + 1;
   }
   child.stdio = [child.stdin, child.stdout, child.stderr];
+  if (ipcLink !== null) {
+    child._ipc = ipcLink;
+    child.connected = true;
+    // Node's `_closesNeeded++` for the channel: 'close' also waits for
+    // 'disconnect'.
+    child._closesNeeded = Number(child._closesNeeded) + 1;
+  }
 
   __ioRegister(procId, {
     readable(): void {
@@ -1659,9 +1689,407 @@ function exec(command?: any, options?: any, callback?: any): any {
   return execFile(normalized.file, normalized.options, normalized.callback);
 }
 
+// `stdioStringToArray(stdio, 'ipc')` from `lib/child_process.js`.
+function __cpStdioWithIpc(stdio: string): any[] {
+  if (stdio === "ignore" || stdio === "pipe" || stdio === "overlapped") return [stdio, stdio, stdio, "ipc"];
+  if (stdio === "inherit") return [0, 1, 2, "ipc"];
+  throw new ERR_INVALID_ARG_VALUE("stdio", stdio, "is invalid");
+}
+
+function __cpNullCheck(value: any, name: string): void {
+  if (typeof value === "string" && value.indexOf("\u0000") !== -1) {
+    throw new ERR_INVALID_ARG_VALUE(name, value, "must be a string without null bytes");
+  }
+}
+
+// `child_process.fork(modulePath, args, options)`.
 function fork(modulePath?: any, args?: any, options?: any): any {
-  const _ignored: any = [modulePath, args, options];
-  throw __cpNotImplemented("child_process.fork (there is no IPC channel)");
+  let path: any = modulePath;
+  if (path !== null && typeof path === "object" && typeof path.href === "string" && path.protocol === "file:") {
+    path = __cpFileUrlToPath(path);
+  }
+  __cpValidateString(path, "modulePath");
+  __cpNullCheck(path, "modulePath");
+  let list: any = args;
+  let opts: any = options;
+  if (list === undefined || list === null) {
+    list = [];
+  } else if (typeof list === "object" && !Array.isArray(list)) {
+    opts = list;
+    list = [];
+  } else if (!Array.isArray(list)) {
+    throw new ERR_INVALID_ARG_TYPE("args", "Array", list);
+  }
+  if (opts !== undefined && opts !== null) __evValidateObject(opts, "options");
+  const o: any = {};
+  if (opts !== undefined && opts !== null) {
+    for (const key of Object.keys(opts)) o[key] = opts[key];
+  }
+  o.shell = false;
+  o.execPath = o.execPath ? o.execPath : process.execPath;
+  __cpNullCheck(o.execPath, "options.execPath");
+  const execArgv: any = o.execArgv ? o.execArgv : process.execArgv;
+  const full: any[] = [];
+  if (Array.isArray(execArgv)) {
+    for (let i = 0; i < Number(execArgv.length); i++) {
+      // The engine's own `--ext <lib>` is not a Node flag (the launcher adds
+      // it back itself).
+      if (execArgv[i] === "--ext") {
+        i = i + 1;
+        continue;
+      }
+      __cpNullCheck(execArgv[i], "options.execArgv[" + String(i) + "]");
+      full.push(execArgv[i]);
+    }
+  }
+  full.push(path);
+  for (let i = 0; i < Number(list.length); i++) full.push(list[i]);
+  if (typeof o.stdio === "string") {
+    o.stdio = __cpStdioWithIpc(o.stdio);
+  } else if (!Array.isArray(o.stdio)) {
+    o.stdio = __cpStdioWithIpc(o.silent ? "pipe" : "inherit");
+  } else {
+    let has: boolean = false;
+    for (let i = 0; i < Number(o.stdio.length); i++) {
+      if (o.stdio[i] === "ipc") has = true;
+    }
+    if (!has) {
+      throw new NodeError(
+        "ERR_CHILD_PROCESS_IPC_REQUIRED",
+        "Forked processes must have an IPC channel, missing value 'ipc' in options.stdio",
+      );
+    }
+  }
+  return spawn(o.execPath, full, o);
+}
+
+function __cpFileUrlToPath(url: any): string {
+  let p: string = decodeURIComponent(String(url.pathname));
+  if (__cpIsWindows && p.length > 2 && p[0] === "/" && p[2] === ":") p = p.slice(1).split("/").join("\\");
+  return p;
+}
+
+// ---------------------------------------------------------------------------
+// The IPC channel
+// ---------------------------------------------------------------------------
+//
+// Node's channel is a pipe or socketpair inherited as `NODE_CHANNEL_FD`. A
+// child Zun process has no non-blocking inherited descriptor on the I/O loop,
+// so the channel is a **loopback TCP connection**, exactly as a `Worker`'s link
+// is (see "The Worker process" in src/worker_threads/worker_threads.ts): the
+// parent listens on `127.0.0.1:0` before spawning and passes the port in
+// `ZUN_NODE_IPC`; the child connects when its `child_process` module loads
+// and installs `process.send` / `process.disconnect` / `process.connected` /
+// `process.channel`. Framing is Node's `'json'` serialization: one
+// `JSON.stringify` document per line. `serialization: 'advanced'` and handle
+// passing (`send(msg, socket)`) are not implemented: the message is sent and
+// the handle is dropped.
+//
+// Liveness follows Node: the parent's link never holds the parent open (the
+// child's process handle does); the child's link holds the child open while
+// it has `'message'` or `'disconnect'` listeners, a pending write, or is still
+// connecting (`process.channel.ref()` / `unref()` override that).
+
+const __CP_IPC_ENV: string = "ZUN_NODE_IPC";
+
+function __cpIpcNew(owner: any, childSide: boolean): any {
+  const link: any = {
+    owner: owner,
+    childSide: childSide,
+    id: 0,
+    server: 0,
+    port: 0,
+    connected: false,
+    closed: false,
+    disconnecting: false,
+    out: [],
+    callbacks: [],
+    inbuf: "",
+    forcedRef: null,
+    channel: null,
+  };
+  link.channel = {
+    fd: childSide ? 3 : undefined,
+    ref(): void {
+      link.forcedRef = true;
+      __cpIpcSyncRef(link);
+    },
+    unref(): void {
+      link.forcedRef = false;
+      __cpIpcSyncRef(link);
+    },
+    hasRef(): boolean {
+      return __cpIpcWantsRef(link);
+    },
+  };
+  return link;
+}
+
+function __cpIpcListen(child: any): any {
+  const link: any = __cpIpcNew(child, false);
+  const ops: any = __ioOps();
+  const listen: string = String(ops.listen("127.0.0.1", 0, 8, 0));
+  if (listen === "-") throw __ioLastError();
+  const fields: string[] = __ioFields(listen);
+  link.server = Number(fields[0]);
+  link.port = Number(fields[2]);
+  __ioRegister(Number(link.server), {
+    readable(): void {
+      __cpIpcAccept(link);
+    },
+    writable(): void {},
+    failed(): void {},
+  });
+  __ioUnref(Number(link.server));
+  __ioWant(Number(link.server), __IO_READ);
+  return link;
+}
+
+function __cpIpcAccept(link: any): void {
+  const ops: any = __ioOps();
+  if (Number(link.server) === 0 || Number(link.id) !== 0 || link.closed === true) return;
+  const reply: string = String(ops.accept(Number(link.server)));
+  if (reply === "-" || reply === "+A") return;
+  const fields: string[] = __ioFields(reply);
+  const id = Number(fields[0]);
+  __ioUnregister(Number(link.server));
+  link.server = 0;
+  link.id = id;
+  link.connected = true;
+  __ioRegister(id, __cpIpcHandler(link));
+  __ioUnref(id);
+  __ioWant(id, __IO_READ);
+  __cpIpcFlush(link);
+}
+
+function __cpIpcHandler(link: any): any {
+  return {
+    readable(): void {
+      __cpIpcRead(link);
+    },
+    writable(): void {
+      if (link.connected !== true) {
+        const ops: any = __ioOps();
+        const status: string = String(ops.connectError(Number(link.id)));
+        if (status === "-") {
+          __cpIpcClose(link, true);
+          return;
+        }
+        link.connected = true;
+        __ioWant(Number(link.id), __IO_READ);
+      }
+      __cpIpcFlush(link);
+    },
+    failed(): void {
+      __cpIpcRead(link);
+      __cpIpcClose(link, true);
+    },
+  };
+}
+
+function __cpIpcFlush(link: any): void {
+  const ops: any = __ioOps();
+  if (ops === null || ops === undefined) return;
+  if (link.connected !== true || link.closed === true) return;
+  const id = Number(link.id);
+  while (Number(link.out.length) > 0) {
+    const head: any = link.out[0];
+    const reply: string = String(ops.write(id, head.toString("base64")));
+    if (reply === "-") {
+      link.out = [];
+      break;
+    }
+    if (reply === "+A") break;
+    const taken = Number(reply.slice(1));
+    if (taken >= Number(head.length)) {
+      link.out.shift();
+      const cb: any = link.callbacks.shift();
+      if (typeof cb === "function") process.nextTick(cb, null);
+    } else {
+      link.out[0] = head.subarray(taken);
+      break;
+    }
+  }
+  if (Number(link.out.length) > 0) {
+    __ioWant(id, __IO_WRITE);
+  } else {
+    __ioUnwant(id, __IO_WRITE);
+    if (link.disconnecting === true) __cpIpcClose(link, true);
+  }
+  __cpIpcSyncRef(link);
+}
+
+function __cpIpcRead(link: any): void {
+  const ops: any = __ioOps();
+  if (ops === null || ops === undefined || link.closed === true || Number(link.id) === 0) return;
+  let open = true;
+  while (true) {
+    const reply: string = String(ops.read(Number(link.id), 0));
+    if (reply === "-" || reply === "+E") {
+      open = false;
+      break;
+    }
+    if (reply === "+A") break;
+    link.inbuf = String(link.inbuf) + String(Buffer.from(reply.slice(2), "base64").toString("utf8"));
+  }
+  while (link.closed !== true) {
+    const text: string = String(link.inbuf);
+    const nl = Number(text.indexOf("\n"));
+    if (nl === -1) break;
+    link.inbuf = text.slice(nl + 1);
+    const line: string = text.slice(0, nl);
+    if (line === "") continue;
+    let message: any = undefined;
+    let ok: boolean = true;
+    try {
+      message = JSON.parse(line);
+    } catch (ignored) {
+      ok = false;
+    }
+    if (ok) __cpIpcDeliver(link, message);
+  }
+  if (!open) __cpIpcClose(link, true);
+}
+
+function __cpIpcDeliver(link: any, message: any): void {
+  const target: any = link.childSide ? process : link.owner;
+  if (
+    message !== null &&
+    typeof message === "object" &&
+    typeof message.cmd === "string" &&
+    String(message.cmd).indexOf("NODE_") === 0
+  ) {
+    target.emit("internalMessage", message);
+    return;
+  }
+  target.emit("message", message, undefined);
+}
+
+function __cpIpcWantsRef(link: any): boolean {
+  if (link.closed === true) return false;
+  if (link.forcedRef === false) return false;
+  if (link.forcedRef === true) return true;
+  if (link.connected !== true || Number(link.out.length) > 0) return true;
+  return Number(process.listenerCount("message")) > 0 || Number(process.listenerCount("disconnect")) > 0;
+}
+
+function __cpIpcSyncRef(link: any): void {
+  if (link.childSide !== true || Number(link.id) === 0 || link.closed === true) return;
+  if (__cpIpcWantsRef(link)) {
+    __ioRef(Number(link.id));
+  } else {
+    __ioUnref(Number(link.id));
+  }
+}
+
+// Tear the channel down and report `'disconnect'` (once).
+function __cpIpcClose(link: any, report: boolean): void {
+  if (link.closed === true) return;
+  link.closed = true;
+  if (Number(link.id) !== 0) __ioUnregister(Number(link.id));
+  if (Number(link.server) !== 0) __ioUnregister(Number(link.server));
+  link.id = 0;
+  link.server = 0;
+  const target: any = link.childSide ? process : link.owner;
+  target.connected = false;
+  if (!report) return;
+  process.nextTick(function (): void {
+    target.emit("disconnect");
+    if (link.childSide !== true) {
+      __cpMaybeClose(link.owner);
+    }
+  });
+}
+
+// `target.send(message, handle, options, callback)` (`setupChannel`).
+function __cpIpcSendApi(target: any, link: any, message: any, handle: any, options: any, callback: any): boolean {
+  let cb: any = callback;
+  let opts: any = options;
+  if (typeof handle === "function") {
+    cb = handle;
+    opts = undefined;
+  } else if (typeof opts === "function") {
+    cb = opts;
+    opts = undefined;
+  } else if (opts !== undefined) {
+    __evValidateObject(opts, "options");
+  }
+  if (link === null || link === undefined || target.connected !== true) {
+    const ex: any = new NodeError("ERR_IPC_CHANNEL_CLOSED", "Channel closed");
+    if (typeof cb === "function") {
+      process.nextTick(cb, ex);
+    } else {
+      process.nextTick(function (): void {
+        target.emit("error", ex);
+      });
+    }
+    return false;
+  }
+  if (message === undefined) {
+    throw new NodeTypeError("ERR_MISSING_ARGS", "The \"message\" argument must be specified");
+  }
+  const kind: string = typeof message;
+  if (kind !== "string" && kind !== "object" && kind !== "number" && kind !== "boolean") {
+    throw new ERR_INVALID_ARG_TYPE("message", ["string", "object", "number", "boolean"], message);
+  }
+  const text: string = JSON.stringify(message) + "\n";
+  link.out.push(Buffer.from(text, "utf8"));
+  link.callbacks.push(cb);
+  __cpIpcFlush(link);
+  return true;
+}
+
+function __cpIpcDisconnectApi(target: any, link: any): void {
+  if (link === null || link === undefined || target.connected !== true) {
+    target.emit("error", new NodeError("ERR_IPC_DISCONNECTED", "IPC channel is already disconnected"));
+    return;
+  }
+  target.connected = false;
+  link.disconnecting = true;
+  if (Number(link.out.length) === 0 || link.connected !== true) {
+    process.nextTick(function (): void {
+      __cpIpcClose(link, true);
+    });
+  }
+}
+
+// The child side: connect back to the parent named by `ZUN_NODE_IPC`.
+function __cpIpcBootChild(): void {
+  const raw: any = process.env[__CP_IPC_ENV];
+  if (raw === undefined || raw === null || raw === "") return;
+  // Not inherited by anything this child spawns in turn.
+  process.env[__CP_IPC_ENV] = "";
+  const ops: any = __ioOps();
+  if (ops === null || ops === undefined) return;
+  const link: any = __cpIpcNew(null, true);
+  const reserved: string = String(ops.socket());
+  if (reserved === "-") return;
+  const reservedId = Number(__ioFields(reserved)[0]);
+  const reply: string = String(ops.connect(reservedId, "127.0.0.1", Number(raw), "", 0));
+  if (reply === "-") return;
+  const fields: string[] = __ioFields(reply);
+  link.id = Number(fields[0]);
+  __ioRegister(Number(link.id), __cpIpcHandler(link));
+  if (String(fields[1]) === "1") {
+    link.connected = true;
+    __ioWant(Number(link.id), __IO_READ);
+  } else {
+    __ioWant(Number(link.id), __IO_WRITE);
+  }
+  process.connected = true;
+  process.channel = link.channel;
+  process.send = function (message?: any, handle?: any, options?: any, callback?: any): boolean {
+    return __cpIpcSendApi(process, link, message, handle, options, callback);
+  };
+  process.disconnect = function (): void {
+    __cpIpcDisconnectApi(process, link);
+  };
+  __ioTurnHooks.push({
+    turn(): void {
+      __cpIpcSyncRef(link);
+    },
+  });
+  __cpIpcSyncRef(link);
 }
 
 // `util.promisify(exec)` / `util.promisify(execFile)`: resolves
@@ -1797,3 +2225,4 @@ process.execPath = __cpNative.cpExecPath();
 // Node reports the same path as `argv[0]`; tests spawn `process.argv[0]` as often as
 // `process.execPath`.
 process.argv[0] = process.execPath;
+__cpIpcBootChild();

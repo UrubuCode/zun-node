@@ -178,13 +178,15 @@ ml-kem = { version = "0.3.4", default-features = false }
 # route, and its streaming encoder/decoder take the very operations Node's
 # `BROTLI_OPERATION_*` flush flags name.
 #
-# zstd (Node 25 added `zstdCompress`/`ZstdCompress`) is deliberately absent:
-# every pure-Rust zstd crate today is decompression-only, and a C-backed one
-# would break the no-`cc` rule above. See `../test/zlib/README.md`.
 [dependencies.libz-rs-sys]
 version = "0.6"
 default-features = false
 features = ["std", "rust-allocator"]
+
+# zstd (Node 25's `zstdCompress`/`ZstdCompress`) over `ruzstd`, the pure-Rust
+# implementation: a full decoder and a "fastest"-level encoder, no `cc`.
+[dependencies.ruzstd]
+version = "0.8"
 
 [dependencies.brotli]
 version = "9"

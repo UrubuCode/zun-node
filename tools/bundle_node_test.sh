@@ -251,7 +251,7 @@ _stream_writable Writable Writable
 _stream_duplex Duplex Duplex
 _stream_transform Transform Transform
 _stream_passthrough PassThrough PassThrough
-zlib __node_zlib Deflate,Inflate,Gzip,Gunzip,DeflateRaw,InflateRaw,Unzip,BrotliCompress,BrotliDecompress
+zlib __node_zlib -
 readline __node_readline Interface
 readline/promises __node_readline_promises Interface
 internal/readline/utils __node_internal_readline_utils CSI
@@ -920,6 +920,37 @@ $required
     done
   fi;;
 esac
+
+# A forked child (`ZUN_NODE_IPC` set by `child_process.fork` in the parent)
+# talks back through `process.send`, which `child_process.ts` installs when it
+# loads -- so it is appended even to a child script that never requires the
+# module (`fixtures/child-process-spawn-node.js` and friends).
+if [ -n "${ZUN_NODE_EXT:-}" ] && [ -n "${ZUN_NODE_IPC:-}" ]; then
+  for required in src/buffer/buffer.ts src/string_decoder/string_decoder.ts src/stream/stream.ts       src/child_process/child_process.ts; do
+    case "
+$FILES" in *"
+$required
+"*) continue;; esac
+    FILES="$FILES$required
+"
+  done
+fi
+
+# `fixtures.readSync` (tools/harness/common.ts) reads through `node:fs`, which
+# a test calling only that helper never requires: the module is appended when
+# the bundle runs with the extension, with the append-once rule.
+if [ -n "${ZUN_NODE_EXT:-}" ]; then
+  case "$SRC_TEXT" in *fixtures.readSync*)
+    for required in src/buffer/buffer.ts src/string_decoder/string_decoder.ts src/stream/stream.ts         src/fs/fs.ts src/fs/streams.ts src/fs/watchers.ts; do
+      case "
+$FILES" in *"
+$required
+"*) continue;; esac
+      FILES="$FILES$required
+"
+    done;;
+  esac
+fi
 
 # `common.spawnPromisified` (tools/harness/common.ts) spawns through
 # `child_process`, which a test calling only that helper never requires: the
@@ -1651,6 +1682,11 @@ EOF_FILES
   perl -ne '$c = 1 if /^(?:export\s+)?(?:abstract\s+)?class\s/; $c = 0 if /^\}/; print "$1\n" if $c && /^ {2}(?:static\s+|async\s+|get\s+|set\s+|readonly\s+|private\s+|public\s+|protected\s+|\*\s*)*([A-Za-z_\$][\w\$]*)\s*[(:;=?!]/' "$@" | sort -u > "$LIB_MEMBERS"
   echo "const __filename: string = $(json_string "$TEST_PATH");"
   echo "const __dirname: string = $(json_string "$TEST_DIR");"
+  # Node's `process.argv[1]` is the main script. Run directly, the engine
+  # reports the bundle there, and a test that re-executes itself through
+  # `fork(process.argv[1])` would hand the launcher a bundle to bundle again.
+  # Under the launcher, ZUN_NODE_ARGV already carries the original path.
+  echo "if (process.env.ZUN_NODE_ARGV === undefined && Number(process.argv.length) > 1) process.argv[1] = __filename;"
   # The builtin registry and `require.main` (ZUN_NODE_REQUIRE only; see the
   # header). One declaration scan over the inlined files, then an in-shell
   # membership test per specifier -- a `grep` per specifier cost about a

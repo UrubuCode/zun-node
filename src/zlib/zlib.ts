@@ -110,12 +110,10 @@
 // What is not here
 // ---------------------------------------------------------------------------
 //
-// zstd (`ZstdCompress`, `zstdCompressSync`, …), which Node 25 added. Every
-// pure-Rust zstd crate today is decompression-only, and a C-backed one would
-// break this extension's "a Rust toolchain is the whole build" rule — see the
-// dependency comment in ../../Cargo.toml. The `ZSTD_*` constants are present
-// (they are just numbers, and `zlib.constants` is observable on its own), the
-// classes and methods are not.
+// No zstd compression-level curve: zstd runs over `ruzstd`, whose encoder
+// implements only its "fastest" level, so `ZSTD_c_compressionLevel` is
+// validated and accepted but every level produces the same output. zstd
+// dictionaries are accepted and ignored on both sides (see `src/zlib/zstd.rs`).
 
 import * as __zNative from "node:zlib";
 
@@ -130,7 +128,12 @@ const __Z_US: string = "\u001f";
 // Re-type an `any` known to hold a byte view (zun#38). Not style: without it
 // `chunk.length` reads `undefined` and `chunk.toString("base64")` throws.
 function __zAsBuffer(value: any): Buffer {
-  return value;
+  if (Buffer.isBuffer(value)) return value;
+  // A non-`Uint8Array` view (`Int8Array`, `Uint16Array`, `DataView`, ...) or
+  // an `ArrayBuffer`: the bytes it covers, without a copy.
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  const backing: any = value.buffer;
+  return Buffer.from(backing, Number(value.byteOffset), Number(value.byteLength));
 }
 
 // Is this a byte view this module can read? `Buffer.isBuffer` answers `true`
@@ -140,7 +143,7 @@ function __zAsBuffer(value: any): Buffer {
 // through `any`.
 function __zIsByteView(value: any): boolean {
   if (value === null || value === undefined) return false;
-  return Buffer.isBuffer(value);
+  return Buffer.isBuffer(value) || ArrayBuffer.isView(value) || value instanceof ArrayBuffer;
 }
 
 // An encoding name for a string chunk. The writable side of a Zun stream keeps
@@ -237,6 +240,21 @@ class ERR_ZLIB_INITIALIZATION_FAILED extends NodeError {
   }
 }
 
+// `ERR_ZSTD_INVALID_PARAM`, a `RangeError`.
+class ERR_ZSTD_INVALID_PARAM extends NodeRangeError {
+  constructor(key: any) {
+    super("ERR_ZSTD_INVALID_PARAM", String(key) + " is not a valid zstd parameter");
+  }
+}
+
+// The error libzstd's `ZSTD_CCtx_setParameter` / `ZSTD_DCtx_setParameter`
+// rejection surfaces as.
+class __ZstdParamFailed extends NodeError {
+  constructor() {
+    super("ERR_ZLIB_INITIALIZATION_FAILED", "Setting parameter failed");
+  }
+}
+
 class ERR_TRAILING_JUNK_AFTER_STREAM_END extends NodeError {
   constructor() {
     super(
@@ -250,11 +268,13 @@ class ERR_TRAILING_JUNK_AFTER_STREAM_END extends NodeError {
 // `genericNodeError(message, { errno, code })`, which is a plain `Error`
 // carrying `code` and `errno` as own properties — so `name` stays `"Error"`
 // and only the two extra fields are added.
-class __ZlibError extends NodeError {
+class __ZlibError extends Error {
   errno: number = 0;
+  code: any = undefined;
   constructor(code: string, message: string, errno: number) {
-    super(code, message);
+    super(message);
     this.errno = errno;
+    this.code = code;
   }
 }
 
@@ -356,6 +376,8 @@ const __Z_MODE_INFLATERAW: number = 6;
 const __Z_MODE_UNZIP: number = 7;
 const __Z_MODE_BROTLI_DECODE: number = 8;
 const __Z_MODE_BROTLI_ENCODE: number = 9;
+const __Z_MODE_ZSTD_COMPRESS: number = 10;
+const __Z_MODE_ZSTD_DECOMPRESS: number = 11;
 
 const __Z_BROTLI_OPERATION_PROCESS: number = 0;
 const __Z_BROTLI_OPERATION_FLUSH: number = 1;
@@ -559,6 +581,8 @@ const __Z_FLUSH_BOUND_BROTLI: number[] = [
   __Z_BROTLI_OPERATION_EMIT_METADATA,
 ];
 
+const __Z_FLUSH_BOUND_ZSTD: number[] = [0, 2];
+
 // `flushiness`: a sparse table ordering the flush flags by strength, so that
 // `maxFlush` can pick the stronger of a scheduled flush and the finish flush.
 // Roughly `Z_NO_FLUSH < Z_BLOCK < Z_PARTIAL_FLUSH < Z_SYNC_FLUSH <
@@ -658,6 +682,12 @@ const __Z_BROTLI_DEFAULTS: any = {
   flush: __Z_BROTLI_OPERATION_PROCESS,
   finishFlush: __Z_BROTLI_OPERATION_FINISH,
   fullFlush: __Z_BROTLI_OPERATION_FLUSH,
+};
+
+const __Z_ZSTD_DEFAULTS: any = {
+  flush: 0,
+  finishFlush: 2,
+  fullFlush: 1,
 };
 
 // `Zlib`'s own option validation plus `handle.init(...)`: `windowBits`,
@@ -765,6 +795,55 @@ function __zBrotliInit(opts: any, mode: number): any {
   const handle: number = Number(
     __zPayload(__zNative.zlibBrotliInit(mode === __Z_MODE_BROTLI_ENCODE ? 1 : 0, encoded)),
   );
+  return { handle: handle, level: __Z_DEFAULT_COMPRESSION, strategy: __Z_DEFAULT_STRATEGY };
+}
+
+// The largest `ZSTD_c_*` / `ZSTD_d_*` parameter key (`kMaxZstdCParam` /
+// `kMaxZstdDParam` in `lib/zlib.js`).
+const __Z_MAX_ZSTD_CPARAM: number = 402;
+const __Z_MAX_ZSTD_DPARAM: number = 100;
+
+// libzstd's bounds for the parameters whose rejection the corpus observes.
+function __zZstdParamOk(compress: boolean, key: number, value: number): boolean {
+  if (compress) {
+    if (key === 100) return value >= -131072 && value <= 22;
+    if (key >= 101 && key <= 106) return value >= 0 && value <= 31;
+    if (key === 107) return value === 0 || (value >= 1 && value <= 9);
+    return true;
+  }
+  if (key === 100) return value === 0 || (value >= 10 && value <= 31);
+  return true;
+}
+
+// `Zstd`'s option validation plus `handle.init(...)`.
+function __zZstdInit(opts: any, compress: boolean): any {
+  const seen: any = {};
+  const maxParam: number = compress ? __Z_MAX_ZSTD_CPARAM : __Z_MAX_ZSTD_DPARAM;
+  const params: any = opts === undefined || opts === null ? undefined : opts.params;
+  const checks: number[] = [];
+  if (params !== undefined && params !== null) {
+    for (const original of Object.keys(params)) {
+      const key: number = Number(original);
+      if (Number.isNaN(key) || key < 0 || key > maxParam || seen[String(key)] === true) {
+        throw new ERR_ZSTD_INVALID_PARAM(original);
+      }
+      const value: any = params[original];
+      if (typeof value !== "number" && typeof value !== "boolean") {
+        throw new ERR_INVALID_ARG_TYPE("options.params[key]", "number", value);
+      }
+      seen[String(key)] = true;
+      checks.push(key);
+      checks.push(value === true ? 1 : value === false ? 0 : Number(value));
+    }
+  }
+  for (let i: number = 0; i < checks.length; i += 2) {
+    if (!__zZstdParamOk(compress, checks[i], checks[i + 1])) throw new __ZstdParamFailed();
+  }
+  let pledged: number = -1;
+  if (opts !== undefined && opts !== null && opts.pledgedSrcSize !== undefined && opts.pledgedSrcSize !== null) {
+    pledged = Number(opts.pledgedSrcSize);
+  }
+  const handle: number = Number(__zPayload(__zNative.zlibZstdInit(compress ? 1 : 0, pledged)));
   return { handle: handle, level: __Z_DEFAULT_COMPRESSION, strategy: __Z_DEFAULT_STRATEGY };
 }
 
@@ -1187,6 +1266,28 @@ class Brotli extends ZlibBase {
   }
 }
 
+class Zstd extends ZlibBase {
+  constructor(opts: any, mode: number) {
+    super(
+      __zBaseSettings(opts, __Z_ZSTD_DEFAULTS, __Z_FLUSH_BOUND_ZSTD),
+      __zZstdInit(opts, mode === __Z_MODE_ZSTD_COMPRESS),
+      mode,
+    );
+  }
+}
+
+class ZstdCompress extends Zstd {
+  constructor(opts?: any) {
+    super(opts, __Z_MODE_ZSTD_COMPRESS);
+  }
+}
+
+class ZstdDecompress extends Zstd {
+  constructor(opts?: any) {
+    super(opts, __Z_MODE_ZSTD_DECOMPRESS);
+  }
+}
+
 class Deflate extends Zlib {
   constructor(opts?: any) {
     super(opts, __Z_MODE_DEFLATE);
@@ -1322,7 +1423,9 @@ function __zBuffer(engine: any, buffer: any, callback: any): void {
   engine.on("end", function (): void {
     __zBufferOnEnd(engine);
   });
-  engine.end(buffer);
+  // Any `ArrayBufferView` or `ArrayBuffer` is a valid input in Node; the
+  // stream's own `write` only takes strings and `Uint8Array`s.
+  engine.end(typeof buffer === "string" || !__zIsByteView(buffer) ? buffer : __zAsBuffer(buffer));
 }
 
 // The `(buffer, opts, callback)` signature every asynchronous convenience
@@ -1358,20 +1461,72 @@ function __zCrc32(data: any, value?: any): number {
 // The module object
 // ---------------------------------------------------------------------------
 
+// Node's stream constructors are callable without `new` (`zlib.Deflate()`,
+// `test-zlib-deflate-constructors.js`), and a class value cannot be called in
+// this engine. The export is a function that constructs the class and shares
+// its prototype, so `new zlib.Deflate()` and `instanceof zlib.Deflate` still
+// work -- the pattern `src/fs/streams.ts` uses for `fs.ReadStream`.
+const __zDeflateExport: any = function (opts?: any): any {
+  return new Deflate(opts);
+};
+__zDeflateExport.prototype = Deflate.prototype;
+const __zInflateExport: any = function (opts?: any): any {
+  return new Inflate(opts);
+};
+__zInflateExport.prototype = Inflate.prototype;
+const __zGzipExport: any = function (opts?: any): any {
+  return new Gzip(opts);
+};
+__zGzipExport.prototype = Gzip.prototype;
+const __zGunzipExport: any = function (opts?: any): any {
+  return new Gunzip(opts);
+};
+__zGunzipExport.prototype = Gunzip.prototype;
+const __zDeflateRawExport: any = function (opts?: any): any {
+  return new DeflateRaw(opts);
+};
+__zDeflateRawExport.prototype = DeflateRaw.prototype;
+const __zInflateRawExport: any = function (opts?: any): any {
+  return new InflateRaw(opts);
+};
+__zInflateRawExport.prototype = InflateRaw.prototype;
+const __zUnzipExport: any = function (opts?: any): any {
+  return new Unzip(opts);
+};
+__zUnzipExport.prototype = Unzip.prototype;
+const __zBrotliCompressExport: any = function (opts?: any): any {
+  return new BrotliCompress(opts);
+};
+__zBrotliCompressExport.prototype = BrotliCompress.prototype;
+const __zBrotliDecompressExport: any = function (opts?: any): any {
+  return new BrotliDecompress(opts);
+};
+__zBrotliDecompressExport.prototype = BrotliDecompress.prototype;
+const __zZstdCompressExport: any = function (opts?: any): any {
+  return new ZstdCompress(opts);
+};
+__zZstdCompressExport.prototype = ZstdCompress.prototype;
+const __zZstdDecompressExport: any = function (opts?: any): any {
+  return new ZstdDecompress(opts);
+};
+__zZstdDecompressExport.prototype = ZstdDecompress.prototype;
+
 const __node_zlib: any = {
   crc32(data: any, value?: any): number {
     return __zCrc32(data, value);
   },
 
-  Deflate: Deflate,
-  Inflate: Inflate,
-  Gzip: Gzip,
-  Gunzip: Gunzip,
-  DeflateRaw: DeflateRaw,
-  InflateRaw: InflateRaw,
-  Unzip: Unzip,
-  BrotliCompress: BrotliCompress,
-  BrotliDecompress: BrotliDecompress,
+  Deflate: __zDeflateExport,
+  Inflate: __zInflateExport,
+  Gzip: __zGzipExport,
+  Gunzip: __zGunzipExport,
+  DeflateRaw: __zDeflateRawExport,
+  InflateRaw: __zInflateRawExport,
+  Unzip: __zUnzipExport,
+  BrotliCompress: __zBrotliCompressExport,
+  BrotliDecompress: __zBrotliDecompressExport,
+  ZstdCompress: __zZstdCompressExport,
+  ZstdDecompress: __zZstdDecompressExport,
 
   createDeflate(options?: any): any {
     return new Deflate(options);
@@ -1399,6 +1554,12 @@ const __node_zlib: any = {
   },
   createBrotliDecompress(options?: any): any {
     return new BrotliDecompress(options);
+  },
+  createZstdCompress(options?: any): any {
+    return new ZstdCompress(options);
+  },
+  createZstdDecompress(options?: any): any {
+    return new ZstdDecompress(options);
   },
 
   // The synchronous convenience methods.
@@ -1429,6 +1590,12 @@ const __node_zlib: any = {
   brotliDecompressSync(buffer: any, opts?: any): any {
     return __zBufferSync(new BrotliDecompress(opts), buffer);
   },
+  zstdCompressSync(buffer: any, opts?: any): any {
+    return __zBufferSync(new ZstdCompress(opts), buffer);
+  },
+  zstdDecompressSync(buffer: any, opts?: any): any {
+    return __zBufferSync(new ZstdDecompress(opts), buffer);
+  },
 
   // The callback convenience methods.
   deflate(buffer: any, opts?: any, callback?: any): void {
@@ -1457,6 +1624,12 @@ const __node_zlib: any = {
   },
   brotliDecompress(buffer: any, opts?: any, callback?: any): void {
     __zAsync(new BrotliDecompress(__zOpts(opts)), buffer, opts, callback);
+  },
+  zstdCompress(buffer: any, opts?: any, callback?: any): void {
+    __zAsync(new ZstdCompress(__zOpts(opts)), buffer, opts, callback);
+  },
+  zstdDecompress(buffer: any, opts?: any, callback?: any): void {
+    __zAsync(new ZstdDecompress(__zOpts(opts)), buffer, opts, callback);
   },
 };
 

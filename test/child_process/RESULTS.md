@@ -6,119 +6,119 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-child-process*.js`. Generated 
 <!-- node-child_process:start -->
 ### Node.js v25 `child_process` compatibility
 
-`███████░░░░░░░░░░░░░░░░░` **31.1%** — 34 / 109 Node `test-child-process*` tests passing
+`███████████░░░░░░░░░░░░░` **49.5%** — 54 / 109 Node `test-child-process*` tests passing
 <!-- node-child_process:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-child-process-advanced-serialization-largebuffer.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-advanced-serialization-splitted-length-field.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-advanced-serialization-largebuffer.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 4 |
+| `test-child-process-advanced-serialization-splitted-length-field.js` | ❌ timeout |  |
 | `test-child-process-advanced-serialization.js` | ❌ assertion | AssertionError [throws]: Missing expected exception. |
-| `test-child-process-bad-stdio.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-can-write-to-stdout.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-child-process-bad-stdio.js` | ✅ pass | |
+| `test-child-process-can-write-to-stdout.js` | ✅ pass | |
 | `test-child-process-constructor.js` | ✅ pass | |
-| `test-child-process-cwd.js` | ❌ unsupported import/require | bundles/test-child-process-cwd.ts:32962:58: error: [SEM0001] a required parameter cannot follow a default para |
+| `test-child-process-cwd.js` | ❌ unsupported import/require | bundles/test-child-process-cwd.ts:36006:58: error: [SEM0001] a required parameter cannot follow a default para |
 | `test-child-process-default-options.js` | ✅ pass | |
-| `test-child-process-destroy.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-destroy.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: Cannot read properties of undefined (reading 'call') |
 | `test-child-process-detached.js` | ✅ pass | |
 | `test-child-process-dgram-reuseport.js` | ✅ pass | |
-| `test-child-process-disconnect.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-disconnect.js` | ✅ pass | |
 | `test-child-process-double-pipe.js` | ✅ pass | |
 | `test-child-process-env.js` | ✅ pass | |
 | `test-child-process-exec-abortcontroller-promisified.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
-| `test-child-process-exec-any-shells-windows.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-exec-any-shells-windows.js` | ❌ runtime | zun: runtime error: unhandled exception: __FsUvError: EPERM: operation not permitted, symlink 'undefined\Syste |
 | `test-child-process-exec-cwd.js` | ✅ pass | |
-| `test-child-process-exec-encoding.js` | ❌ engine panic | thread '<unnamed>' (35096) panicked at crates\zun_interp\src\value.rs:228:22: |
+| `test-child-process-exec-encoding.js` | ❌ engine panic | thread '<unnamed>' (18524) panicked at crates\zun_interp\src\value.rs:228:22: |
 | `test-child-process-exec-env.js` | ✅ pass | |
 | `test-child-process-exec-error.js` | ✅ pass | |
-| `test-child-process-exec-kill-throws.js` | ❌ runtime | Uncaught RangeError: stdout maxBuffer length exceeded |
-| `test-child-process-exec-maxbuf.js` | ❌ parse | TypeError: invalid argument to built-in function |
-| `test-child-process-exec-std-encoding.js` | ✅ pass | |
+| `test-child-process-exec-kill-throws.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-child-process-exec-maxbuf.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-child-process-exec-std-encoding.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-child-process-exec-stdout-stderr-data-string.js` | ✅ pass | |
 | `test-child-process-exec-timeout-expire.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-exec-timeout-expire.js: |
 | `test-child-process-exec-timeout-kill.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-exec-timeout-kill.js: |
 | `test-child-process-exec-timeout-not-expired.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-exec-timeout-not-expired.js: |
 | `test-child-process-execFile-promisified-abortController.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
-| `test-child-process-execfile-maxbuf.js` | ❌ parse | Uncaught TypeError: invalid argument to built-in function |
+| `test-child-process-execfile-maxbuf.js` | ❌ parse | Uncaught TypeError: The "list[0]" argument must be an instance of Buffer or Uint8Array. Received type string ( |
 | `test-child-process-execfile.js` | ✅ pass | |
 | `test-child-process-execfilesync-maxbuf.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-child-process-execsync-maxbuf.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-child-process-exit-code.js` | ✅ pass | |
 | `test-child-process-flush-stdio.js` | ✅ pass | |
-| `test-child-process-fork-abort-signal.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-fork-and-spawn.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-fork-args.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
-| `test-child-process-fork-close.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-fork-abort-signal.js` | ✅ pass | |
+| `test-child-process-fork-and-spawn.js` | ✅ pass | |
+| `test-child-process-fork-args.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-child-process-fork-close.js` | ❌ assertion | AssertionError [==]: false == true |
 | `test-child-process-fork-closed-channel-segfault.js` | ✅ pass | |
-| `test-child-process-fork-detached.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-fork-detached.js` | ✅ pass | |
 | `test-child-process-fork-dgram.js` | ✅ pass | |
-| `test-child-process-fork-exec-argv.js` | ❌ parse | Uncaught SyntaxError: Unexpected token (unexpected end of JSON input) |
+| `test-child-process-fork-exec-argv.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-child-process-fork-exec-path.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-fork-exec-path.js: |
-| `test-child-process-fork-getconnections.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-fork-net-server.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-fork-net-socket.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-fork-net.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-fork-no-shell.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-fork-ref.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-fork-ref2.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-fork-stdio-string-variant.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
-| `test-child-process-fork-stdio.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
-| `test-child-process-fork-timeout-kill-signal.js` | ❌ type error | bundles/test-child-process-fork-timeout-kill-signal.ts:29244:10: error: [SEM0001] no field or setter 'aborted' |
+| `test-child-process-fork-getconnections.js` | ❌ assertion | AssertionError [==]: undefined == true |
+| `test-child-process-fork-net-server.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-child-process-fork-net-socket.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-child-process-fork-net.js` | ❌ parse | ReferenceError: closeEmitted is not defined |
+| `test-child-process-fork-no-shell.js` | ✅ pass | |
+| `test-child-process-fork-ref.js` | ✅ pass | |
+| `test-child-process-fork-ref2.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-child-process-fork-stdio-string-variant.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-child-process-fork-stdio.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: Cannot read properties of undefined (reading 'write') |
+| `test-child-process-fork-timeout-kill-signal.js` | ❌ type error | bundles/test-child-process-fork-timeout-kill-signal.ts:32052:10: error: [SEM0001] no field or setter 'aborted' |
 | `test-child-process-fork-url.mjs` | ❌ unsupported import/require | bundles/test-child-process-fork-url.ts: error: OXC adapter: unsupported expression 'ImportMeta' |
-| `test-child-process-fork.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-fork3.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-http-socket-leak.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-http-socket-leak.js: |
-| `test-child-process-internal.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-ipc-next-tick.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-fork.js` | ✅ pass | |
+| `test-child-process-fork3.js` | ✅ pass | |
+| `test-child-process-http-socket-leak.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-child-process-internal.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
+| `test-child-process-ipc-next-tick.js` | ✅ pass | |
 | `test-child-process-ipc.js` | ❌ parse | Mismatched function call: function should not have been called |
 | `test-child-process-kill.js` | ✅ pass | |
 | `test-child-process-net-reuseport.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-child-process-net-reuseport.js: |
 | `test-child-process-no-deprecation.js` | ✅ pass | |
-| `test-child-process-pipe-dataflow.js` | ❌ type error | bundles/test-child-process-pipe-dataflow.ts:33821:5: error: [SEM0001] type Boolean has no methods |
+| `test-child-process-pipe-dataflow.js` | ✅ pass | |
 | `test-child-process-promisified.js` | ❌ timeout |  |
-| `test-child-process-prototype-tampering.mjs` | ❌ engine panic | thread '<unnamed>' (39044) panicked at crates\zun_interp\src\value.rs:197:22: |
-| `test-child-process-recv-handle.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-reject-null-bytes.js` | ❌ assertion | AssertionError [throws]: Expected values to be strictly deep-equal: |
-| `test-child-process-send-after-close.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-send-cb.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-send-keep-open.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-send-returns-boolean.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-send-type-error.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-send-utf8.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-server-close.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-prototype-tampering.mjs` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in tmp.FvB8I7TzHp: |
+| `test-child-process-recv-handle.js` | ❌ parse | zun: runtime error: unhandled exception: TypeError: Cannot read properties of undefined (reading 'readStop') |
+| `test-child-process-reject-null-bytes.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
+| `test-child-process-send-after-close.js` | ✅ pass | |
+| `test-child-process-send-cb.js` | ✅ pass | |
+| `test-child-process-send-keep-open.js` | ✅ pass | |
+| `test-child-process-send-returns-boolean.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-child-process-send-type-error.js` | ❌ assertion | AssertionError [throws]: Missing expected exception (TypeError). |
+| `test-child-process-send-utf8.js` | ❌ timeout |  |
+| `test-child-process-server-close.js` | ❌ parse | Uncaught TypeError: The argument 'stdio[1]' is not supported by this runtime (use 'pipe', 'ignore', 'inherit'  |
 | `test-child-process-set-blocking.js` | ✅ pass | |
-| `test-child-process-silent.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-child-process-spawn-args.mjs` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-silent.js` | ✅ pass | |
+| `test-child-process-spawn-args.mjs` | ❌ parse | zun: runtime error: malformed bytecode: async turn went idle with the entry point still suspended at __timerDr |
 | `test-child-process-spawn-argv0.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
 | `test-child-process-spawn-controller.js` | ✅ pass | |
 | `test-child-process-spawn-error.js` | ✅ pass | |
 | `test-child-process-spawn-event.js` | ✅ pass | |
-| `test-child-process-spawn-shell.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-child-process-spawn-shell.js` | ✅ pass | |
 | `test-child-process-spawn-timeout-kill-signal.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
-| `test-child-process-spawn-typeerror.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-spawn-typeerror.js` | ✅ pass | |
 | `test-child-process-spawn-windows-batch-file.js` | ❌ runtime | '.' n�o � reconhecido como um comando interno |
 | `test-child-process-spawnsync-args.js` | ✅ pass | |
 | `test-child-process-spawnsync-env.js` | ✅ pass | |
-| `test-child-process-spawnsync-input.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-spawnsync-input.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: invalid argument to built-in function |
 | `test-child-process-spawnsync-kill-signal.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-child-process-spawnsync-maxbuf.js` | ❌ assertion | AssertionError [deepStrictEqual]: Expected values to be strictly deep-equal: |
 | `test-child-process-spawnsync-shell.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected exactly 1 |
 | `test-child-process-spawnsync-timeout.js` | ✅ pass | |
 | `test-child-process-spawnsync-validation-errors.js` | ✅ pass | |
 | `test-child-process-spawnsync.js` | ✅ pass | |
-| `test-child-process-stdin-ipc.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-stdin-ipc.js` | ✅ pass | |
 | `test-child-process-stdin.js` | ✅ pass | |
-| `test-child-process-stdio-big-write-end.js` | ❌ runtime | bundles/test-child-process-stdio-big-write-end.ts: error: parse error: "A 'return' statement can only be used  |
+| `test-child-process-stdio-big-write-end.js` | ❌ parse | Error: write EPIPE |
 | `test-child-process-stdio-inherit.js` | ✅ pass | |
-| `test-child-process-stdio-merge-stdouts-into-cat.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-stdio-merge-stdouts-into-cat.js` | ❌ runtime | zun: runtime error: unhandled exception: ERR_INVALID_ARG_VALUE: The argument 'stdio[1]' is not supported by th |
 | `test-child-process-stdio-overlapped.js` | ✅ pass | |
 | `test-child-process-stdio-reuse-readable-stdio.js` | ✅ pass | |
 | `test-child-process-stdio.js` | ✅ pass | |
-| `test-child-process-stdout-flush-exit.js` | ❌ parse | Mismatched function call: <anonymous> called 0 times, expected at least 1 |
+| `test-child-process-stdout-flush-exit.js` | ✅ pass | |
 | `test-child-process-stdout-flush.js` | ✅ pass | |
-| `test-child-process-stdout-ipc.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-child-process-stdout-ipc.js` | ✅ pass | |
 | `test-child-process-uid-gid.js` | ❌ assertion | AssertionError [throws]: Missing expected exception. |
 | `test-child-process-validate-stdio.js` | ✅ pass | |
-| `test-child-process-windows-hide.js` | ❌ parse | not ok - spawnSync() passes windowsHide correctly: Cannot read properties of undefined (reading 'method') |
+| `test-child-process-windows-hide.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |

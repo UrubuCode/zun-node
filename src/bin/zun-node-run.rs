@@ -275,8 +275,16 @@ fn cache_dir() -> PathBuf {
 fn bundle(bundler: &str, source: &Path) -> Result<PathBuf, String> {
     // `absolute`, not `canonicalize`: on Windows the latter yields a `\?\`
     // verbatim path, which the bundler (a POSIX shell script) cannot use.
-    let absolute = std::path::absolute(source)
+    let mut absolute = std::path::absolute(source)
         .map_err(|err| format!("cannot resolve {}: {err}", source.display()))?;
+    // Node resolves a main module without its extension
+    // (`fork(fixtures.path('child-process-spawn-node'))`).
+    if !absolute.is_file() {
+        let with_js = PathBuf::from(format!("{}.js", absolute.display()));
+        if with_js.is_file() {
+            absolute = with_js;
+        }
+    }
     let bytes = std::fs::read(&absolute).map_err(|err| format!("cannot read script: {err}"))?;
     let mut hasher = DefaultHasher::new();
     absolute.hash(&mut hasher);
@@ -287,6 +295,10 @@ fn bundle(bundler: &str, source: &Path) -> Result<PathBuf, String> {
         newest_modification(&root.join("src")).hash(&mut hasher);
         newest_modification(&root.join("tools")).hash(&mut hasher);
     }
+    // A forked child's bundle also carries `child_process` (see the
+    // `ZUN_NODE_IPC` rule in tools/bundle_node_test.sh), so it is a different
+    // bundle of the same script.
+    variable("ZUN_NODE_IPC").is_some().hash(&mut hasher);
     let key = hasher.finish();
 
     let directory = cache_dir();

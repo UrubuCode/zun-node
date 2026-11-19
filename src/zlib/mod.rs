@@ -90,6 +90,7 @@ use crate::Descriptor;
 use zun_abi::ZunTy::{Bool, F64, I64, Str};
 
 mod brotli;
+mod zstd;
 mod zstream;
 
 #[cfg(test)]
@@ -117,6 +118,7 @@ pub(super) mod mode {
 enum Engine {
     Zlib(zstream::ZlibStream),
     Brotli(brotli::BrotliStream),
+    Zstd(zstd::ZstdStream),
 }
 
 struct Handle {
@@ -267,6 +269,22 @@ pub(crate) unsafe extern "C" fn zlib_brotli_init(
     unsafe { ret_str(out, &payload) }
 }
 
+/// `zlibZstdInit(encode, pledgedSrcSize)` → `+<handle>`.
+/// `node_zlib.cc`'s `ZstdContext::Init`. A negative `pledgedSrcSize` means
+/// none was given; the parameters were validated by the TS layer.
+pub(crate) unsafe extern "C" fn zlib_zstd_init(
+    args: *const ZunValue,
+    n: usize,
+    out: *mut ZunValue,
+) -> i32 {
+    let encode = unsafe { arg_i64(args, n, 0) } != 0;
+    let pledged = unsafe { arg_i64(args, n, 1) };
+    let pledged = if pledged < 0 { None } else { Some(pledged as u64) };
+    let stream = zstd::ZstdStream::open(encode, pledged);
+    let payload = ok_one(&insert(Engine::Zstd(stream)).to_string());
+    unsafe { ret_str(out, &payload) }
+}
+
 /// One step of the chunking loop, shared by [`zlib_write`] and
 /// [`zlib_write_more`].
 ///
@@ -288,6 +306,10 @@ fn step(handle: i64, flush: i32, out_len: usize) -> String {
                 (produced, consumed, error)
             }
             Engine::Brotli(stream) => {
+                let (produced, consumed) = stream.step(flush, pending, &mut out);
+                (produced, consumed, stream.error())
+            }
+            Engine::Zstd(stream) => {
                 let (produced, consumed) = stream.step(flush, pending, &mut out);
                 (produced, consumed, stream.error())
             }
@@ -381,7 +403,7 @@ pub(crate) unsafe extern "C" fn zlib_params(
                     scratch.truncate(produced);
                     (scratch, error)
                 }
-                Engine::Brotli(_) => (Vec::new(), None),
+                Engine::Brotli(_) | Engine::Zstd(_) => (Vec::new(), None),
             })
         }
         None => None,
@@ -408,6 +430,10 @@ pub(crate) unsafe extern "C" fn zlib_reset(
             Some(match &mut slot.engine {
                 Engine::Zlib(stream) => stream.reset(),
                 Engine::Brotli(stream) => stream.reset(),
+                Engine::Zstd(stream) => {
+                    stream.reset();
+                    None
+                }
             })
         }
         None => None,
@@ -474,6 +500,12 @@ pub(crate) const DESCRIPTORS: &[Descriptor] = &[
         params: &[I64, Str],
         ret: Str,
         invoke: zlib_brotli_init,
+    },
+    Descriptor {
+        key: b"zlibZstdInit\0",
+        params: &[I64, I64],
+        ret: Str,
+        invoke: zlib_zstd_init,
     },
     Descriptor {
         key: b"zlibWrite\0",
