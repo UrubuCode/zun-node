@@ -332,7 +332,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-path:start -->
 ### Node.js v25 `path` compatibility
 
-`██████████████████████░░` **94.1%** — 16 / 17 Node `test-path*` tests passing
+`████████████████████████` **100.0%** — 17 / 17 Node `test-path*` tests passing
 <!-- node-path:end -->
 
 > `path` already runs the whole Node corpus, so its number is a real measurement.
