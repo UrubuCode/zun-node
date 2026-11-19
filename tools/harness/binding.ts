@@ -47,11 +47,27 @@ const __harnessBufferBinding: any = {
   },
 };
 
+// `internalBinding('timers')` — `test-timers-ordering.js` reads the loop clock
+// as `getLibuvNow()`, libuv's integer millisecond count since the loop started.
+// The scheduling toggles are accepted and ignored: this platform's loop is the
+// engine's own, and `src/timers/timers.ts` keeps the ref accounting.
+// The monotonic clock the engine's timers run on, floored to whole
+// milliseconds: a 1 ms timer then always reads at least 1 later.
+const __harnessTimersBinding: any = {
+  getLibuvNow(): number {
+    return Math.floor(performance.now());
+  },
+  scheduleTimer(duration: any): void {},
+  toggleTimerRef(value: any): void {},
+  toggleImmediateRef(value: any): void {},
+};
+
 const __node_internal_test_binding: any = {
   internalBinding(name: any): any {
     if (name === "cares_wrap") return __dnsCares;
     if (name === "uv") return __harnessUvConstants;
     if (name === "buffer") return __harnessBufferBinding;
+    if (name === "timers") return __harnessTimersBinding;
     throw new Error("internalBinding: " + String(name) + " is not served by the harness");
   },
   primordials: {},

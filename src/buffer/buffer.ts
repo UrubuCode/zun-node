@@ -299,35 +299,40 @@ function __bufAtob(input: any): string {
 // function, because a byte view read *through* `any` is opaque in this engine
 // while the same value passed *into* a typed parameter is not.
 
-// Two divergences live here, both because a value held in an `any` does not
-// report its class in this engine (zun#38) — neither can be fixed from the
-// library side, and neither is reachable from Node's own `buffer` corpus:
-//
-//   * Node accepts an `ArrayBuffer`/`SharedArrayBuffer` as well as a view.
-//     Through `any` an `ArrayBuffer` is indistinguishable from `{}`
-//     (`ArrayBuffer.isView` is false, `Object.prototype.toString` answers
-//     `[object Object]`), so accepting one would mean accepting every object.
-//     It is rejected with Node's `ERR_INVALID_ARG_TYPE` instead.
-//   * Node rejects a `DataView` and accepts every *typed* array, validating the
-//     view's bytes. `ArrayBuffer.isView` is true for both and nothing separates
-//     them, while reading a `DataView` through the typed-array accessors is an
-//     **uncatchable** engine error ("call did not resolve to a method"). So
-//     only a `U8` view — which `Buffer.isBuffer` does recognise — is scanned,
-//     and any other view is reported as the wrong type. That is Node's answer
-//     for a `DataView` and a divergence for a `Uint16Array`.
-//
-// Node also throws `ERR_INVALID_STATE` for a detached `ArrayBuffer`; there is
-// no way to detach one here (`structuredClone` takes a single argument), and no
-// way to observe detachment if there were.
-function __bufIsUtf8(input: any): boolean {
-  __bufValidateScanInput(input);
-  return __bufScanUtf8(input);
+// The engine now reports an `ArrayBuffer`'s, a typed array's and a
+// `DataView`'s class through `Object.prototype.toString` even inside an `any`,
+// and a transferred buffer answers `detached === true`, so the whole contract
+// is Node's: a `DataView` or a non-binary value is `ERR_INVALID_ARG_TYPE`, a
+// detached `ArrayBuffer` is `ERR_INVALID_STATE`, and any typed array or
+// (Shared)ArrayBuffer is scanned over its bytes. The bytes are read through a
+// `Uint8Array` window onto the same memory, which is a `Buffer` to the checker.
+class ERR_INVALID_STATE extends NodeError {
+  constructor(what: string) {
+    super("ERR_INVALID_STATE", "Invalid state: " + what);
+  }
 }
 
-function __bufValidateScanInput(input: any): void {
-  if (!Buffer.isBuffer(input)) {
-    throw new ERR_INVALID_ARG_TYPE("input", ["ArrayBuffer", "Buffer", "TypedArray"], input);
+function __bufIsUtf8(input: any): boolean {
+  return __bufScanUtf8(__bufValidateScanInput(input));
+}
+
+function __bufValidateScanInput(input: any): any {
+  const tag: string =
+    input !== null && typeof input === "object" ? Object.prototype.toString.call(input) : "";
+  if (tag === "[object ArrayBuffer]" || tag === "[object SharedArrayBuffer]") {
+    if (input.detached === true) {
+      throw new ERR_INVALID_STATE("Cannot validate on a detached buffer");
+    }
+    return new Uint8Array(input);
   }
+  if (tag !== "" && tag !== "[object DataView]" && ArrayBuffer.isView(input)) {
+    if (input.buffer.detached === true) {
+      throw new ERR_INVALID_STATE("Cannot validate on a detached buffer");
+    }
+    if (Buffer.isBuffer(input)) return input;
+    return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+  }
+  throw new ERR_INVALID_ARG_TYPE("input", ["ArrayBuffer", "Buffer", "TypedArray"], input);
 }
 
 function __bufScanUtf8(bytes: Buffer): boolean {
@@ -380,8 +385,7 @@ function __bufScanUtf8(bytes: Buffer): boolean {
 }
 
 function __bufIsAscii(input: any): boolean {
-  __bufValidateScanInput(input);
-  return __bufScanAscii(input);
+  return __bufScanAscii(__bufValidateScanInput(input));
 }
 
 function __bufScanAscii(bytes: Buffer): boolean {

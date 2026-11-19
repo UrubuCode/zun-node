@@ -4,6 +4,34 @@ The compatibility bar for `buffer` is **Node.js 25's own test suite**, not tests
 we write. `buffer` is **not finished** until it passes 100% of Node's
 `test-buffer*` tests.
 
+## Re-probe on `feat/finish-core` (39 / 64)
+
+Re-measured against the current engine: 37 / 64 before, 39 / 64 after.
+
+* The tracker kind is now `zun-ts+ext`: `test-buffer-concat.js` and the
+  `constructor-node-modules*` files spawn a child process, and without the
+  extension the bundle died on an undefined native. `concat` passes now. The
+  cost is `test-buffer-bytelength.js`, which calls `vm.runInNewContext` and
+  loses run-time code generation under `--ext`
+  ([zun#151](https://github.com/UrubuCode/zun/issues/151)); when that is fixed
+  both pass.
+* **Fixed here:** `isUtf8` / `isAscii` (`test-buffer-isutf8.js`,
+  `test-buffer-isascii.js`). The engine now reports an `ArrayBuffer`'s, a typed
+  array's and a `DataView`'s class through an `any`, and a transferred buffer
+  answers `detached === true`, so Node's whole contract is implemented:
+  ArrayBuffer/SharedArrayBuffer/any TypedArray scanned over its bytes,
+  `DataView` rejected, detached buffer `ERR_INVALID_STATE`.
+* The inspected form of a Buffer now carries Node's "extra properties" tail
+  (`<Buffer 31 32, prop: 123>`). `test-buffer-inspect.js` still fails on the
+  nested value: a `Uint8Array` inspects as a `Buffer` because nothing separates
+  the two in this engine.
+* **Still blocked (all engine):** the `nodeBuffer` intrinsics' argument
+  validation (`copy` without `code`, `asciiWrite` with a negative length,
+  `toString(enc, start, {})`), `JSON.stringify` not calling `toJSON`, resizable
+  / pool / SharedArrayBuffer views, the function-constructor model
+  (`arraybuffer`, `fakes`, `inheritance`, `from`), the `Buffer()` deprecation
+  warning, and eval under `--ext` (`write-fast`, `bytelength`).
+
 ## The oracle
 
 `NODE_TESTS.txt` is the full inventory of Node 25's corpus for this module —

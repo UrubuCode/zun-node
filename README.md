@@ -353,7 +353,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
 
-`███████████████░░░░░░░░░` **62.8%** — 22 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+`████████████████░░░░░░░░` **68.5%** — 24 / 35 Node `test-event-emitter-*|test-events-*` tests passing
 <!-- node-events:end -->
 
 > `events` is implemented end to end — the whole `EventEmitter` surface, every
@@ -447,7 +447,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-buffer:start -->
 ### Node.js v25 `buffer` compatibility
 
-`█████████████░░░░░░░░░░░` **57.8%** — 37 / 64 Node `test-buffer*` tests passing
+`██████████████░░░░░░░░░░` **60.9%** — 39 / 64 Node `test-buffer*` tests passing
 <!-- node-buffer:end -->
 
 > `buffer` is the first module whose central object is **the engine's**, not
@@ -629,7 +629,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-timers:start -->
 ### Node.js v25 `timers` compatibility
 
-`█████████████░░░░░░░░░░░` **56.8%** — 33 / 58 Node `test-timers*` tests passing
+`███████████████░░░░░░░░░` **65.5%** — 38 / 58 Node `test-timers*` tests passing
 <!-- node-timers:end -->
 
 > `timers` is the first module whose *substance* was already in the engine: the
@@ -870,7 +870,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-console:start -->
 ### Node.js v25 `console` compatibility
 
-`████████████░░░░░░░░░░░░` **50.0%** — 11 / 22 Node `test-console*` tests passing
+`██████████████████░░░░░░` **77.2%** — 17 / 22 Node `test-console*` tests passing
 <!-- node-console:end -->
 
 <!-- node-perf_hooks:start -->

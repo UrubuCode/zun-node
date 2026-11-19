@@ -147,6 +147,22 @@
 //     bundle resolve, so `util.ts` sitting first in bundle order is fine.
 
 // ---------------------------------------------------------------------------
+// Explicit-resource-management symbols
+// ---------------------------------------------------------------------------
+//
+// Node 25 exposes `Symbol.dispose` / `Symbol.asyncDispose`, and its timers,
+// file handles and `addAbortListener` key methods by them. This engine has
+// neither (an engine gap), so they are installed here as ordinary unique
+// symbols, first in every bundle, before any module keys a method by them.
+{
+  const __symbolCtor: any = Symbol;
+  if (__symbolCtor.dispose === undefined) __symbolCtor.dispose = Symbol("Symbol.dispose");
+  if (__symbolCtor.asyncDispose === undefined) {
+    __symbolCtor.asyncDispose = Symbol("Symbol.asyncDispose");
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
 
@@ -1200,12 +1216,25 @@ function inspect(value: any, options?: any): string {
   return __utilFormatValue(ctx, value, 0);
 }
 
+function __utilIsRevokedProxy(value: any): boolean {
+  try {
+    Object.getPrototypeOf(value);
+    return false;
+  } catch (e) {
+    return true;
+  }
+}
+
 function __utilFormatValue(ctx: any, value: any, recurseTimes: number): string {
   const kind = typeof value;
   if (kind !== "object" && kind !== "function") {
     return __utilFormatPrimitive(ctx, value);
   }
   if (value === null) return __utilStylize(ctx, "null", "null");
+  // A revoked proxy throws on every trap. Node detects it through
+  // `getProxyDetails` and prints `<Revoked Proxy>`; here the one observable
+  // fact is that `getPrototypeOf` throws, and nothing else does.
+  if (__utilIsRevokedProxy(value)) return __utilStylize(ctx, "<Revoked Proxy>", "special");
   if (kind === "function" || __utilIsFn(value)) {
     return __utilFormatFunctionValue(ctx, value, recurseTimes);
   }
@@ -1659,6 +1688,17 @@ function __utilFormatByteView(ctx: any, value: any, recurseTimes: number): strin
     if (remaining > 0) {
       str = str + " ... " + String(remaining) + " more byte" + (remaining > 1 ? "s" : "");
     }
+    // Node's "inspect special properties as well" tail: own enumerable
+    // non-index keys, rendered compactly after the bytes.
+    const extras: string[] = [];
+    for (const key of Object.keys(value)) {
+      if (/^(0|[1-9][0-9]*)$/.test(key)) continue;
+      extras.push(key + ": " + __utilFormatValue(ctx, value[key], recurseTimes + 1));
+    }
+    if (extras.length > 0) {
+      if (length !== 0) str = str + ", ";
+      str = str + extras.join(", ");
+    }
     return "<Buffer " + str + ">";
   }
 
@@ -1865,7 +1905,8 @@ function __utilFormatKeys(ctx: any, value: any, recurseTimes: number, isError: b
     }
   }
   for (const sym of Object.getOwnPropertySymbols(value)) {
-    const label = "[" + __utilStylize(ctx, String(sym), "symbol") + "]";
+    // Node 25 prints a symbol key bare: `Symbol(foo): 1`, not `[Symbol(foo)]`.
+    const label = __utilStylize(ctx, String(sym), "symbol");
     output.push(label + ": " + __utilFormatValue(ctx, value[sym], recurseTimes + 1));
   }
   for (const entry of __utilFormatProtoKeys(ctx, value, recurseTimes)) output.push(entry);

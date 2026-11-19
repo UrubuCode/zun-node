@@ -14,6 +14,30 @@ bash zun-node/tools/run_node_tests.sh --zun target/debug/zun --module console
 there is no native extension and no `--ext`. Each test is bundled by
 `tools/bundle_node_test.sh` and run as `zun run <bundle.ts>`.
 
+## Re-probe on `feat/finish-core` (17 / 22)
+
+Re-measured against the current engine: 16 / 22 before (11 at the last
+commit), 17 / 22 after.
+
+* **Fixed here:** `util.inspect` of a revoked proxy prints `<Revoked Proxy>`
+  instead of throwing (`test-console-issue-43095.js`); symbol keys print bare,
+  `Symbol(foo): 1`, as Node 25 does.
+* Two bundler fixes for `test-console.js`: the `console` receiver rename no
+  longer fires inside a quoted string, and an `alias.member` rewrite no longer
+  fires after a `.` (it turned `'nodejs.util.inspect.custom'` into
+  `'nodejs.inspect.custom'`). The file now stops on the name of a
+  symbol-keyed arrow function, which is `""` here
+  ([zun#152](https://github.com/UrubuCode/zun/issues/152)).
+* **Still blocked (engine):** `test-console-instance.js` — a class method
+  value passed to `forEach` panics
+  ([zun#160](https://github.com/UrubuCode/zun/issues/160));
+  `test-console-table.js` — no `String.prototype.trimLeft`
+  ([zun#161](https://github.com/UrubuCode/zun/issues/161));
+  `test-console-assign-undefined.js` — `globalThis.console = 42` does not
+  rebind the `console` identifier; `test-console-no-swallow-stack-overflow.js`
+  — deep recursion overflows the native stack instead of throwing
+  `RangeError`.
+
 ## The two things to know before reading the table
 
 ### 1. `console` is in every bundle, because it is a global

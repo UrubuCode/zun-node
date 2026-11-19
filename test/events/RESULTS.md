@@ -6,7 +6,7 @@ Oracle: `nodejs/node@v25.0.0` `test/parallel/test-event-emitter-*|test-events-*.
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
 
-`███████████████░░░░░░░░░` **65.7%** — 23 / 35 Node `test-event-emitter-*|test-events-*` tests passing
+`████████████████░░░░░░░░` **68.5%** — 24 / 35 Node `test-event-emitter-*|test-events-*` tests passing
 <!-- node-events:end -->
 
 The "Why" column is the first line of the failing run's stderr, truncated.
@@ -27,7 +27,7 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-event-emitter-max-listeners-warning-for-symbol.js` | ✅ pass | |
 | `test-event-emitter-max-listeners-warning.js` | ✅ pass | |
 | `test-event-emitter-max-listeners.js` | ✅ pass | |
-| `test-event-emitter-method-names.js` | ❌ assertion | AssertionError [strictEqual]: Expected values to be strictly equal: |
+| `test-event-emitter-method-names.js` | ✅ pass | |
 | `test-event-emitter-modify-in-emit.js` | ✅ pass | |
 | `test-event-emitter-no-error-provided-to-error-event.js` | ✅ pass | |
 | `test-event-emitter-num-args.js` | ✅ pass | |
@@ -39,12 +39,12 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 | `test-event-emitter-special-event-names.js` | ✅ pass | |
 | `test-event-emitter-subclass.js` | ❌ runtime | zun: runtime error: unhandled exception: TypeError: call is not a function |
 | `test-event-emitter-symbols.js` | ✅ pass | |
-| `test-events-add-abort-listener.mjs` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: describe is not defined |
+| `test-events-add-abort-listener.mjs` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in tmp.DK4u5Y0435: |
 | `test-events-customevent.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-events-customevent.js: |
 | `test-events-getmaxlisteners.js` | ✅ pass | |
 | `test-events-list.js` | ✅ pass | |
 | `test-events-listener-count-with-listener.js` | ✅ pass | |
 | `test-events-on-async-iterator.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-events-on-async-iterator.js: |
-| `test-events-once.js` | ❌ type error | bundles/test-events-once.ts:20873:6: error: [SEM0001] no field or setter 'addEventListener' on this type |
+| `test-events-once.js` | ❌ type error | bundles/test-events-once.ts:22919:6: error: [SEM0001] no field or setter 'addEventListener' on this type |
 | `test-events-static-geteventlisteners.js` | ❌ bundle failed | bundle_node_test.sh: unresolved require() in test-events-static-geteventlisteners.js: |
 | `test-events-uncaught-exception-stack.js` | ❌ runtime | zun: runtime error: unhandled exception: Error |
