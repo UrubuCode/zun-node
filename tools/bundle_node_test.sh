@@ -149,6 +149,8 @@ case "$SRC" in
     ESM_SRC="$(mktemp)"
     perl -pe '
       if (/^\s*import\s/) {
+        # `../common/index.mjs` is the ESM face of `../common`.
+        s{(["\x27])\.\./common/index\.mjs\1}{\x27../common\x27};
         s/^(\s*)import\s+\*\s+as\s+([A-Za-z_\$][\w\$]*)\s+from\s+(["\x27][^"\x27]+["\x27])\s*;?/$1const $2 = require($3);/
         or s/^(\s*)import\s+([A-Za-z_\$][\w\$]*)\s*,\s*\{([^}]*)\}\s*from\s+(["\x27][^"\x27]+["\x27])\s*;?/my ($i,$d,$n,$m)=($1,$2,$3,$4); $n =~ s#\bas\b#:#g; "${i}const $d = require($m); const {$n} = require($m);"/e
         or s/^(\s*)import\s+\{([^}]*)\}\s*from\s+(["\x27][^"\x27]+["\x27])\s*;?/my ($i,$n,$m)=($1,$2,$3); $n =~ s#\bas\b#:#g; "${i}const {$n} = require($m);"/e

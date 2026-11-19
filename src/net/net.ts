@@ -2656,9 +2656,17 @@ function __netSamePrefix(left: any, right: any, prefix: number): boolean {
 
 class BlockList {
   rules: any = null;
+  // `check` is an own function-valued field rather than a method so that a
+  // caller can replace it on an instance (`test-dgram-blocklist.js` wraps it):
+  // assigning over a class method is a compile error in this engine.
+  check: any = null;
 
   constructor() {
     this.rules = [];
+    const self: BlockList = this;
+    this.check = function (address: any, family?: any): boolean {
+      return __netBlockCheck(self, address, family);
+    };
   }
 
   addAddress(address: any, family?: any): void {
@@ -2695,32 +2703,6 @@ class BlockList {
     });
   }
 
-  check(address: any, family?: any): boolean {
-    let probe: any = null;
-    if (__netIsObj(address) && address.address !== undefined) {
-      // A `SocketAddress` is accepted wherever an address string is.
-      probe = __netAddressBytes(address.address, address.family);
-    } else {
-      probe = __netAddressBytes(address, family);
-    }
-    if (probe === null) return false;
-    for (const rule of this.rules) {
-      if (String(rule.family) !== String(probe.family)) continue;
-      if (rule.kind === "address") {
-        if (__netCompareBytes(rule.bytes, probe.bytes) === 0) return true;
-      } else if (rule.kind === "range") {
-        if (
-          __netCompareBytes(probe.bytes, rule.bytes) >= 0 &&
-          __netCompareBytes(probe.bytes, rule.end) <= 0
-        ) {
-          return true;
-        }
-      } else if (__netSamePrefix(rule.bytes, probe.bytes, Number(rule.prefix))) {
-        return true;
-      }
-    }
-    return false;
-  }
 
   // Node's inspection surface: one line per rule, in the wording
   // `test-net-blocklist.js` compares against.
@@ -2752,6 +2734,33 @@ class BlockList {
     }
     return list;
   }
+}
+
+function __netBlockCheck(list: BlockList, address: any, family?: any): boolean {
+  let probe: any = null;
+  if (__netIsObj(address) && address.address !== undefined) {
+    // A `SocketAddress` is accepted wherever an address string is.
+    probe = __netAddressBytes(address.address, address.family);
+  } else {
+    probe = __netAddressBytes(address, family);
+  }
+  if (probe === null) return false;
+  for (const rule of list.rules) {
+    if (String(rule.family) !== String(probe.family)) continue;
+    if (rule.kind === "address") {
+      if (__netCompareBytes(rule.bytes, probe.bytes) === 0) return true;
+    } else if (rule.kind === "range") {
+      if (
+        __netCompareBytes(probe.bytes, rule.bytes) >= 0 &&
+        __netCompareBytes(probe.bytes, rule.end) <= 0
+      ) {
+        return true;
+      }
+    } else if (__netSamePrefix(rule.bytes, probe.bytes, Number(rule.prefix))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // One address argument of a `BlockList` method, validated the way Node

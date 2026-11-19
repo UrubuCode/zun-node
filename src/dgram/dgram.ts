@@ -187,8 +187,16 @@ function __dgramToBuffer(value: any): Buffer {
     const direct: Buffer = value;
     return direct;
   }
-  // A `Uint8Array` (or other typed view) is copied; a `DataView`/wider view is
-  // read as its element sequence, which is a documented deviation.
+  // A `DataView` is read byte by byte through a typed binding.
+  if (value instanceof DataView) {
+    const dv: DataView = value;
+    const raw: number[] = [];
+    const n: number = Number(dv.byteLength);
+    for (let i = 0; i < n; i++) raw.push(dv.getUint8(i));
+    return Buffer.from(raw);
+  }
+  // A `Uint8Array` (or other typed view) is copied; a wider view is read as
+  // its element sequence, which is a documented deviation.
   const view: Uint8Array = value;
   const bytes: number[] = [];
   const size: number = Number(view.length);
@@ -254,6 +262,13 @@ function __dgramDefaultLookup(self: any, address: any, callback: any): void {
     state.lookup(name, family, callback);
     return;
   }
+  // Node's `defaultLookup` reads `dns.lookup` at call time, so a test that
+  // replaces it is honoured whenever `dns` is part of the program.
+  const dnsModule: any = (globalThis as any).__zunNodeDns;
+  if (dnsModule !== undefined && dnsModule !== null) {
+    dnsModule.lookup(name, family, callback);
+    return;
+  }
   const literal: number = __netIsIP(name);
   if (literal !== 0) {
     __netTick(function (): void {
@@ -297,6 +312,12 @@ class __DgramSocket extends EventEmitter {
       if (options.sendBufferSize !== undefined && typeof options.sendBufferSize !== "number") {
         throw new ERR_INVALID_ARG_TYPE("options.sendBufferSize", "number", options.sendBufferSize);
       }
+      if (__dgramTruthy(options.receiveBlockList) && !(options.receiveBlockList instanceof BlockList)) {
+        throw new ERR_INVALID_ARG_TYPE("options.receiveBlockList", "net.BlockList", options.receiveBlockList);
+      }
+      if (__dgramTruthy(options.sendBlockList) && !(options.sendBlockList instanceof BlockList)) {
+        throw new ERR_INVALID_ARG_TYPE("options.sendBlockList", "net.BlockList", options.sendBlockList);
+      }
     }
     const ipv6: boolean = kind === "udp6";
     const opened: any = ops.udpOpen(ipv6 ? 1 : 0);
@@ -328,8 +349,29 @@ class __DgramSocket extends EventEmitter {
       ipv6Only: options !== null && options.ipv6Only === true,
       recvBufferSize: recvSize,
       sendBufferSize: sendSize,
+      receiveBlockList: options !== null && __dgramTruthy(options.receiveBlockList) ? options.receiveBlockList : null,
+      sendBlockList: options !== null && __dgramTruthy(options.sendBlockList) ? options.sendBlockList : null,
     };
     __dgramInstallFacade(this);
+    // `Socket.prototype[SymbolAsyncDispose]`: close, unless already closed.
+    // An own property, because a class computed key must be a literal
+    // well-known symbol the checker recognises (zun#31).
+    const disposing: __DgramSocket = this;
+    (this as any)[Symbol.asyncDispose] = function (): any {
+      return new Promise((resolve: any, reject: any) => {
+        if (Number(disposing._dgState.handle) === 0) {
+          resolve(undefined);
+          return;
+        }
+        try {
+          disposing.close(function (): void {
+            resolve(undefined);
+          });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    };
     if (options !== null && options.ipv6Only === true && !ipv6) {
       this._dgState.handle = 0;
       ops.close(Number(__ioFields(opened)[0]));
@@ -464,6 +506,9 @@ class __DgramSocket extends EventEmitter {
   }
 
   getSendQueueSize(): any {
+    // libuv's Windows backend never adds to `send_queue_size` (`uv__send` in
+    // src/win/udp.c hands the request to the kernel), so it reads 0 there.
+    if (process.platform === "win32") return 0;
     let total = 0;
     for (const entry of this._dgState.blocked) total += Number(entry.size);
     return total;
@@ -547,6 +592,7 @@ function __dgramInstallFacade(self: any): void {
       );
       return;
     }
+    if (__dgramReceiveBlocked(self, rinfo)) return;
     self.emit("message", buf, rinfo);
   };
   state.facade = facade;
@@ -560,6 +606,11 @@ class __DgramUdpHandle {
   fd: number = -1;
   id: number = 0;
 }
+
+// `internalBinding('udp_wrap')` as far as the corpus reads it, published for
+// the test harness's `internalBinding` (tools/harness/binding.ts), which is
+// compiled into bundles that may not contain this module.
+(globalThis as any).__zunNodeUdpWrap = { UDP: __DgramUdpHandle };
 
 function __dgramCreateSocketHandle(address: any, port: any, addressType: any, fd?: any): any {
   const ops: any = __dgramRequireIo();
@@ -715,6 +766,7 @@ function __dgramOnReadable(self: any): void {
       port: Number(parts[2]),
       size: Number(bytes.length),
     };
+    if (__dgramReceiveBlocked(self, info)) continue;
     self.emit("message", bytes, info);
     if (Number(state.handle) !== handle) return;
   }
@@ -791,6 +843,9 @@ function __dgramDoConnect(self: any, port: number, address: any, callback: any):
     __evBox(function (ex: any, ip: any): void {
       if (Number(state.handle) === 0) return;
       let failure: any = ex;
+      if ((failure === null || failure === undefined) && __dgramSendBlocked(self, ip)) {
+        failure = new __DgramIpBlocked(String(ip));
+      }
       if (failure === null || failure === undefined) {
         const result: any = __dgramRequireIo().udpConnect(Number(state.handle), String(ip), port);
         if (__ioFailed(result)) {
@@ -821,6 +876,35 @@ function __dgramDoConnect(self: any, port: number, address: any, callback: any):
 // send
 // ---------------------------------------------------------------------------
 
+class __DgramIpBlocked extends NodeError {
+  constructor(ip: string) {
+    super("ERR_IP_BLOCKED", "IP(" + ip + ") is blocked by net.BlockList");
+  }
+}
+
+// `state.sendBlockList?.check(ip, "ipv" + isIP(ip))`.
+function __dgramSendBlocked(self: any, ip: any): boolean {
+  const list: any = self._dgState.sendBlockList;
+  if (list === null || list === undefined) return false;
+  const text: string = String(ip);
+  return __dgramTruthy(Reflect.apply(list.check, list, [text, "ipv" + String(__netIsIP(text))]));
+}
+
+// `receiveBlockList?.check(rinfo.address, rinfo.family?.toLocaleLowerCase())`.
+function __dgramReceiveBlocked(self: any, rinfo: any): boolean {
+  const list: any = self._dgState.receiveBlockList;
+  if (list === null || list === undefined) return false;
+  const family: any = rinfo.family === undefined || rinfo.family === null ? undefined : String(rinfo.family).toLowerCase();
+  // `Reflect.apply` rather than `list.check(...)`: a replacement `check`
+  // that reads `arguments` loses its first argument through the member call.
+  return __dgramTruthy(Reflect.apply(list.check, list, [rinfo.address, family]));
+}
+
+function __dgramTruthy(value: any): boolean {
+  return value !== undefined && value !== null && value !== "" && value !== 0 && value !== false &&
+    !(typeof value === "number" && value !== value);
+}
+
 function __dgramSend(self: any, a: any, b: any, c: any, d: any, e: any, f: any): void {
   let buffer: any = a;
   let offset: any = b;
@@ -846,16 +930,11 @@ function __dgramSend(self: any, a: any, b: any, c: any, d: any, e: any, f: any):
       if (typeof port === "function") {
         callback = port;
         port = null;
-      } else if (port || address) {
-        throw new ERR_SOCKET_DGRAM_IS_CONNECTED();
       }
     } else {
-      // `send(buf, port, address[, cb])` on a connected socket is refused.
-      if (typeof offset === "number" || typeof length === "string") {
-        throw new ERR_SOCKET_DGRAM_IS_CONNECTED();
-      }
       callback = offset;
     }
+    if (__dgramTruthy(port) || __dgramTruthy(address)) throw new ERR_SOCKET_DGRAM_IS_CONNECTED();
     port = null;
     address = null;
   }
@@ -925,6 +1004,18 @@ function __dgramDispatch(
   );
 }
 
+// Node's `--test-udp-no-try-send` test flag, read out of `NODE_OPTIONS`.
+const __dgramNoTrySend: any = { on: __dgramReadNoTrySend() };
+
+function __dgramReadNoTrySend(): boolean {
+  const raw: any = __processEnvGet("NODE_OPTIONS");
+  if (typeof raw === "string" && raw.indexOf("--test-udp-no-try-send") !== -1) return true;
+  for (const word of process.execArgv) {
+    if (String(word) === "--test-udp-no-try-send") return true;
+  }
+  return false;
+}
+
 function __dgramDoSend(
   self: any,
   ex: any,
@@ -946,6 +1037,10 @@ function __dgramDoSend(
     return;
   }
   if (Number(state.handle) === 0) return;
+  if (__dgramTruthy(ip) && __dgramSendBlocked(self, ip)) {
+    if (__netIsFn(callback)) __netTick(callback, new __DgramIpBlocked(String(ip)));
+    return;
+  }
   const parts: Buffer[] = [];
   for (const item of list) {
     const piece: Buffer = item;
@@ -963,9 +1058,12 @@ function __dgramDoSend(
     callback: callback,
     size: Number(joined.length),
   };
-  if (Number(state.blocked.length) > 0) {
-    // Earlier datagrams are still waiting for room: keep the order.
+  if (Number(state.blocked.length) > 0 || __dgramNoTrySend.on) {
+    // Earlier datagrams are still waiting for room: keep the order. Under
+    // `--test-udp-no-try-send` every datagram takes this queued path, as
+    // libuv's `uv_udp_try_send` is skipped and the send waits for writability.
     state.blocked.push(entry);
+    __ioWant(Number(state.handle), 2);
     return;
   }
   __dgramAttempt(self, entry, true);

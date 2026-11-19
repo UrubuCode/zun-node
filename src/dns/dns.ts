@@ -404,6 +404,12 @@ class DNSException extends NodeError {
       writable: true,
       configurable: true,
     });
+    Object.defineProperty(this, "stack", {
+      value: "Error: " + message + __dnsCallerFrames(),
+      enumerable: false,
+      writable: true,
+      configurable: true,
+    });
   }
   get name(): string {
     return "Error";
@@ -411,6 +417,34 @@ class DNSException extends NodeError {
   toString(): string {
     return "Error: " + this.message;
   }
+}
+
+// The stack frames under a `DNSException`, as `captureLargerStackTrace` leaves
+// them: the exception's own constructors and this module's helpers are
+// dropped, and the top-level frame is named the way V8 names a CommonJS
+// module's body (`Object.<anonymous>`).
+function __dnsCallerFrames(): string {
+  const raw: string = String(new Error("").stack);
+  const lines: string[] = raw.split("\n");
+  let out: string = "";
+  for (let i = 1; i < Number(lines.length); i++) {
+    const line: string = lines[i];
+    const trimmed: string = line.trim();
+    if (
+      trimmed.startsWith("at __dns") ||
+      trimmed.startsWith("at DNSException") ||
+      trimmed.startsWith("at NodeError") ||
+      trimmed.startsWith("at constructor ")
+    ) {
+      continue;
+    }
+    if (trimmed.startsWith("at <main>")) {
+      out = out + "\n    at Object.<anonymous>" + trimmed.slice(9);
+    } else {
+      out = out + "\n    " + trimmed;
+    }
+  }
+  return out;
 }
 
 // libuv's `EAI_NODATA` / `EAI_NONAME` as Node's fabricated `ENOTFOUND`, every
@@ -687,12 +721,29 @@ function __dnsIpv6Nibbles(address: string): string {
   return out;
 }
 
+function __dnsIsOnion(name: string): boolean {
+  let lower: string = name.toLowerCase();
+  if (lower.endsWith(".")) lower = lower.slice(0, lower.length - 1);
+  return lower === "onion" || lower.endsWith(".onion");
+}
+
 // One query against the channel in `__dnsChannelSlot`, as the default
 // implementation of every `ChannelWrap.prototype` query method.
 function __dnsBindingQuery(bindingName: string, req: any, name: any): any {
   const handle: any = __dnsChannelSlot.current;
   const rrtype: string = __DNS_BINDING_TYPES[bindingName];
   const queried: string = bindingName === "getHostByAddr" ? __dnsArpaName(String(name)) : String(name);
+  // c-ares refuses `.onion` names without sending anything (RFC 7686 §2,
+  // `ares__is_onion_domain`), completing the query with ENOTFOUND.
+  if (__dnsIsOnion(queried)) {
+    handle.pending = Number(handle.pending) + 1;
+    process.nextTick(() => {
+      handle.pending = Number(handle.pending) - 1;
+      handle.requests = __dnsWithoutRequest(handle.requests, req);
+      __evCall(req.oncomplete, [req.cancelled === true ? "ECANCELLED" : "ENOTFOUND"]);
+    });
+    return 0;
+  }
   if (__ioAvailable()) return __dnsQueryAsync(handle, bindingName, req, rrtype, queried);
   const raw: string = __dnsNative.dnsQuery(
     __dnsServerPayload(handle),
@@ -1327,12 +1378,18 @@ function __dnsGetServers(handle: any): string[] {
 function __dnsSetServers(handle: any, servers: any): void {
   __dnsValidateArray(servers, "servers");
   const next: any[] = [];
-  const count: number = Number(servers.length);
-  for (let index = 0; index < count; index++) {
-    // `ArrayPrototypeForEach` semantics: the length is read once and a hole
-    // (or an index an accessor truncated away mid-walk) is skipped.
-    if (!(index in servers)) continue;
-    const serv: any = servers[index];
+  // `ArrayPrototypeForEach` semantics: the length is read once and a hole
+  // (or an index an accessor truncated away mid-walk) is skipped. The walk is
+  // `forEach` itself rather than an indexed loop, because a plain index read of
+  // an element defined by an accessor yields the engine's internal accessor
+  // record instead of invoking the getter, while `forEach` invokes it.
+  const given: any[] = [];
+  servers.forEach((value: any, at: any) => {
+    given.push([Number(at), value]);
+  });
+  for (const pair of given) {
+    const index: number = Number(pair[0]);
+    const serv: any = pair[1];
     __dnsValidateString(serv, "servers[" + String(index) + "]");
     let version: number = __dnsIsIP(serv);
     if (version !== 0) {
@@ -1749,6 +1806,17 @@ function __dnsLookupServicePromise(args: any[]): any {
 // ---------------------------------------------------------------------------
 
 // `internal/dns/callback_resolver.js`' `query`, for one binding name.
+// The optional `(options, callback)` tail of a callback-style entry point as
+// the argument list it was given. The public methods declare two optional
+// parameters rather than `...rest`, because a function value passed to a rest
+// parameter does not resolve at the call site (zun#100); an explicit trailing
+// `undefined` is therefore indistinguishable from an omitted argument.
+function __dnsRest(a: any, b: any): any[] {
+  if (b !== undefined) return [a, b];
+  if (a !== undefined) return [a];
+  return [];
+}
+
 function __dnsQueryCallback(resolver: any, bindingName: string, name: any, rest: any[]): any {
   const given: number = Number(rest.length);
   let options: any = given > 1 ? rest[0] : undefined;
@@ -1871,50 +1939,50 @@ class Resolver {
   setLocalAddress(ipv4?: any, ipv6?: any): void {
     __dnsSetLocalAddress(this._handle, ipv4, ipv6);
   }
-  resolve(hostname: any, ...rest: any[]): any {
-    return __dnsResolveCallback(this, hostname, rest);
+  resolve(hostname: any, __a?: any, __b?: any): any {
+    return __dnsResolveCallback(this, hostname, __dnsRest(__a, __b));
   }
-  resolve4(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "queryA", name, rest);
+  resolve4(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "queryA", name, __dnsRest(__a, __b));
   }
-  resolve6(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "queryAaaa", name, rest);
+  resolve6(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "queryAaaa", name, __dnsRest(__a, __b));
   }
-  resolveAny(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "queryAny", name, rest);
+  resolveAny(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "queryAny", name, __dnsRest(__a, __b));
   }
-  resolveCaa(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "queryCaa", name, rest);
+  resolveCaa(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "queryCaa", name, __dnsRest(__a, __b));
   }
-  resolveCname(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "queryCname", name, rest);
+  resolveCname(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "queryCname", name, __dnsRest(__a, __b));
   }
-  resolveMx(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "queryMx", name, rest);
+  resolveMx(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "queryMx", name, __dnsRest(__a, __b));
   }
-  resolveNaptr(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "queryNaptr", name, rest);
+  resolveNaptr(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "queryNaptr", name, __dnsRest(__a, __b));
   }
-  resolveNs(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "queryNs", name, rest);
+  resolveNs(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "queryNs", name, __dnsRest(__a, __b));
   }
-  resolvePtr(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "queryPtr", name, rest);
+  resolvePtr(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "queryPtr", name, __dnsRest(__a, __b));
   }
-  resolveSoa(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "querySoa", name, rest);
+  resolveSoa(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "querySoa", name, __dnsRest(__a, __b));
   }
-  resolveSrv(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "querySrv", name, rest);
+  resolveSrv(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "querySrv", name, __dnsRest(__a, __b));
   }
-  resolveTlsa(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "queryTlsa", name, rest);
+  resolveTlsa(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "queryTlsa", name, __dnsRest(__a, __b));
   }
-  resolveTxt(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "queryTxt", name, rest);
+  resolveTxt(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "queryTxt", name, __dnsRest(__a, __b));
   }
-  reverse(address: any, ...rest: any[]): any {
-    return __dnsQueryCallback(this, "getHostByAddr", address, rest);
+  reverse(address: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(this, "getHostByAddr", address, __dnsRest(__a, __b));
   }
 }
 
@@ -2161,8 +2229,8 @@ const __node_dns_promises: any = {
 // ---------------------------------------------------------------------------
 
 const __node_dns: any = {
-  lookup(hostname: any, ...rest: any[]): any {
-    return __dnsLookup(hostname, rest);
+  lookup(hostname: any, __a?: any, __b?: any): any {
+    return __dnsLookup(hostname, __dnsRest(__a, __b));
   },
   lookupService(...args: any[]): any {
     return __dnsLookupService(args);
@@ -2181,50 +2249,50 @@ const __node_dns: any = {
   getServers(): string[] {
     return __dnsDefaultResolver().getServers();
   },
-  resolve(hostname: any, ...rest: any[]): any {
-    return __dnsResolveCallback(__dnsDefaultResolver(), hostname, rest);
+  resolve(hostname: any, __a?: any, __b?: any): any {
+    return __dnsResolveCallback(__dnsDefaultResolver(), hostname, __dnsRest(__a, __b));
   },
-  resolve4(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "queryA", name, rest);
+  resolve4(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "queryA", name, __dnsRest(__a, __b));
   },
-  resolve6(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "queryAaaa", name, rest);
+  resolve6(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "queryAaaa", name, __dnsRest(__a, __b));
   },
-  resolveAny(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "queryAny", name, rest);
+  resolveAny(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "queryAny", name, __dnsRest(__a, __b));
   },
-  resolveCaa(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "queryCaa", name, rest);
+  resolveCaa(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "queryCaa", name, __dnsRest(__a, __b));
   },
-  resolveCname(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "queryCname", name, rest);
+  resolveCname(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "queryCname", name, __dnsRest(__a, __b));
   },
-  resolveMx(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "queryMx", name, rest);
+  resolveMx(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "queryMx", name, __dnsRest(__a, __b));
   },
-  resolveNaptr(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "queryNaptr", name, rest);
+  resolveNaptr(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "queryNaptr", name, __dnsRest(__a, __b));
   },
-  resolveNs(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "queryNs", name, rest);
+  resolveNs(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "queryNs", name, __dnsRest(__a, __b));
   },
-  resolvePtr(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "queryPtr", name, rest);
+  resolvePtr(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "queryPtr", name, __dnsRest(__a, __b));
   },
-  resolveSoa(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "querySoa", name, rest);
+  resolveSoa(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "querySoa", name, __dnsRest(__a, __b));
   },
-  resolveSrv(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "querySrv", name, rest);
+  resolveSrv(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "querySrv", name, __dnsRest(__a, __b));
   },
-  resolveTlsa(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "queryTlsa", name, rest);
+  resolveTlsa(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "queryTlsa", name, __dnsRest(__a, __b));
   },
-  resolveTxt(name: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "queryTxt", name, rest);
+  resolveTxt(name: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "queryTxt", name, __dnsRest(__a, __b));
   },
-  reverse(address: any, ...rest: any[]): any {
-    return __dnsQueryCallback(__dnsDefaultResolver(), "getHostByAddr", address, rest);
+  reverse(address: any, __a?: any, __b?: any): any {
+    return __dnsQueryCallback(__dnsDefaultResolver(), "getHostByAddr", address, __dnsRest(__a, __b));
   },
 
   // uv_getaddrinfo flags, as the platform defines them.
@@ -2257,3 +2325,8 @@ const __node_dns: any = {
   ADDRGETNETWORKPARAMS: __DNS_ADDRGETNETWORKPARAMS,
   CANCELLED: __DNS_CANCELLED,
 };
+
+// Published for modules that resolve through `dns.lookup` lazily, as Node's
+// `defaultLookup` does (`dgram`): a bundle that does not include this module
+// leaves the slot empty and those modules fall back to their own resolver.
+(globalThis as any).__zunNodeDns = __node_dns;

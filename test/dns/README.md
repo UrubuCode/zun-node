@@ -6,7 +6,7 @@ listed in [`NODE_TESTS.txt`](NODE_TESTS.txt) and downloaded by
 vendored. The per-test run of the last measurement is
 [`RESULTS.md`](RESULTS.md); this file says *why* each failing test fails.
 
-**22 / 27 passing (81.4%)**, measured on Windows with the release engine and the
+**25 / 27 passing (92.5%)**, measured on Windows with the release engine and the
 worktree's own `zun_node.dll`.
 
 `dns` is the kind `os` introduced: Zun TypeScript (`../../src/dns/dns.ts`) over
@@ -18,19 +18,33 @@ Rust natives (`../../src/dns/*.rs`), run as
 same surface again under `node:dns/promises` — so the table below is almost
 entirely about things outside it.
 
-## Why the other 5 fail
+## Why the other 2 fail
 
-None of the five is in this module.
+Neither is in this module; both are compile errors in the test body.
 
 | Test | Blocker |
 |---|---|
-| `test-dns.js` | **An accessor on an array index reads back as the engine's internal record** ([zun#132](https://github.com/UrubuCode/zun/issues/132)): the test defines a getter on `servers[2]` that truncates the array mid-walk, and `servers[2]` yields `{ __elemAcc: true, v: ... }` instead of the getter's string, so `validateString` rejects it. Holes in the array are handled (`setServers` skips them, as `ArrayPrototypeForEach` does). |
-| `test-dns-channel-cancel.js` | `TypeError: apply is not a function`, raised inside `resolver.resolve4('example0.org', next)` where `next` is a rest-parameter arrow that spreads into a `common.mustCall` wrapper and is defined inside an `async` `mustCall` callback. Every smaller reduction of that shape runs correctly, so it is not yet isolated well enough for an engine issue; `test-dns-channel-cancel-promise.js` and `test-dns-cancel-reverse-lookup.js` cover the same `cancel()` path and pass. |
-| `test-dns-lookup-promises.js` | **Arity is enforced on a plain function** — `function getaddrinfoPositive(addresses)` is called with two arguments and the checker rejects the program (`expects 0 to 1 argument(s), found 2`). |
-| `test-dns-memory-error.js` | Needs named stack frames (`err.stack.split('\n')[1]` must match `/^ {4}at Object/`), which the engine does not produce. |
-| `test-dns-perf_hooks.js` | **A spread into a method call is not lowered** (`entries.push(...items.getEntries())`). Behind it is a real gap: `dns` does not feed the performance timeline. |
+| `test-dns-lookup-promises.js` | **Arity is enforced on a plain function** ([zun#61](https://github.com/UrubuCode/zun/issues/61)) — `function getaddrinfoPositive(addresses)` is called with two arguments and the checker rejects the program (`expects 0 to 1 argument(s), found 2`). |
+| `test-dns-perf_hooks.js` | **A spread into a method call is not lowered** ([zun#92](https://github.com/UrubuCode/zun/issues/92), `entries.push(...items.getEntries())`). Behind it is a real gap: `dns` does not feed the performance timeline. |
 
-## What moved the count from 6 to 22
+## What moved the count from 22 to 25
+
+* `test-dns-channel-cancel.js`: the failure was a function value passed to a
+  `...rest` method parameter not resolving at the call site
+  ([zun#100](https://github.com/UrubuCode/zun/issues/100)). Every public
+  callback-style entry point (`lookup`, `resolve*`, `reverse`, on both the
+  module and `Resolver`) now declares two optional parameters and rebuilds the
+  argument list with `__dnsRest`; an explicit trailing `undefined` is therefore
+  read as omitted.
+* `test-dns.js`: `setServers` walks the list with `forEach` (an indexed read of
+  an accessor element yields the engine's internal record, zun#132, while
+  `forEach` invokes the getter), and `.onion` names complete with `ENOTFOUND`
+  without sending a query, as c-ares does (RFC 7686).
+* `test-dns-memory-error.js`: `DNSException` builds its own `stack` from the
+  engine's frames, dropping its constructors and naming the top-level frame
+  `Object.<anonymous>` the way V8 names a CommonJS module body.
+
+## What moved the count from 6 to 22 (earlier round)
 
 * **The asynchronous transport** (below) — the nine fake-server files.
 * **`tools/harness/dns.ts`**, a port of `test/common/dns.js`

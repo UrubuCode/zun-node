@@ -1035,7 +1035,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-dns:start -->
 ### Node.js v25 `dns` compatibility
 
-`███████████████████░░░░░` **81.4%** — 22 / 27 Node `test-dns*` tests passing
+`██████████████████████░░` **92.5%** — 25 / 27 Node `test-dns*` tests passing
 <!-- node-dns:end -->
 
 > `dns` is the sixth module written as Zun TypeScript over Rust natives, and the
@@ -1354,7 +1354,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-dgram:start -->
 ### Node.js v25 `dgram` compatibility
 
-`██████████████████░░░░░░` **76.3%** — 58 / 76 Node `test-dgram-*` tests passing
+`█████████████████████░░░` **89.4%** — 68 / 76 Node `test-dgram-*` tests passing
 <!-- node-dgram:end -->
 
 > `dgram` is the second consumer of the shared I/O loop and follows the pattern
