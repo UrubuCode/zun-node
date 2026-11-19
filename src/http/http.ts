@@ -1695,7 +1695,12 @@ function __httpOutFinal(self: any, cb: any): void {
   if (self.chunkedEncoding === true && self._hasBody === true) {
     tail = tail + "0\r\n" + String(self._trailer) + "\r\n";
   }
-  if (tail === "") {
+  // Node always issues a final `_send('', 'latin1', finish)`, even with an
+  // empty tail, so `finish` is ordered after the socket write completes.
+  // A destroyed socket has nothing to order against; Node's `_writeRaw`
+  // drops the write rather than failing `end()`.
+  const sock: any = self.socket;
+  if (tail === "" && sock !== null && sock !== undefined && sock.destroyed === true) {
     __httpInvoke(cb, [null]);
     return;
   }

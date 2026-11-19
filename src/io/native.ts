@@ -31,6 +31,12 @@ __ioInstallNative({
   listen(address: string, port: number, backlog: number, flags: number): string {
     return __ioNative.ioListen(address, port, backlog, flags);
   },
+  listenPipe(path: string, backlog: number): string {
+    return __ioNative.ioListenPipe(path, backlog);
+  },
+  connectPipe(handle: number, path: string): string {
+    return __ioNative.ioConnectPipe(handle, path);
+  },
   accept(handle: number): string {
     return __ioNative.ioAccept(handle);
   },

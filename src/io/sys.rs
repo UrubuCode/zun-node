@@ -106,11 +106,11 @@ mod unix {
         }
     }
 
-    fn last() -> io::Error {
+    pub(crate) fn last() -> io::Error {
         io::Error::last_os_error()
     }
 
-    fn would_block(err: &io::Error) -> bool {
+    pub(crate) fn would_block(err: &io::Error) -> bool {
         matches!(err.raw_os_error(), Some(libc::EAGAIN) | Some(libc::EWOULDBLOCK))
     }
 
@@ -718,12 +718,12 @@ mod windows {
         }
     }
 
-    fn last() -> io::Error {
+    pub(crate) fn last() -> io::Error {
         // SAFETY: no arguments, reads this thread's last Winsock error.
         io::Error::from_raw_os_error(unsafe { WSAGetLastError() })
     }
 
-    fn would_block(err: &io::Error) -> bool {
+    pub(crate) fn would_block(err: &io::Error) -> bool {
         err.raw_os_error() == Some(WSAEWOULDBLOCK)
     }
 

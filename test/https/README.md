@@ -4,7 +4,7 @@ The oracle is `nodejs/node@v25.0.0`, `test/parallel/test-https-*.js` — 62
 files, listed in [`NODE_TESTS.txt`](NODE_TESTS.txt), with the key fixtures in
 [`NODE_FIXTURES.txt`](NODE_FIXTURES.txt). Per-test run: [`RESULTS.md`](RESULTS.md).
 
-**24 / 62 passing (38.7%)** on Windows (2026-11-18). Baseline before this
+**27 / 62 passing (43.5%)** on Windows (2026-11-18). Baseline before this
 module existed: 0 / 62.
 
 `https` is [`../../src/https/https.ts`](../../src/https/https.ts): `node:http`

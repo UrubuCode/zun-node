@@ -64,11 +64,10 @@
 //     documents. A `lookup` callback therefore still runs on a later tick than
 //     its caller, and `options.lookup` is still honoured, but two concurrent
 //     connects resolve one after the other.
-//   * **No pipes.** A Unix domain socket / Windows named pipe handle is a
-//     different kernel object with a different readiness story, and the loop
-//     has only the TCP half today. `listen(path)` and `connect(path)` raise
-//     `ERR_INVALID_ARG_VALUE`-shaped `ENOTSUP` rather than pretending; the
-//     twenty-odd pipe files in the corpus are named in ../../test/net/README.md.
+//   * **Pipes are local sockets.** `listen(path)` / `connect({ path })` open
+//     a Unix domain socket; on Windows a named pipe name is mapped to an
+//     AF_UNIX socket file in the temp directory (see `src/io/pipe.rs`), so
+//     it shares the TCP readiness path. Only this runtime can dial it.
 //
 // ---------------------------------------------------------------------------
 // Engine workarounds in this file, each tied to an open zun issue
@@ -748,6 +747,8 @@ class Socket extends Duplex {
     this._sockState = {
       // The I/O handle, or 0 when there is none.
       handle: 0,
+      // The path of a pipe connection, or null for TCP.
+      pipe: null,
       // Bytes handed to the kernel and taken off it.
       bytesWritten: 0,
       bytesRead: 0,
@@ -1463,16 +1464,14 @@ function __netSocketConnectOptions(self: any, options: any): any {
   // is legal for `connect` here, as it is in Node — `validatePort`'s
   // `allowZero` defaults to true.
   __netValidateConnectOptions(options);
-  const port: number = hasPort ? __netValidatePort(options.port, "options.port", true) : 0;
-  if (hasPath) {
-    // See the header: pipes are a different kernel object and the loop has
-    // only the socket half.
-    throw new ERR_INVALID_ARG_VALUE(
-      "options.path",
-      options.path,
-      "is not supported by node:net on this runtime (no pipe support)",
-    );
+  const port: number =
+    hasPort && !hasPath ? __netValidatePort(options.port, "options.port", true) : 0;
+  // Node's `connect` gives a path precedence over a port (`listen` is the
+  // other way round): `http`'s `socketPath` arrives next to a default port.
+  if (hasPath && typeof options.path !== "string") {
+    throw new ERR_INVALID_ARG_TYPE("options.path", "string", options.path);
   }
+  const pipePath: any = hasPath ? String(options.path) : null;
 
   const state: any = self._sockState;
   const host: string =
@@ -1513,6 +1512,14 @@ function __netSocketConnectOptions(self: any, options: any): any {
   }
   state.connectPending = true;
   state.attempted = [];
+  if (pipePath !== null) {
+    // A pipe (Unix domain socket / Windows named pipe; see `src/io/pipe.rs`)
+    // needs no resolver, but connects on a later tick like any other socket.
+    state.pipe = pipePath;
+    state.connectOptions = options;
+    __netTick(__netTryPipe, self);
+    return self;
+  }
   // Node's `connect` re-arms the writable side here. It is *not* done by
   // assignment: `writable` is an accessor on `Duplex`, and assigning to an
   // accessor through an `any` receiver panics the interpreter (see
@@ -1688,6 +1695,41 @@ function __netTryCandidate(self: any): void {
   }
 }
 
+// The error a failed pipe call raises: `connect ENOENT /tmp/x.sock`, with the
+// path as `address` (a path may hold a colon, so `__netSystemError`'s
+// host:port split does not apply).
+function __netPipeError(info: any, syscall: string, path: string): any {
+  const code: string = String(info.code);
+  const error: any = new __NetSystemError(code, syscall + " " + code + " " + path);
+  error.errno = Number(info.errno);
+  error.syscall = syscall;
+  error.address = path;
+  return error;
+}
+
+// Start the connection to `state.pipe`.
+function __netTryPipe(self: any): void {
+  if (self.destroyed === true) return;
+  const state: any = self._sockState;
+  const ops: any = __netRequireIo();
+  const handle: number = Number(state.handle);
+  const path: string = String(state.pipe);
+  const payload: any = ops.connectPipe(handle, path);
+  if (__ioFailed(payload)) {
+    const info: any = __ioLastError();
+    self.connecting = false;
+    state.connectPending = false;
+    __netDestroyWith(self, __netPipeError(info, "connect", path));
+    return;
+  }
+  const connected: boolean = Number(__ioFields(payload)[1]) === 1;
+  if (connected) {
+    __netTick(__netSettleConnect, self);
+  } else {
+    __ioWant(handle, 2);
+  }
+}
+
 // A connecting socket became ready: ask `SO_ERROR` whether it worked.
 function __netSettleConnect(self: any): void {
   if (self.connecting !== true) return;
@@ -1712,7 +1754,13 @@ function __netSettleConnect(self: any): void {
   }
   self.connecting = false;
   state.connectPending = false;
-  state.peer = __netTriple(__ioFields(payload));
+  if (state.pipe !== null && state.pipe !== undefined) {
+    // A pipe has no addresses: `remoteAddress` & co. are `undefined`.
+    state.peer = {};
+    state.local = {};
+  } else {
+    state.peer = __netTriple(__ioFields(payload));
+  }
   __ioUnwant(handle, 2);
   __netAfterConnect(self);
 }
@@ -2066,6 +2114,8 @@ class Server extends EventEmitter {
     this._srvState = {
       // The listening handle, or 0.
       handle: 0,
+      // True when listening on a pipe path.
+      pipe: false,
       listening: false,
       // The sockets this server accepted and that are still open — the set
       // `close()` waits for and `getConnections` counts.
@@ -2212,13 +2262,12 @@ function __netServerListen(self: any, a: any, b: any, c: any, d: any): any {
       ? 0
       : __netValidatePort(options.port, "options.port", true);
 
-  if (options.path !== undefined && options.path !== null) {
-    throw new ERR_INVALID_ARG_VALUE(
-      "options.path",
-      options.path,
-      "is not supported by node:net on this runtime (no pipe support)",
-    );
-  }
+  const listenPath: any =
+    options.path !== undefined &&
+    options.path !== null &&
+    (options.port === undefined || options.port === null)
+      ? String(options.path)
+      : null;
   if (options.fd !== undefined && options.fd !== null) {
     throw new ERR_INVALID_ARG_VALUE(
       "options.fd",
@@ -2239,6 +2288,11 @@ function __netServerListen(self: any, a: any, b: any, c: any, d: any): any {
     backlog = Number(c);
   }
   if (Number.isNaN(backlog) || backlog < 0) backlog = 511;
+
+  if (listenPath !== null) {
+    __netTick(__netBindNow, self, { path: listenPath, backlog: backlog });
+    return self;
+  }
 
   const host: any = options.host;
   const exclusive: boolean = options.exclusive === true;
@@ -2341,14 +2395,18 @@ function __netBindNow(self: any, request: any): void {
   let flags = 0;
   if (request.ipv6Only === true) flags = flags | 1;
   if (request.exclusive === true) flags = flags | 2;
-  const payload: any = ops.listen(
-    String(request.address),
-    Number(request.port),
-    Number(request.backlog),
-    flags,
-  );
+  const isPipe: boolean = request.path !== undefined && request.path !== null;
+  const payload: any = isPipe
+    ? ops.listenPipe(String(request.path), Number(request.backlog))
+    : ops.listen(String(request.address), Number(request.port), Number(request.backlog), flags);
   if (__ioFailed(payload)) {
     const info: any = __ioLastError();
+    if (isPipe) {
+      const pipeError: any = __netPipeError(info, "listen", String(request.path));
+      pipeError.message = "listen " + String(info.code) + ": " + String(info.message) + " " + String(request.path);
+      self.emit("error", pipeError);
+      return;
+    }
     // A `listen` failure is Node's *described* shape:
     // `listen EADDRINUSE: address already in use 0.0.0.0:8080`. The syscall is
     // named `listen` even when it was `bind` that failed, because `lib/net.js`
@@ -2363,11 +2421,14 @@ function __netBindNow(self: any, request: any): void {
   state.handle = handle;
   self._handle = handle;
   __processHandleOpened(self);
-  state.address = {
-    address: String(parts[1]),
-    family: String(parts[3]),
-    port: Number(parts[2]),
-  };
+  state.pipe = isPipe;
+  state.address = isPipe
+    ? String(request.path)
+    : {
+        address: String(parts[1]),
+        family: String(parts[3]),
+        port: Number(parts[2]),
+      };
   state.listening = true;
   __ioRegister(handle, {
     readable(): void {
@@ -2407,12 +2468,12 @@ function __netOnConnection(self: any): void {
     if (text === "+A" || text === "+") return;
     const parts: any[] = __ioFields(text);
     const accepted: number = Number(parts[0]);
-    const remote: any = {
+    const remote: any = state.pipe === true ? {} : {
       address: String(parts[1]),
       family: String(parts[3]),
       port: Number(parts[2]),
     };
-    const local: any = {
+    const local: any = state.pipe === true ? {} : {
       address: String(parts[4]),
       family: String(parts[3]),
       port: Number(parts[5]),

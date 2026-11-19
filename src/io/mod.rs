@@ -103,6 +103,7 @@ use crate::abi::{arg_i64, arg_str, ret_str};
 use crate::fs::base64;
 use crate::Descriptor;
 
+pub(crate) mod pipe;
 pub(crate) mod sys;
 pub(crate) mod udp;
 
@@ -150,6 +151,10 @@ struct Handle {
     /// True for an IPv6 datagram socket (`udp6`); the option numbers differ by
     /// family and an unbound Windows socket cannot be asked.
     ipv6: bool,
+    /// `Some` for a local (pipe) socket: the Node path for a listener, whose
+    /// socket file is removed on close, and `""` for a stream. Pipes have no
+    /// IP addresses, so the name natives answer an empty record for them.
+    pipe: Option<String>,
 }
 
 /// Every live handle, keyed by the number published to the program.
@@ -230,6 +235,7 @@ fn uv_error(code: &str) -> (&'static str, i64, &'static str) {
         "ENETDOWN" => ("ENETDOWN", uv_errno(100, -4062), "network is down"),
         "ENETUNREACH" => ("ENETUNREACH", uv_errno(101, -4063), "network is unreachable"),
         "ENOBUFS" => ("ENOBUFS", uv_errno(105, -4060), "no buffer space available"),
+        "ENOENT" => ("ENOENT", uv_errno(2, -4058), "no such file or directory"),
         "ENOMEM" => ("ENOMEM", uv_errno(12, -4057), "not enough memory"),
         "ENOTCONN" => ("ENOTCONN", uv_errno(107, -4053), "socket is not connected"),
         "ENOTSOCK" => ("ENOTSOCK", uv_errno(88, -4050), "socket operation on non-socket"),
@@ -294,7 +300,7 @@ fn handle_of<R>(
 fn publish(raw: sys::Raw, kind: Kind, connecting: bool) -> i64 {
     let id = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
     with_table(|table| {
-        table.insert(id, Handle { raw, kind, interest: 0, connecting, ipv6: false });
+        table.insert(id, Handle { raw, kind, interest: 0, connecting, ipv6: false, pipe: None });
     });
     id
 }
@@ -490,12 +496,12 @@ unsafe extern "C" fn accept(args: *const ZunValue, n: usize, out: *mut ZunValue)
     let id = unsafe { arg_i64(args, n, 0) };
     let raw = match handle_of(id, "accept", |handle| {
         if handle.kind == Kind::Listener {
-            Some(handle.raw)
+            Some((handle.raw, handle.pipe.is_some()))
         } else {
             None
         }
     }) {
-        Ok(Some(raw)) => raw,
+        Ok(Some(pair)) => pair,
         Ok(None) => {
             // SAFETY: `out` is a writable Str return.
             return unsafe { ret_str(out, &fail_code("accept", "ENOTSOCK", "")) };
@@ -506,11 +512,19 @@ unsafe extern "C" fn accept(args: *const ZunValue, n: usize, out: *mut ZunValue)
         }
     };
 
+    let (raw, is_pipe) = raw;
     let payload = match sys::accept(raw) {
         Ok(None) => AGAIN.to_owned(),
         Ok(Some((accepted, peer))) => {
             let local = sys::local_addr(accepted).unwrap_or(peer);
             let child = publish(accepted, Kind::Stream, false);
+            if is_pipe {
+                with_table(|table| {
+                    if let Some(row) = table.get_mut(&child) {
+                        row.pipe = Some(String::new());
+                    }
+                });
+            }
             let [remote_address, remote_port, family] = address_fields(&peer);
             let [local_address, local_port, _] = address_fields(&local);
             ok_fields(&[
@@ -669,11 +683,15 @@ unsafe extern "C" fn connect_error(args: *const ZunValue, n: usize, out: *mut Zu
     let id = unsafe { arg_i64(args, n, 0) };
     let looked_up = handle_of(id, "connect", |handle| {
         handle.connecting = false;
-        handle.raw
+        (handle.raw, handle.pipe.is_some())
     });
     let payload = match looked_up {
         Err(text) => text,
-        Ok(raw) => match sys::take_error(raw) {
+        Ok((raw, true)) => match sys::take_error(raw) {
+            Ok(None) => ok(),
+            Ok(Some(err)) | Err(err) => fail_io("connect", &err, ""),
+        },
+        Ok((raw, false)) => match sys::take_error(raw) {
             Ok(None) => {
                 // A socket that reports writable but has no peer is a refused
                 // connection the platform declined to put in SO_ERROR (which
@@ -714,8 +732,8 @@ unsafe extern "C" fn read(args: *const ZunValue, n: usize, out: *mut ZunValue) -
         (requested as usize).min(MAX_READ)
     };
 
-    let raw = match handle_of(id, "read", |handle| handle.raw) {
-        Ok(raw) => raw,
+    let (raw, is_pipe) = match handle_of(id, "read", |handle| (handle.raw, handle.pipe.is_some())) {
+        Ok(pair) => pair,
         Err(text) => {
             // SAFETY: `out` is a writable Str return.
             return unsafe { ret_str(out, &text) };
@@ -730,6 +748,9 @@ unsafe extern "C" fn read(args: *const ZunValue, n: usize, out: *mut ZunValue) -
             text.push_str(&base64::encode(&buffer[..count]));
             text
         }
+        // Winsock's AF_UNIX answers a read after the peer's close with
+        // `WSAENOTCONN` rather than a zero-length read; it is end of file.
+        Err(err) if is_pipe && sys::uv_code_of(&err) == "ENOTCONN" => EOF.to_owned(),
         Err(err) => fail_io("read", &err, ""),
     };
     // SAFETY: `out` is a writable Str return.
@@ -824,6 +845,11 @@ unsafe extern "C" fn close(args: *const ZunValue, n: usize, out: *mut ZunValue) 
     if let Some(handle) = with_table(|table| table.remove(&id)) {
         if handle.raw != sys::INVALID {
             sys::close(handle.raw);
+        }
+        if let Some(path) = handle.pipe.as_deref() {
+            if handle.kind == Kind::Listener && !path.is_empty() {
+                pipe::unlink(path);
+            }
         }
     }
     // SAFETY: `out` is a writable Str return.
@@ -960,9 +986,10 @@ unsafe extern "C" fn poll(args: *const ZunValue, n: usize, out: *mut ZunValue) -
 unsafe extern "C" fn sock_name(args: *const ZunValue, n: usize, out: *mut ZunValue) -> i32 {
     // SAFETY: the host passes `n` initialized values matching the descriptor.
     let id = unsafe { arg_i64(args, n, 0) };
-    let payload = match handle_of(id, "getsockname", |handle| handle.raw) {
+    let payload = match handle_of(id, "getsockname", |handle| (handle.raw, handle.pipe.is_some())) {
         Err(text) => text,
-        Ok(raw) => match sys::local_addr(raw) {
+        Ok((_, true)) => ok(),
+        Ok((raw, false)) => match sys::local_addr(raw) {
             Ok(addr) => {
                 let [address, port, family] = address_fields(&addr);
                 ok_fields(&[address, port, family])
@@ -979,9 +1006,10 @@ unsafe extern "C" fn sock_name(args: *const ZunValue, n: usize, out: *mut ZunVal
 unsafe extern "C" fn peer_name(args: *const ZunValue, n: usize, out: *mut ZunValue) -> i32 {
     // SAFETY: the host passes `n` initialized values matching the descriptor.
     let id = unsafe { arg_i64(args, n, 0) };
-    let payload = match handle_of(id, "getpeername", |handle| handle.raw) {
+    let payload = match handle_of(id, "getpeername", |handle| (handle.raw, handle.pipe.is_some())) {
         Err(text) => text,
-        Ok(raw) => match sys::peer_addr(raw) {
+        Ok((_, true)) => ok(),
+        Ok((raw, false)) => match sys::peer_addr(raw) {
             Ok(addr) => {
                 let [address, port, family] = address_fields(&addr);
                 ok_fields(&[address, port, family])
@@ -1039,6 +1067,94 @@ unsafe extern "C" fn handle_count(_: *const ZunValue, _: usize, out: *mut ZunVal
     unsafe { crate::abi::ret_i64(out, count) }
 }
 
+// ---------------------------------------------------------------------------
+// ioListenPipe / ioConnectPipe
+// ---------------------------------------------------------------------------
+
+/// `ioListenPipe(path, backlog)` — a listening local socket (see `pipe.rs`).
+/// The result is the handle alone; a pipe server's address is its path.
+unsafe extern "C" fn listen_pipe(args: *const ZunValue, n: usize, out: *mut ZunValue) -> i32 {
+    // SAFETY: the host passes `n` initialized values matching the descriptor.
+    let path = match unsafe { arg_str(args, n, 0) } {
+        Ok(value) => value.to_owned(),
+        Err(status) => return status,
+    };
+    // SAFETY: as above.
+    let backlog = unsafe { arg_i64(args, n, 1) } as i32;
+    let payload = listen_pipe_on(&path, backlog);
+    // SAFETY: `out` is a writable Str return.
+    unsafe { ret_str(out, &payload) }
+}
+
+/// The body of `ioListenPipe`, factored out for the Rust tests.
+fn listen_pipe_on(path: &str, backlog: i32) -> String {
+    match pipe::listen(path, backlog) {
+        Ok(raw) => {
+            let id = publish(raw, Kind::Listener, false);
+            with_table(|table| {
+                if let Some(row) = table.get_mut(&id) {
+                    row.pipe = Some(path.to_owned());
+                }
+            });
+            ok_fields(&[id.to_string()])
+        }
+        Err(err) if err.kind() == io::ErrorKind::InvalidInput => {
+            fail_code("listen", "EINVAL", path)
+        }
+        Err(err) => fail_io("listen", &err, path),
+    }
+}
+
+/// `ioConnectPipe(handle, path)` — open a local socket into a reserved row and
+/// start connecting; the result is `handle US connected`, like `ioConnect`.
+unsafe extern "C" fn connect_pipe(args: *const ZunValue, n: usize, out: *mut ZunValue) -> i32 {
+    // SAFETY: the host passes `n` initialized values matching the descriptor.
+    let id = unsafe { arg_i64(args, n, 0) };
+    // SAFETY: as above.
+    let path = match unsafe { arg_str(args, n, 1) } {
+        Ok(value) => value.to_owned(),
+        Err(status) => return status,
+    };
+    let payload = connect_pipe_to(id, &path);
+    // SAFETY: `out` is a writable Str return.
+    unsafe { ret_str(out, &payload) }
+}
+
+/// The body of `ioConnectPipe`; `id == 0` publishes a fresh row (Rust tests).
+fn connect_pipe_to(id: i64, path: &str) -> String {
+    if id != 0 && !with_table(|table| table.contains_key(&id)) {
+        return fail_code("connect", "EBADF", "");
+    }
+    // A path with nothing at it is `ENOENT`, as libuv reports it; Winsock
+    // answers a less specific code for the mapped file.
+    if !pipe::socket_path(path).exists() {
+        return fail_code("connect", "ENOENT", path);
+    }
+    let (raw, connected) = match pipe::connect(path) {
+        Ok(pair) => pair,
+        Err(err) if err.kind() == io::ErrorKind::InvalidInput => {
+            return fail_code("connect", "EINVAL", path)
+        }
+        Err(err) => return fail_io("connect", &err, path),
+    };
+    let id = if id == 0 { publish(sys::INVALID, Kind::Stream, true) } else { id };
+    let previous = with_table(|table| {
+        table.get_mut(&id).map(|handle| {
+            let old = handle.raw;
+            handle.raw = raw;
+            handle.connecting = !connected;
+            handle.pipe = Some(String::new());
+            old
+        })
+    });
+    if let Some(old) = previous {
+        if old != sys::INVALID {
+            sys::close(old);
+        }
+    }
+    ok_fields(&[id.to_string(), i64::from(connected).to_string()])
+}
+
 /// The `node:io` function table.
 pub(crate) const DESCRIPTORS: &[Descriptor] = &[
     Descriptor { key: b"ioLookup\0", params: &[Str, I64], ret: Str, invoke: lookup },
@@ -1048,6 +1164,8 @@ pub(crate) const DESCRIPTORS: &[Descriptor] = &[
         ret: Str,
         invoke: listen,
     },
+    Descriptor { key: b"ioListenPipe\0", params: &[Str, I64], ret: Str, invoke: listen_pipe },
+    Descriptor { key: b"ioConnectPipe\0", params: &[I64, Str], ret: Str, invoke: connect_pipe },
     Descriptor { key: b"ioAccept\0", params: &[I64], ret: Str, invoke: accept },
     Descriptor { key: b"ioSocket\0", params: &[], ret: Str, invoke: reserve },
     Descriptor {
