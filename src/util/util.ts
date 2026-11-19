@@ -2897,7 +2897,13 @@ const __utilTypes: any = {
   isSetIterator(value: any): boolean {
     return false;
   },
+  // `vm.SourceTextModule`/`SyntheticModule` namespaces are registered in `globalThis.__zunVmNamespaces`
+  // (src/vm/vm.ts); the engine has no module namespace object of its own.
   isModuleNamespaceObject(value: any): boolean {
+    if (value === null || typeof value !== "object") return false;
+    const list: any = (globalThis as any).__zunVmNamespaces;
+    if (list === undefined) return false;
+    for (let i = 0; i < list.length; i++) if (list[i] === value) return true;
     return false;
   },
   isProxy(value: any): boolean {

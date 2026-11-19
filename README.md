@@ -1184,7 +1184,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-vm:start -->
 ### Node.js v25 `vm` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **33.6%** — 31 / 92 Node `test-vm-*` tests passing
+`██████████░░░░░░░░░░░░░░` **45.6%** — 42 / 92 Node `test-vm-*` tests passing
 <!-- node-vm:end -->
 
 > `vm` is the one module whose job *is* run-time compilation, so the first

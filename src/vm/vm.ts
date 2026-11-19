@@ -131,15 +131,16 @@
 //     (`__zunVmArgs`), which carries values of any type.
 //   * There is no interruptible execution and no stack-map-based unwind from
 //     outside, so `timeout` and `breakOnSigint` are validated and then
-//     ignored; a runaway script runs to completion. There is no code cache
+//     ignored (zun#150); a runaway script runs to completion. There is no code cache
 //     either, so `produceCachedData` honestly reports
 //     `cachedDataProduced: false` and a supplied `cachedData` is honestly
 //     rejected rather than silently accepted.
-//   * `--experimental-vm-modules` has no counterpart here (the bundler passes
-//     no V8 flags), and ES module instantiation needs a compile entry this
-//     platform does not expose, so `vm.Module`, `vm.SourceTextModule` and
-//     `vm.SyntheticModule` are **absent** — which is exactly their shape in a
-//     Node run without that flag.
+//   * There is no ES-module compile entry for run-time code, so
+//     `vm.SourceTextModule` is a source rewrite onto the same `new Function`
+//     floor (see the section near the end of this file); `vm.Module` and
+//     `vm.SyntheticModule` are always available, as if
+//     `--experimental-vm-modules` were on. Interrupting a run needs an engine
+//     API that does not exist yet (zun#150).
 //
 // Like `path` and `events`, `vm` needs no syscall, so it is Zun TypeScript
 // rather than a `zun_abi` extension (PLAN.md principle 2).
@@ -1508,15 +1509,1250 @@ function __vmMeasureMemory(options?: any): any {
   return Promise.resolve(result);
 }
 
+// ---------------------------------------------------------------------------
+// vm.Module / vm.SourceTextModule / vm.SyntheticModule
+// ---------------------------------------------------------------------------
+//
+// The engine has no ES-module compile entry for run-time code, so a
+// `SourceTextModule` is expressed over the same `new Function` floor as a
+// `Script`: its source is rewritten into an async function body.
+//
+//   * every top-level `import` becomes a `let` per local binding plus a setter
+//     closure the record keeps (`(v) => { local = v; }`), so a binding is live:
+//     the exporter publishes a new value and every importer's setter runs;
+//   * every top-level `export` declaration loses its keyword and is followed by
+//     a `__zunVmM.pub("name", () => name)` call, which publishes the binding's
+//     value at that point (an `export function` is published at the top of the
+//     body, because function declarations are hoisted) and once more at the
+//     end of the body;
+//   * `export default <expr>` assigns a hidden `__zunVmD`;
+//   * `import.meta` reads a per-module object and `import(...)` calls the
+//     module's `importModuleDynamically`;
+//   * the body is wrapped in `return (async () => { ... })();`, so top-level
+//     `await` works and evaluation is a promise.
+//
+// Linking calls the user's linker per specifier and checks the answer the way
+// `lib/internal/vm/module.js` does; once no module in the graph is still
+// linking, the graph is instantiated: every module's export names are resolved
+// (own exports, named re-exports, `export *`) and every import is bound, which
+// is where `import { nonexistent }` becomes a `SyntaxError`. The top-level
+// scan is lexical (strings, templates, comments and bracket depth are
+// tracked; statement ends are found at a `;` or a newline at depth 0 that does
+// not continue the expression), which covers the forms Node's tests write.
+
+const __VM_MOD_REC: string = "__zunVmModRec";
+let __vmModContextIds: any = [];
+let __vmModMainIds: any = 0;
+
+class ERR_VM_MODULE_STATUS extends NodeError {
+  constructor(message: string) {
+    super("ERR_VM_MODULE_STATUS", "Module status " + message);
+  }
+}
+
+function __vmModInvalidThis(): any {
+  return new NodeTypeError("ERR_INVALID_THIS", 'Value of "this" must be of type Module');
+}
+
+class __VmModuleReferenceError extends ReferenceError {
+  code: string = "";
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
+function __vmModIsWordChar(c: string): boolean {
+  return c !== "" && __vmIsIdentChar(c);
+}
+
+// Skip a string/template/comment starting at `i`; answers the index past it,
+// or `i` itself when nothing is to be skipped there.
+function __vmModSkip(code: string, i: number): number {
+  const n: number = code.length;
+  const c: string = code[i];
+  if (c === "/" && i + 1 < n && code[i + 1] === "/") {
+    let j = i + 2;
+    while (j < n && code[j] !== "\n") j++;
+    return j;
+  }
+  if (c === "/" && i + 1 < n && code[i + 1] === "*") {
+    let j = i + 2;
+    while (j + 1 < n && !(code[j] === "*" && code[j + 1] === "/")) j++;
+    return j + 2;
+  }
+  if (c === "'" || c === '"' || c === "`") {
+    let j = i + 1;
+    let depth = 0;
+    while (j < n) {
+      const d: string = code[j];
+      if (d === "\\") {
+        j += 2;
+        continue;
+      }
+      if (c === "`" && d === "$" && j + 1 < n && code[j + 1] === "{") {
+        // a template substitution: skip to its matching brace
+        let k = j + 2;
+        depth = 1;
+        while (k < n && depth > 0) {
+          const s: number = __vmModSkip(code, k);
+          if (s !== k) {
+            k = s;
+            continue;
+          }
+          if (code[k] === "{") depth++;
+          else if (code[k] === "}") depth--;
+          k++;
+        }
+        j = k;
+        continue;
+      }
+      if (d === c) return j + 1;
+      j++;
+    }
+    return n;
+  }
+  return i;
+}
+
+function __vmModWs(code: string, i: number): number {
+  const n: number = code.length;
+  let j = i;
+  while (j < n) {
+    const c: string = code[j];
+    if (c === " " || c === "\t" || c === "\n" || c === "\r") {
+      j++;
+      continue;
+    }
+    const s: number = __vmModSkip(code, j);
+    if (s !== j && code[j] === "/") {
+      j = s;
+      continue;
+    }
+    break;
+  }
+  return j;
+}
+
+function __vmModWord(code: string, i: number): string {
+  let j = i;
+  while (j < code.length && __vmModIsWordChar(code[j])) j++;
+  return code.substring(i, j);
+}
+
+// The index past the statement that starts at `i` (exclusive of a `;`, which
+// is consumed).
+function __vmModStatementEnd(code: string, i: number): number {
+  const n: number = code.length;
+  let depth = 0;
+  let j = i;
+  let last = "";
+  while (j < n) {
+    const s: number = __vmModSkip(code, j);
+    if (s !== j) {
+      j = s;
+      last = "x";
+      continue;
+    }
+    const c: string = code[j];
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    if (depth < 0) return j;
+    if (depth === 0 && c === ";") return j + 1;
+    if (depth === 0 && c === "\n") {
+      const k: number = __vmModWs(code, j);
+      const next: string = k < n ? code[k] : "";
+      const continues: boolean =
+        "=+-*/%&|^?:.,([<>".indexOf(next) >= 0 && next !== "" ||
+        "=+-*/%&|^?:.,([<>".indexOf(last) >= 0 && last !== "";
+      if (!continues) return j;
+    }
+    if (c !== " " && c !== "\t" && c !== "\n" && c !== "\r") last = c;
+    j++;
+  }
+  return n;
+}
+
+// Reads a string literal at `i`: `{ value, end }` or undefined.
+function __vmModString(code: string, i: number): any {
+  const c: string = code[i];
+  if (c !== "'" && c !== '"') return undefined;
+  const end: number = __vmModSkip(code, i);
+  const raw: string = code.substring(i + 1, end - 1);
+  return { value: raw, end: end };
+}
+
+// `with { a: 'b' }` / `assert { ... }` after a specifier.
+function __vmModAttributes(code: string, i: number): any {
+  const j: number = __vmModWs(code, i);
+  const w: string = __vmModWord(code, j);
+  const attrs: any = {};
+  if (w !== "with" && w !== "assert") return { attrs: attrs, end: i };
+  let k: number = __vmModWs(code, j + w.length);
+  if (code[k] !== "{") return { attrs: attrs, end: i };
+  k++;
+  while (k < code.length) {
+    k = __vmModWs(code, k);
+    if (code[k] === "}") {
+      k++;
+      break;
+    }
+    let key = "";
+    const str: any = __vmModString(code, k);
+    if (str !== undefined) {
+      key = str.value;
+      k = str.end;
+    } else {
+      key = __vmModWord(code, k);
+      k += key.length;
+    }
+    k = __vmModWs(code, k);
+    if (code[k] === ":") k++;
+    k = __vmModWs(code, k);
+    const val: any = __vmModString(code, k);
+    if (val === undefined) break;
+    attrs[key] = val.value;
+    k = __vmModWs(code, val.end);
+    if (code[k] === ",") k++;
+  }
+  return { attrs: attrs, end: k };
+}
+
+// `{ a, b as c, default as d }` at `i` -> `{ pairs: [[imported, local]], end }`.
+function __vmModBraces(code: string, i: number): any {
+  const pairs: any[] = [];
+  let k: number = i + 1;
+  while (k < code.length) {
+    k = __vmModWs(code, k);
+    if (code[k] === "}") {
+      k++;
+      break;
+    }
+    let first = "";
+    const str: any = __vmModString(code, k);
+    if (str !== undefined) {
+      first = str.value;
+      k = str.end;
+    } else {
+      first = __vmModWord(code, k);
+      k += first.length;
+      if (first === "") return { pairs: pairs, end: code.length };
+    }
+    k = __vmModWs(code, k);
+    let second: string = first;
+    if (__vmModWord(code, k) === "as") {
+      k = __vmModWs(code, k + 2);
+      const s2: any = __vmModString(code, k);
+      if (s2 !== undefined) {
+        second = s2.value;
+        k = s2.end;
+      } else {
+        second = __vmModWord(code, k);
+        k += second.length;
+      }
+      k = __vmModWs(code, k);
+    }
+    pairs.push([first, second]);
+    if (code[k] === ",") k++;
+  }
+  return { pairs: pairs, end: k };
+}
+
+// The names a `const`/`let`/`var` declaration list introduces (simple
+// declarators and flat destructuring).
+function __vmModDeclNames(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let expect = true;
+  let i = 0;
+  while (i < text.length) {
+    const s: number = __vmModSkip(text, i);
+    if (s !== i) {
+      i = s;
+      continue;
+    }
+    const c: string = text[i];
+    if (depth === 0 && c === ",") {
+      expect = true;
+      i++;
+      continue;
+    }
+    if (depth === 0 && c === "=") expect = false;
+    if (c === "(" || c === "[" || c === "{") {
+      if (expect && depth === 0 && (c === "[" || c === "{")) {
+        // destructuring pattern: take every identifier not followed by `:`
+        const close: string = c === "[" ? "]" : "}";
+        let j = i + 1;
+        let d = 1;
+        while (j < text.length && d > 0) {
+          if (text[j] === c) d++;
+          else if (text[j] === close) d--;
+          else if (__vmIsIdentStart(text[j])) {
+            const w: string = __vmModWord(text, j);
+            const after: number = __vmModWs(text, j + w.length);
+            if (text[after] !== ":") out.push(w);
+            j += w.length;
+            continue;
+          }
+          j++;
+        }
+        i = j;
+        expect = false;
+        continue;
+      }
+      depth++;
+    } else if (c === ")" || c === "]" || c === "}") {
+      depth--;
+    } else if (expect && depth === 0 && __vmIsIdentStart(c)) {
+      const w: string = __vmModWord(text, i);
+      out.push(w);
+      expect = false;
+      i += w.length;
+      continue;
+    }
+    i++;
+  }
+  return out;
+}
+
+// The rewrite. Answers `{ body, requests, imports, locals, reexports, stars,
+// usesMeta, usesImport, hasTLA }`.
+function __vmModTransform(code: string): any {
+  const requests: any[] = [];
+  const imports: any[] = [];
+  const locals: any[] = [];
+  const reexports: any[] = [];
+  const stars: any[] = [];
+  const hoisted: string[] = [];
+  let out = "";
+  let depth = 0;
+  let i = 0;
+  let segStart = 0;
+  let prev = "";
+  let usesMeta = false;
+  let usesImport = false;
+  let hasTLA = false;
+  const n: number = code.length;
+
+  // One request per distinct (specifier, attributes, phase), as V8 dedups.
+  const addRequest = (spec: string, attrs: any, phase: string): number => {
+    const key: string = spec + "|" + JSON.stringify(attrs) + "|" + phase;
+    for (let r = 0; r < requests.length; r++) {
+      if (requests[r].key === key) return r;
+    }
+    requests.push({ specifier: spec, attributes: attrs, phase: phase, key: key });
+    return requests.length - 1;
+  };
+
+  while (i < n) {
+    const s: number = __vmModSkip(code, i);
+    if (s !== i) {
+      i = s;
+      prev = "x";
+      continue;
+    }
+    const c: string = code[i];
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    if (__vmIsIdentStart(c) && !(i > 0 && __vmModIsWordChar(code[i - 1]))) {
+      const w: string = __vmModWord(code, i);
+      const afterWord: number = __vmModWs(code, i + w.length);
+      const nextC: string = afterWord < n ? code[afterWord] : "";
+      if (w === "await" && depth === 0 && prev !== ".") hasTLA = true;
+      if (w === "import" && prev !== "." && nextC === ".") {
+        // import.meta
+        out = out + code.substring(segStart, i) + "__zunVmMeta";
+        usesMeta = true;
+        i = __vmModWs(code, afterWord + 1) + 4;
+        segStart = i;
+        prev = "x";
+        continue;
+      }
+      if (w === "import" && prev !== "." && nextC === "(") {
+        out = out + code.substring(segStart, i) + "__zunVmImport";
+        usesImport = true;
+        i = i + w.length;
+        segStart = i;
+        prev = "x";
+        continue;
+      }
+      const atStatement: boolean =
+        depth === 0 && (prev === "" || prev === ";" || prev === "}" || prev === "\n");
+      if (w === "import" && atStatement) {
+        out = out + code.substring(segStart, i);
+        let k: number = afterWord;
+        const bare: any = __vmModString(code, k);
+        if (bare !== undefined) {
+          const at: any = __vmModAttributes(code, bare.end);
+          addRequest(bare.value, at.attrs, "evaluation");
+          k = at.end;
+        } else {
+          const bindings: any[] = [];
+          let phase = "evaluation";
+          {
+            const pk: number = __vmModWs(code, k);
+            const pw: string = __vmModWord(code, pk);
+            const after: number = __vmModWs(code, pk + pw.length);
+            if ((pw === "source" || pw === "defer") && __vmIsIdentStart(code[after] === undefined ? "" : code[after]) && __vmModWord(code, after) !== "from") {
+              phase = pw;
+              k = after;
+            }
+          }
+          while (k < n) {
+            k = __vmModWs(code, k);
+            if (code[k] === "{") {
+              const br: any = __vmModBraces(code, k);
+              for (let p = 0; p < br.pairs.length; p++) bindings.push(br.pairs[p]);
+              k = br.end;
+            } else if (code[k] === "*") {
+              k = __vmModWs(code, k + 1);
+              k = __vmModWs(code, k + 2); // `as`
+              const local: string = __vmModWord(code, k);
+              bindings.push(["*", local]);
+              k += local.length;
+            } else if (code[k] === ",") {
+              k++;
+            } else {
+              const word: string = __vmModWord(code, k);
+              if (word === "from" || word === "") break;
+              bindings.push(["default", word]);
+              k += word.length;
+            }
+          }
+          k = __vmModWs(code, k + 4);
+          const spec: any = __vmModString(code, k);
+          const specifier: string = spec === undefined ? "" : spec.value;
+          const at: any = __vmModAttributes(code, spec === undefined ? k : spec.end);
+          const reqIdx: number = addRequest(specifier, at.attrs, phase);
+          k = at.end;
+          for (let b = 0; b < bindings.length; b++) {
+            const imported: string = phase === "source" ? "*source" : bindings[b][0];
+            imports.push({ specifier: specifier, request: reqIdx, imported: imported, local: bindings[b][1] });
+          }
+        }
+        const semi: number = __vmModWs(code, k);
+        if (code[semi] === ";") k = semi + 1;
+        out = out + "\n";
+        i = k;
+        segStart = i;
+        prev = ";";
+        continue;
+      }
+      if (w === "export" && atStatement) {
+        out = out + code.substring(segStart, i);
+        let k: number = afterWord;
+        const next: string = __vmModWord(code, k);
+        if (code[k] === "{" || code[k] === "*") {
+          let pairs: any[] = [];
+          let star = false;
+          let starAs = "";
+          if (code[k] === "{") {
+            const br: any = __vmModBraces(code, k);
+            pairs = br.pairs;
+            k = br.end;
+          } else {
+            star = true;
+            k = __vmModWs(code, k + 1);
+            if (__vmModWord(code, k) === "as") {
+              k = __vmModWs(code, k + 2);
+              const s2: any = __vmModString(code, k);
+              if (s2 !== undefined) {
+                starAs = s2.value;
+                k = s2.end;
+              } else {
+                starAs = __vmModWord(code, k);
+                k += starAs.length;
+              }
+            }
+          }
+          k = __vmModWs(code, k);
+          let specifier: any = undefined;
+          let reqIdx = -1;
+          if (__vmModWord(code, k) === "from") {
+            k = __vmModWs(code, k + 4);
+            const spec: any = __vmModString(code, k);
+            specifier = spec === undefined ? "" : spec.value;
+            const at: any = __vmModAttributes(code, spec === undefined ? k : spec.end);
+            reqIdx = addRequest(specifier, at.attrs, "evaluation");
+            k = at.end;
+          }
+          if (star && starAs === "") {
+            stars.push(reqIdx);
+          } else if (star) {
+            reexports.push({ specifier: specifier, request: reqIdx, imported: "*", exported: starAs });
+          } else if (specifier === undefined) {
+            for (let p = 0; p < pairs.length; p++) {
+              locals.push({ exported: pairs[p][1], local: pairs[p][0], late: true });
+            }
+          } else {
+            for (let p = 0; p < pairs.length; p++) {
+              reexports.push({ specifier: specifier, request: reqIdx, imported: pairs[p][0], exported: pairs[p][1] });
+            }
+          }
+          const semi: number = __vmModWs(code, k);
+          if (code[semi] === ";") k = semi + 1;
+          out = out + "\n";
+          i = k;
+          segStart = i;
+          prev = ";";
+          continue;
+        }
+        if (next === "default") {
+          k = __vmModWs(code, k + 7);
+          let word: string = __vmModWord(code, k);
+          let k2: number = k;
+          if (word === "async") {
+            k2 = __vmModWs(code, k + 5);
+            word = __vmModWord(code, k2);
+          }
+          if (word === "function" || word === "class") {
+            let k3: number = __vmModWs(code, k2 + word.length);
+            if (code[k3] === "*") k3 = __vmModWs(code, k3 + 1);
+            const name: string = __vmModWord(code, k3);
+            if (name !== "") {
+              locals.push({ exported: "default", local: name, late: word === "class" });
+              if (word === "function") hoisted.push(name);
+              segStart = k;
+              i = k;
+              prev = ";";
+              continue;
+            }
+          }
+          const end: number = __vmModStatementEnd(code, k);
+          let expr: string = code.substring(k, end);
+          if (expr.endsWith(";")) expr = expr.substring(0, expr.length - 1);
+          out = out + "__zunVmD = (" + expr + "\n);\n__zunVmM.pub(\"default\", () => __zunVmD);\n";
+          locals.push({ exported: "default", local: "__zunVmD", late: true });
+          i = end;
+          segStart = i;
+          prev = ";";
+          continue;
+        }
+        // export const|let|var|function|class|async function
+        let kind: string = next;
+        let k2: number = k;
+        if (kind === "async") {
+          k2 = __vmModWs(code, k + 5);
+          kind = __vmModWord(code, k2);
+        }
+        if (kind === "function" || kind === "class") {
+          let k3: number = __vmModWs(code, k2 + kind.length);
+          if (code[k3] === "*") k3 = __vmModWs(code, k3 + 1);
+          const name: string = __vmModWord(code, k3);
+          locals.push({ exported: name, local: name, late: kind === "class" });
+          if (kind === "function") hoisted.push(name);
+          if (kind === "class") {
+            // published after the declaration
+            const end: number = __vmModStatementEnd(code, k);
+            out = out + code.substring(k, end) + "\n__zunVmM.pub(" + JSON.stringify(name) + ", () => " + name + ");\n";
+            i = end;
+            segStart = i;
+            prev = ";";
+            continue;
+          }
+          segStart = k;
+          i = k;
+          prev = ";";
+          continue;
+        }
+        const end: number = __vmModStatementEnd(code, k);
+        const names: string[] = __vmModDeclNames(code.substring(k2 + kind.length, end));
+        let pubs = "";
+        for (let p = 0; p < names.length; p++) {
+          locals.push({ exported: names[p], local: names[p], late: true });
+          pubs = pubs + "__zunVmM.pub(" + JSON.stringify(names[p]) + ", () => " + names[p] + ");\n";
+        }
+        out = out + code.substring(k, end) + "\n" + pubs;
+        i = end;
+        segStart = i;
+        prev = ";";
+        continue;
+      }
+      i += w.length;
+      prev = "x";
+      continue;
+    }
+    if (c === ";" || c === "}") prev = c;
+    else if (c === "\n") {
+      if (prev === "x" || prev === ")" || prev === "]") prev = "\n";
+    } else if (c !== " " && c !== "\t" && c !== "\r") prev = c;
+    i++;
+  }
+  out = out + code.substring(segStart, n);
+
+  let head = "const __zunVmM = " + __VM_MOD_REC + ";\n";
+  for (let b = 0; b < imports.length; b++) {
+    const local: string = imports[b].local;
+    head = head + "let " + local + ";\n__zunVmM.set[" + JSON.stringify(local) + "] = (__zunVmV) => { " +
+      local + " = __zunVmV; };\n";
+  }
+  head = head + "let __zunVmD;\n";
+  if (usesMeta) head = head + "const __zunVmMeta = __zunVmM.meta;\n";
+  if (usesImport) head = head + "const __zunVmImport = __zunVmM.dyn;\n";
+  head = head + "__zunVmM.ready();\nreturn (async () => {\n";
+  for (let h = 0; h < hoisted.length; h++) {
+    head = head + "__zunVmM.pub(" + JSON.stringify(hoisted[h]) + ", () => " + hoisted[h] + ");\n";
+  }
+  let tail = "\n";
+  for (let l = 0; l < locals.length; l++) {
+    tail = tail + "__zunVmM.pub(" + JSON.stringify(locals[l].exported) + ", () => " + locals[l].local + ");\n";
+  }
+  tail = tail + "})();\n";
+  return {
+    body: head + out + tail,
+    requests: requests,
+    imports: imports,
+    locals: locals,
+    reexports: reexports,
+    stars: stars,
+    usesMeta: usesMeta,
+    usesImport: usesImport,
+    hasTLA: hasTLA,
+  };
+}
+
+// --- records ----------------------------------------------------------------
+
+function __vmModNewNamespace(): any {
+  const ns: any = Object.create(null);
+  Object.defineProperty(ns, Symbol.toStringTag, { value: "Module" });
+  const g: any = globalThis;
+  if (g.__zunVmNamespaces === undefined) g.__zunVmNamespaces = [];
+  g.__zunVmNamespaces.push(ns);
+  return ns;
+}
+
+function __vmModNewRecord(mod: any, kind: string, context: any, identifier: any): any {
+  return {
+    module: mod,
+    kind: kind,
+    context: context,
+    identifier: identifier,
+    status: "unlinked",
+    error: undefined,
+    ns: __vmModNewNamespace(),
+    exportNames: [],
+    listeners: {},
+    values: {},
+    set: {},
+    linked: [],
+    requests: [],
+    imports: [],
+    locals: [],
+    reexports: [],
+    stars: [],
+    fn: undefined,
+    instantiated: false,
+    evaluation: undefined,
+    meta: undefined,
+    initializeImportMeta: undefined,
+    importModuleDynamically: undefined,
+    evaluateCallback: undefined,
+    hasTLA: false,
+    specifiers: [],
+    moduleRequests: [],
+    dyn: undefined,
+    pub: undefined,
+    ready: undefined,
+  };
+}
+
+function __vmModRec(m: any): any {
+  if (m === null || m === undefined || (typeof m !== "object" && typeof m !== "function")) {
+    throw __vmModInvalidThis();
+  }
+  const rec: any = m.__zunVmModule;
+  if (rec === undefined || rec === null || rec.module !== m) throw __vmModInvalidThis();
+  return rec;
+}
+
+function __vmModIsModule(m: any): boolean {
+  if (m === null || m === undefined || typeof m !== "object") return false;
+  const rec: any = m.__zunVmModule;
+  return rec !== undefined && rec !== null && rec.module === m;
+}
+
+function __vmModPublish(rec: any, name: string, value: any): void {
+  rec.values[name] = value;
+  rec.ns[name] = value;
+  const list: any = rec.listeners[name];
+  if (list === undefined) return;
+  for (let i = 0; i < list.length; i++) {
+    const fn: any = list[i];
+    fn(value);
+  }
+}
+
+function __vmModListen(rec: any, name: string, fn: any): void {
+  let list: any = rec.listeners[name];
+  if (list === undefined) {
+    list = [];
+    rec.listeners[name] = list;
+  }
+  list.push(fn);
+  if (name in rec.values) fn(rec.values[name]);
+}
+
+function __vmModContextIdentifier(context: any): string {
+  if (context === undefined) {
+    const id: any = __vmModMainIds;
+    __vmModMainIds = __vmModMainIds + 1;
+    return "vm:module(" + String(id) + ")";
+  }
+  for (let i = 0; i < __vmModContextIds.length; i++) {
+    const row: any = __vmModContextIds[i];
+    if (row.context === context) {
+      const id: any = row.next;
+      row.next = row.next + 1;
+      return "vm:module(" + String(id) + ")";
+    }
+  }
+  __vmModContextIds.push({ context: context, next: 1 });
+  return "vm:module(0)";
+}
+
+function __vmModRequestFor(rec: any, index: any): any {
+  return rec.linked[index];
+}
+
+// Export names, resolved through re-exports and `export *` (cycle-guarded).
+function __vmModExportNames(rec: any, seen: any[]): string[] {
+  for (let i = 0; i < seen.length; i++) if (seen[i] === rec) return [];
+  seen.push(rec);
+  if (rec.kind === "synthetic") return rec.exportNames;
+  const out: string[] = [];
+  for (let i = 0; i < rec.locals.length; i++) {
+    if (out.indexOf(rec.locals[i].exported) < 0) out.push(rec.locals[i].exported);
+  }
+  for (let i = 0; i < rec.reexports.length; i++) {
+    if (out.indexOf(rec.reexports[i].exported) < 0) out.push(rec.reexports[i].exported);
+  }
+  for (let i = 0; i < rec.stars.length; i++) {
+    const dep: any = __vmModRequestFor(rec, rec.stars[i]);
+    if (dep === undefined) continue;
+    const names: string[] = __vmModExportNames(dep.__zunVmModule, seen);
+    for (let j = 0; j < names.length; j++) {
+      if (names[j] !== "default" && out.indexOf(names[j]) < 0) out.push(names[j]);
+    }
+  }
+  return out;
+}
+
+function __vmModInstantiate(rec: any): void {
+  if (rec.instantiated) return;
+  if (rec.kind === "synthetic") {
+    rec.instantiated = true;
+    return;
+  }
+  for (let i = 0; i < rec.requests.length; i++) {
+    if (rec.linked[i] === undefined) {
+      throw new NodeError(
+        "ERR_VM_MODULE_LINK_FAILURE",
+        "request for '" + rec.requests[i].specifier + "' can not be resolved on module '" +
+          rec.identifier + "' that is not linked",
+      );
+    }
+  }
+  rec.instantiated = true;
+  try {
+    for (let i = 0; i < rec.linked.length; i++) __vmModInstantiate(rec.linked[i].__zunVmModule);
+  } catch (e: any) {
+    rec.instantiated = false;
+    throw e;
+  }
+  const names: string[] = __vmModExportNames(rec, []);
+  // A namespace lists its exports in code-unit order.
+  names.sort();
+  rec.exportNames = names;
+  for (let i = 0; i < names.length; i++) {
+    if (!(names[i] in rec.ns)) rec.ns[names[i]] = undefined;
+  }
+  // imports must resolve now: a missing name is a SyntaxError at link time
+  for (let i = 0; i < rec.imports.length; i++) {
+    const imp: any = rec.imports[i];
+    if (imp.imported === "*" || imp.imported === "*source") continue;
+    const dep: any = __vmModRequestFor(rec, imp.request);
+    const depRec: any = dep.__zunVmModule;
+    const depNames: string[] = depRec.kind === "synthetic" ? depRec.exportNames : __vmModExportNames(depRec, []);
+    if (depNames.indexOf(imp.imported) < 0) {
+      throw new SyntaxError(
+        "The requested module '" + imp.specifier + "' does not provide an export named '" +
+          imp.imported + "'",
+      );
+    }
+  }
+  // re-exports forward the dependency's published values
+  for (let i = 0; i < rec.reexports.length; i++) {
+    const re: any = rec.reexports[i];
+    const dep: any = __vmModRequestFor(rec, re.request);
+    const depRec: any = dep.__zunVmModule;
+    if (re.imported === "*") {
+      __vmModPublish(rec, re.exported, depRec.ns);
+    } else {
+      __vmModListen(depRec, re.imported, __vmModForwarder(rec, re.exported));
+    }
+  }
+  for (let i = 0; i < rec.stars.length; i++) {
+    const dep: any = __vmModRequestFor(rec, rec.stars[i]);
+    const depRec: any = dep.__zunVmModule;
+    const depNames: string[] = __vmModExportNames(depRec, []);
+    for (let j = 0; j < depNames.length; j++) {
+      const name: string = depNames[j];
+      if (name === "default") continue;
+      let own = false;
+      for (let l = 0; l < rec.locals.length; l++) if (rec.locals[l].exported === name) own = true;
+      if (!own) __vmModListen(depRec, name, __vmModForwarder(rec, name));
+    }
+  }
+}
+
+function __vmModForwarder(rec: any, name: string): any {
+  return (v: any): void => {
+    __vmModPublish(rec, name, v);
+  };
+}
+
+// Binds the module's import setters; called by the compiled body once it has
+// registered them (`__zunVmM.ready()`).
+function __vmModBindImports(rec: any): void {
+  for (let i = 0; i < rec.imports.length; i++) {
+    const imp: any = rec.imports[i];
+    const setter: any = rec.set[imp.local];
+    if (imp.imported === "*source") continue;
+    const dep: any = __vmModRequestFor(rec, imp.request);
+    const depRec: any = dep.__zunVmModule;
+    if (imp.imported === "*") {
+      setter(depRec.ns);
+    } else {
+      __vmModListen(depRec, imp.imported, setter);
+    }
+  }
+}
+
+function __vmModGraphLinking(rec: any, self: any, seen: any[]): boolean {
+  for (let i = 0; i < seen.length; i++) if (seen[i] === rec) return false;
+  seen.push(rec);
+  if (rec !== self && rec.status === "linking") return true;
+  for (let i = 0; i < rec.linked.length; i++) {
+    const dep: any = rec.linked[i];
+    if (dep === undefined) continue;
+    if (__vmModGraphLinking(dep.__zunVmModule, self, seen)) return true;
+  }
+  return false;
+}
+
+async function __vmModLink(rec: any, linker: any): Promise<any> {
+  const n: number = rec.requests.length;
+  const self: any = rec.module;
+  const results: any[] = [];
+  for (let i = 0; i < n; i++) {
+    const req: any = rec.requests[i];
+    results.push(linker(req.specifier, self, { attributes: req.attributes, assert: req.attributes }));
+  }
+  for (let i = 0; i < n; i++) {
+    const req: any = rec.requests[i];
+    const m: any = await results[i];
+    if (!__vmModIsModule(m)) {
+      throw new NodeError("ERR_VM_MODULE_NOT_MODULE", "Provided module is not an instance of Module");
+    }
+    const depRec: any = m.__zunVmModule;
+    if (depRec.context !== rec.context) {
+      throw new NodeError("ERR_VM_MODULE_DIFFERENT_CONTEXT", "Linked modules must use the same context");
+    }
+    if (depRec.status === "errored") {
+      const err: any = new NodeError(
+        "ERR_VM_MODULE_LINK_FAILURE",
+        "request for '" + req.specifier + "' resolved to an errored module",
+      );
+      err.cause = depRec.error;
+      throw err;
+    }
+    rec.linked[i] = m;
+    if (depRec.status === "unlinked") await __vmModLinkEntry(depRec, linker);
+  }
+}
+
+async function __vmModLinkEntry(rec: any, linker: any): Promise<any> {
+  rec.status = "linking";
+  try {
+    await __vmModLink(rec, linker);
+  } catch (e: any) {
+    rec.status = "errored";
+    rec.error = e;
+    throw e;
+  }
+  rec.status = "linked";
+  if (!__vmModGraphLinking(rec, rec, [])) {
+    try {
+      __vmModInstantiate(rec);
+    } catch (e: any) {
+      rec.status = "errored";
+      rec.error = e;
+      throw e;
+    }
+  }
+}
+
+function __vmModRunBody(rec: any): any {
+  const global: any = globalThis;
+  const previous: any = global[__VM_MOD_REC];
+  global[__VM_MOD_REC] = rec;
+  try {
+    if (rec.context === undefined) return __vmRunCompiled(rec.fn, globalThis, true);
+    return __vmRunCompiled(rec.fn, rec.context, false);
+  } finally {
+    global[__VM_MOD_REC] = previous;
+  }
+}
+
+function __vmModEvaluate(rec: any): any {
+  if (rec.evaluation !== undefined) return rec.evaluation;
+  rec.status = "evaluating";
+  rec.evaluation = __vmModEvaluateAsync(rec);
+  return rec.evaluation;
+}
+
+async function __vmModEvaluateAsync(rec: any): Promise<any> {
+  try {
+    for (let i = 0; i < rec.linked.length; i++) {
+      const depRec: any = rec.linked[i].__zunVmModule;
+      if (depRec.status === "evaluating") continue;
+      await __vmModEvaluate(depRec);
+    }
+    if (rec.kind === "synthetic") {
+      const cb: any = rec.evaluateCallback;
+      const r: any = cb.call(rec.module);
+      if (r !== undefined && r !== null && typeof r.then === "function") await r;
+    } else {
+      if (rec.meta === undefined && rec.usesMeta) {
+        rec.meta = Object.create(null);
+        const init: any = rec.initializeImportMeta;
+        if (init !== undefined) init(rec.meta, rec.module);
+      }
+      await __vmModRunBody(rec);
+    }
+  } catch (e: any) {
+    rec.status = "errored";
+    rec.error = e;
+    throw e;
+  }
+  rec.status = "evaluated";
+  return undefined;
+}
+
+function __vmModValidateEvaluate(options: any): void {
+  if (options === undefined) return;
+  __evValidateObject(options, "options");
+  if (options.timeout !== undefined) __vmValidateUint32(options.timeout, "options.timeout", true);
+  if (options.breakOnSigint !== undefined) {
+    __evValidateBoolean(options.breakOnSigint, "options.breakOnSigint");
+  }
+}
+
+function __vmModValidateContext(options: any): any {
+  const context: any = options.context;
+  if (context === undefined) return undefined;
+  if (context === null || typeof context !== "object" || !__vmIsContext(context)) {
+    throw new ERR_INVALID_ARG_TYPE("options.context", "vm.Context", context);
+  }
+  return context;
+}
+
+class __VmModule {
+  constructor() {
+    if (this.constructor === __VmModule) {
+      throw new TypeError("Module is not a constructor");
+    }
+  }
+
+  get identifier(): any {
+    return __vmModRec(this).identifier;
+  }
+
+  get context(): any {
+    return __vmModRec(this).context;
+  }
+
+  get status(): any {
+    return __vmModRec(this).status;
+  }
+
+  get namespace(): any {
+    const rec: any = __vmModRec(this);
+    if (rec.status === "unlinked" || rec.status === "linking") {
+      throw new ERR_VM_MODULE_STATUS("must not be unlinked or linking");
+    }
+    return rec.ns;
+  }
+
+  get error(): any {
+    const rec: any = __vmModRec(this);
+    if (rec.status !== "errored") throw new ERR_VM_MODULE_STATUS("must be errored");
+    return rec.error;
+  }
+
+  async link(linker?: any): Promise<any> {
+    const rec: any = __vmModRec(this);
+    if (typeof linker !== "function") throw new ERR_INVALID_ARG_TYPE("linker", "Function", linker);
+    // A SyntheticModule has no requests: it is linked from construction.
+    if (rec.kind === "synthetic") return undefined;
+    if (rec.status === "linked") {
+      throw new NodeError("ERR_VM_MODULE_ALREADY_LINKED", "Module has already been linked");
+    }
+    if (rec.status !== "unlinked") throw new ERR_VM_MODULE_STATUS("must be unlinked");
+    await __vmModLinkEntry(rec, linker);
+    return undefined;
+  }
+
+  async evaluate(options?: any): Promise<any> {
+    const rec: any = __vmModRec(this);
+    __vmModValidateEvaluate(options);
+    const st: string = rec.status;
+    if (st !== "linked" && st !== "evaluating" && st !== "evaluated" && st !== "errored") {
+      throw new ERR_VM_MODULE_STATUS("must be one of linked, evaluated, or errored");
+    }
+    if (st === "errored" && rec.evaluation === undefined) throw rec.error;
+    if (!rec.instantiated) __vmModInstantiate(rec);
+    await __vmModEvaluate(rec);
+    return undefined;
+  }
+}
+
+class SourceTextModule extends __VmModule {
+  constructor(sourceText?: any, options?: any) {
+    super();
+    __vmValidateString(sourceText, "sourceText");
+    const opts: any = options === undefined ? {} : options;
+    __evValidateObject(opts, "options");
+    const context: any = __vmModValidateContext(opts);
+    let identifier: any = opts.identifier;
+    if (identifier !== undefined) __vmValidateString(identifier, "options.identifier");
+    if (opts.lineOffset !== undefined) __vmValidateInt32(opts.lineOffset, "options.lineOffset");
+    if (opts.columnOffset !== undefined) __vmValidateInt32(opts.columnOffset, "options.columnOffset");
+    if (opts.cachedData !== undefined) __vmValidateBuffer(opts.cachedData, "options.cachedData");
+    const init: any = opts.initializeImportMeta;
+    if (init !== undefined && typeof init !== "function") {
+      throw new ERR_INVALID_ARG_TYPE("options.initializeImportMeta", "function", init);
+    }
+    const dyn: any = opts.importModuleDynamically;
+    if (dyn !== undefined && typeof dyn !== "function") {
+      throw new ERR_INVALID_ARG_TYPE("options.importModuleDynamically", "function", dyn);
+    }
+    const t: any = __vmModTransform(String(sourceText));
+    const compiled: any = __vmCompile(t.body, [], true);
+    if (compiled.error !== "") throw new SyntaxError(__vmSyntaxMessage(compiled.error));
+    if (identifier === undefined) identifier = __vmModContextIdentifier(context);
+    const rec: any = __vmModNewRecord(this, "source", context, identifier);
+    rec.fn = compiled.fn;
+    rec.requests = t.requests;
+    rec.imports = t.imports;
+    rec.locals = t.locals;
+    rec.reexports = t.reexports;
+    rec.stars = t.stars;
+    rec.usesMeta = t.usesMeta;
+    rec.hasTLA = t.hasTLA;
+    rec.initializeImportMeta = init;
+    rec.importModuleDynamically = dyn;
+    const specs: string[] = [];
+    const reqs: any[] = [];
+    for (let i = 0; i < t.requests.length; i++) {
+      specs.push(t.requests[i].specifier);
+      const attrs: any = Object.create(null);
+      const src: any = t.requests[i].attributes;
+      for (const key of Object.keys(src)) attrs[key] = src[key];
+      const req: any = Object.create(null);
+      req.specifier = t.requests[i].specifier;
+      req.attributes = Object.freeze(attrs);
+      req.phase = t.requests[i].phase;
+      reqs.push(Object.freeze(req));
+    }
+    rec.specifiers = Object.freeze(specs);
+    rec.moduleRequests = Object.freeze(reqs);
+    rec.pub = (name: any, getter: any): void => {
+      __vmModPublish(rec, name, getter());
+    };
+    rec.ready = (): void => {
+      __vmModBindImports(rec);
+    };
+    const self: any = this;
+    rec.dyn = (specifier: any, options?: any): any => __vmModDynamicImport(rec, self, specifier, options);
+    Object.defineProperty(this, "__zunVmModule", { value: rec, enumerable: false });
+  }
+
+  get dependencySpecifiers(): any {
+    return __vmModRec(this).specifiers;
+  }
+
+  get moduleRequests(): any {
+    return __vmModRec(this).moduleRequests;
+  }
+
+  hasTopLevelAwait(): boolean {
+    return __vmModRec(this).hasTLA;
+  }
+
+  hasAsyncGraph(): boolean {
+    const rec: any = __vmModRec(this);
+    if (rec.status !== "evaluated" && rec.status !== "evaluating" && !rec.instantiated) {
+      throw new ERR_VM_MODULE_STATUS("must be instantiated");
+    }
+    return __vmModAsyncGraph(rec, []);
+  }
+
+  linkRequests(modules?: any): void {
+    const rec: any = __vmModRec(this);
+    __vmValidateArray(modules, "modules");
+    if (rec.status !== "unlinked") {
+      throw new NodeError("ERR_VM_MODULE_ALREADY_LINKED", "Module has already been linked");
+    }
+    if (modules.length !== rec.requests.length) {
+      throw new NodeError(
+        "ERR_MODULE_LINK_MISMATCH",
+        "Module request count does not match the number of modules provided",
+      );
+    }
+    for (let i = 0; i < modules.length; i++) {
+      const m: any = modules[i];
+      if (!__vmModIsModule(m)) {
+        throw new NodeError("ERR_VM_MODULE_NOT_MODULE", "Provided module is not an instance of Module");
+      }
+      if (m.__zunVmModule.context !== rec.context) {
+        throw new NodeError("ERR_VM_MODULE_DIFFERENT_CONTEXT", "Linked modules must use the same context");
+      }
+    }
+    // Requests that share a module cache key (specifier + attributes) must
+    // resolve to one module, whatever their phase.
+    for (let i = 0; i < modules.length; i++) {
+      for (let j = 0; j < i; j++) {
+        const a: any = rec.requests[i];
+        const b: any = rec.requests[j];
+        if (a.specifier === b.specifier && JSON.stringify(a.attributes) === JSON.stringify(b.attributes) &&
+            modules[i] !== modules[j]) {
+          throw new NodeError(
+            "ERR_MODULE_LINK_MISMATCH",
+            "Module request '" + a.specifier + "' must be linked to the same module",
+          );
+        }
+      }
+    }
+    for (let i = 0; i < modules.length; i++) rec.linked[i] = modules[i];
+    rec.status = "linked";
+  }
+
+  instantiate(): void {
+    const rec: any = __vmModRec(this);
+    // An unlinked request is reported by the instantiation itself, naming it.
+    if (rec.status === "unlinked" && rec.requests.length === 0) {
+      throw new NodeError("ERR_VM_MODULE_LINK_FAILURE", "module '" + rec.identifier + "' is not linked");
+    }
+    __vmModInstantiate(rec);
+  }
+
+  createCachedData(): any {
+    throw new NodeError(
+      "ERR_VM_CODE_CACHE_UNAVAILABLE",
+      "this platform has no code cache: createCachedData() cannot produce one",
+    );
+  }
+}
+
+function __vmModAsyncGraph(rec: any, seen: any[]): boolean {
+  for (let i = 0; i < seen.length; i++) if (seen[i] === rec) return false;
+  seen.push(rec);
+  if (rec.hasTLA) return true;
+  for (let i = 0; i < rec.linked.length; i++) {
+    if (__vmModAsyncGraph(rec.linked[i].__zunVmModule, seen)) return true;
+  }
+  return false;
+}
+
+async function __vmModDynamicImport(rec: any, referrer: any, specifier: any, options?: any): Promise<any> {
+  const dyn: any = rec.importModuleDynamically;
+  if (dyn === undefined) {
+    throw new NodeTypeError(
+      "ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING",
+      "A dynamic import callback was not specified.",
+    );
+  }
+  const attrs: any = options !== undefined && options !== null && options.with !== undefined ? options.with : {};
+  const m: any = await dyn(String(specifier), referrer, attrs);
+  if (!__vmModIsModule(m)) return m;
+  const depRec: any = m.__zunVmModule;
+  if (depRec.status === "unlinked") {
+    throw new ERR_VM_MODULE_STATUS("must be linked");
+  }
+  if (!depRec.instantiated) __vmModInstantiate(depRec);
+  await __vmModEvaluate(depRec);
+  return depRec.ns;
+}
+
+class SyntheticModule extends __VmModule {
+  constructor(exportNames?: any, evaluateCallback?: any, options?: any) {
+    super();
+    let ok: boolean = Array.isArray(exportNames);
+    if (ok) {
+      for (let i = 0; i < exportNames.length; i++) {
+        if (typeof exportNames[i] !== "string") ok = false;
+      }
+    }
+    if (!ok) {
+      throw new NodeTypeError(
+        "ERR_INVALID_ARG_TYPE",
+        'The "exportNames" argument must be an Array of unique strings.' + __evReceived(exportNames),
+      );
+    }
+    for (let i = 0; i < exportNames.length; i++) {
+      for (let j = 0; j < i; j++) {
+        if (exportNames[i] === exportNames[j]) {
+          throw new NodeTypeError(
+            "ERR_INVALID_ARG_VALUE",
+            "The property 'exportNames." + exportNames[i] + "' is duplicated. Received '" +
+              exportNames[i] + "'",
+          );
+        }
+      }
+    }
+    if (typeof evaluateCallback !== "function") {
+      throw new ERR_INVALID_ARG_TYPE("evaluateCallback", "function", evaluateCallback);
+    }
+    const opts: any = options === undefined ? {} : options;
+    __evValidateObject(opts, "options");
+    const context: any = __vmModValidateContext(opts);
+    let identifier: any = opts.identifier;
+    if (identifier !== undefined) __vmValidateString(identifier, "options.identifier");
+    if (identifier === undefined) identifier = __vmModContextIdentifier(context);
+    const rec: any = __vmModNewRecord(this, "synthetic", context, identifier);
+    const names: string[] = [];
+    for (let i = 0; i < exportNames.length; i++) names.push(exportNames[i]);
+    const sorted: string[] = names.slice();
+    sorted.sort();
+    for (let i = 0; i < sorted.length; i++) rec.ns[sorted[i]] = undefined;
+    rec.exportNames = names;
+    rec.evaluateCallback = evaluateCallback;
+    rec.status = "linked";
+    rec.instantiated = true;
+    Object.defineProperty(this, "__zunVmModule", { value: rec, enumerable: false });
+  }
+
+  setExport(name?: any, value?: any): void {
+    const rec: any = __vmModRec(this);
+    if (rec.kind !== "synthetic") throw __vmModInvalidThis();
+    __vmValidateString(name, "name");
+    if (rec.exportNames.indexOf(name) < 0) {
+      throw new __VmModuleReferenceError(
+        "ERR_VM_MODULE_EXPORT_NOT_FOUND",
+        "Export '" + name + "' is not defined in module",
+      );
+    }
+    __vmModPublish(rec, name, value);
+  }
+}
+
 const __vmConstants: any = {
   USE_MAIN_CONTEXT_DEFAULT_LOADER: __vmMainContextDefaultLoader,
   DONT_CONTEXTIFY: __vmDontContextify,
 };
 
-// `vm.Module`, `vm.SourceTextModule` and `vm.SyntheticModule` are absent, which
-// is their shape in a Node run without `--experimental-vm-modules`: this
-// platform has no flag to turn them on, and ES module instantiation would need
-// a compile entry point the engine does not expose (see the header).
 const __node_vm: any = {
   Script: Script,
   createContext: createContext,
@@ -1528,4 +2764,7 @@ const __node_vm: any = {
   compileFunction: compileFunction,
   measureMemory: __vmMeasureMemory,
   constants: __vmConstants,
+  Module: __VmModule,
+  SourceTextModule: SourceTextModule,
+  SyntheticModule: SyntheticModule,
 };
