@@ -524,13 +524,13 @@ function __v8WriteReceiver(state: any, value: any, owner: any): void {
     if (state.treatViewsAsHostObjects !== true) {
       // The base `Serializer` would serialize the view over its own
       // `ArrayBuffer` here (`kArrayBufferView` after `kArrayBuffer`); neither
-      // the buffer nor the offsets are reachable through `any` in this engine
+      // the buffer nor the offsets are reachable through `any` in the Zun engine
       // (see the header), so the reason is named rather than guessed.
       throw __v8CloneError(
         owner,
         "ArrayBufferView serialization without " +
           "_setTreatArrayBufferViewsAsHostObjects(true) needs the view's " +
-          "ArrayBuffer, which is not reachable in this engine " +
+          "ArrayBuffer, which is not reachable in the Zun engine " +
           "(https://github.com/UrubuCode/zun/issues/38)",
       );
     }
@@ -677,7 +677,7 @@ function __v8WriteError(state: any, error: any, owner: any): void {
 
   const message: any = error.message;
   // V8 writes the message only when the error carries one. An `Error` built
-  // with no argument has none; this engine reports that as the empty string,
+  // with no argument has none; the Zun engine reports that as the empty string,
   // so the empty string is what is treated as "absent".
   if (message !== undefined && message !== null && String(message) !== "") {
     __v8PushByte(state, __V8_ERR_MESSAGE);
@@ -726,7 +726,7 @@ function __v8WriteRawBytes(state: any, source: any): void {
   if (!__v8IsReadableView(source)) {
     throw new Error(
       "writeRawBytes() of a non-Uint8Array view: the view's bytes are not " +
-        "reachable in this engine " +
+        "reachable in the Zun engine " +
         "(https://github.com/UrubuCode/zun/issues/38)",
     );
   }
@@ -751,12 +751,12 @@ function __v8DefaultWriteHostObject(state: any, view: any, owner: any): void {
     throw __v8CloneError(
       owner,
       "Unserializable host object: an ArrayBufferView whose element type " +
-        "this engine does not report. Only Uint8Array/Buffer views can be " +
+        "the Zun engine does not report. Only Uint8Array/Buffer views can be " +
         "serialized here; see the header of src/v8/v8.ts and " +
         "https://github.com/UrubuCode/zun/issues/38",
     );
   }
-  // `Buffer` and `Uint8Array` are one runtime type in this engine, so the two
+  // `Buffer` and `Uint8Array` are one runtime type in the Zun engine, so the two
   // cannot be told apart; index 10 (`FastBuffer`) is the one that makes a
   // `Buffer` — by far the common case, and the only one Node's own corpus
   // round-trips — byte-identical to Node.
@@ -779,7 +779,7 @@ function __v8NewDesState(buffer: any): any {
   if (!__v8IsReadableView(buffer)) {
     throw new Error(
       "new Deserializer() of a non-Uint8Array view: the view's bytes are " +
-        "not reachable in this engine " +
+        "not reachable in the Zun engine " +
         "(https://github.com/UrubuCode/zun/issues/38)",
     );
   }
@@ -973,7 +973,7 @@ function __v8ReadValue(state: any, owner: any): any {
   }
   if (tag === __V8_TAG_TRUE_OBJECT || tag === __V8_TAG_FALSE_OBJECT) {
     // A boxed primitive. There is no `new Boolean(...)` wrapper object in
-    // this engine, so the primitive is handed back and the distinction is
+    // the Zun engine, so the primitive is handed back and the distinction is
     // lost; documented in ../../test/v8/README.md.
     const boxed: any = tag === __V8_TAG_TRUE_OBJECT;
     state.ids.push(boxed);
@@ -1021,7 +1021,7 @@ function __v8ReadValue(state: any, owner: any): any {
     __v8ReadRawBytes(state, byteLength);
     throw new Error(
       "ArrayBuffer deserialization needs an ArrayBuffer whose bytes can be " +
-        "written, which is not reachable in this engine " +
+        "written, which is not reachable in the Zun engine " +
         "(https://github.com/UrubuCode/zun/issues/38)",
     );
   }
@@ -1228,13 +1228,13 @@ function __v8DefaultReadHostObject(state: any): any {
   ) {
     throw new Error(
       "BigInt64Array/BigUint64Array cannot be built with their element " +
-        "values in this engine (new BigInt64Array([42n])[0] answers 0), so " +
+        "values in the Zun engine (new BigInt64Array([42n])[0] answers 0), so " +
         "view type " + String(typeIndex) + " is rejected rather than " +
         "returned full of zeros",
     );
   }
   if (typeIndex === __V8_VIEW_FLOAT16) {
-    throw new Error("Float16Array is not defined in this engine");
+    throw new Error("Float16Array is not defined in the Zun engine");
   }
   throw new Error("Unknown ArrayBufferView type index " + String(typeIndex));
 }
@@ -1329,7 +1329,7 @@ class Serializer {
   // later `writeValue` of it emits `kArrayBufferTransfer` + id instead of its
   // contents. The registration is kept, and that is as far as it can go: an
   // `ArrayBuffer` reached through an `any` is indistinguishable from `{}` in
-  // this engine (see the header), so `writeValue` never recognizes one and the
+  // the Zun engine (see the header), so `writeValue` never recognizes one and the
   // table is never consulted. Dropping the method would be worse — a consumer
   // would get "not a function" instead of a value that simply never arrives.
   transferArrayBuffer(id: any, arrayBuffer: any): void {
@@ -1555,7 +1555,7 @@ function __v8GetHeapStatistics(): any {
 
 // V8's heap space names at Node 25, which is what `test-v8-stats.js` asserts
 // the set of. Zun's heap is not divided into spaces, so every size is zero —
-// the shape is V8's, the numbers are this runtime's.
+// the shape is V8's, the numbers are the Zun runtime's.
 const __V8_HEAP_SPACES: string[] = [
   "read_only_space",
   "new_space",
@@ -1637,7 +1637,7 @@ function __v8SetHeapSnapshotNearHeapLimit(limit: any): void {
 
 // A well-formed `.heapsnapshot` with an empty graph. The `meta` block is the
 // schema a consumer (Chrome DevTools, `heapsnapshot-parser`) needs in order to
-// read the arrays; the arrays are empty because this runtime exposes no heap
+// read the arrays; the arrays are empty because the Zun runtime exposes no heap
 // graph to walk. An empty-but-valid snapshot is the same answer the zeros in
 // `getHeapStatistics` are, in a different format.
 function __v8EmptyHeapSnapshot(): string {
@@ -1711,7 +1711,7 @@ function __v8WriteHeapSnapshot(filename?: any, options?: any): string {
   }
   throw new Error(
     "v8.writeHeapSnapshot() is not available in zun-node: it needs a heap " +
-      "graph, which this runtime does not expose, and `fs`, which is a " +
+      "graph, which the Zun runtime does not expose, and `fs`, which is a " +
       "native extension that a node:v8 bundle does not load. " +
       "v8.getHeapSnapshot() answers the (empty) snapshot as a stream.",
   );
@@ -1747,7 +1747,7 @@ function __v8QueryObjects(ctor: any, options?: any): any {
   );
   throw new Error(
     "v8.queryObjects() is not available in zun-node: counting live " +
-      "instances needs a heap walk, and this runtime exposes no heap graph. " +
+      "instances needs a heap walk, and the Zun runtime exposes no heap graph. " +
       "Returning 0 would be a wrong answer rather than an empty one.",
   );
 }

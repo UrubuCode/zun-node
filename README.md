@@ -860,7 +860,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-diagnostics_channel:start -->
 ### Node.js v25 `diagnostics_channel` compatibility
 
-`█████░░░░░░░░░░░░░░░░░░░` **24.4%** — 12 / 49 Node `test-diagnostics-channel*` tests passing
+`████████░░░░░░░░░░░░░░░░` **36.7%** — 18 / 49 Node `test-diagnostics-channel*` tests passing
 <!-- node-diagnostics_channel:end -->
 
 <!-- node-console:start -->
@@ -994,13 +994,13 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-readline:start -->
 ### Node.js v25 `readline` compatibility
 
-`██████████░░░░░░░░░░░░░░` **45.4%** — 10 / 22 Node `test-readline*` tests passing
+`█████████████░░░░░░░░░░░` **54.5%** — 12 / 22 Node `test-readline*` tests passing
 <!-- node-readline:end -->
 
 <!-- node-v8:start -->
 ### Node.js v25 `v8` compatibility
 
-`█████████░░░░░░░░░░░░░░░` **38.0%** — 8 / 21 Node `test-v8-*` tests passing
+`███████████░░░░░░░░░░░░░` **47.6%** — 10 / 21 Node `test-v8-*` tests passing
 <!-- node-v8:end -->
 
 > `node:v8` is a window onto a V8 isolate, and Zun is not V8: the wire format
@@ -1078,7 +1078,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-domain:start -->
 ### Node.js v25 `domain` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **36.0%** — 18 / 50 Node `test-domain-*` tests passing
+`██████████████░░░░░░░░░░` **60.0%** — 30 / 50 Node `test-domain-*` tests passing
 <!-- node-domain:end -->
 
 > `node:domain` is deprecated but fully specified, and it is the one module in
@@ -1240,7 +1240,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-module:start -->
 ### Node.js v25 `module` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **37.0%** — 20 / 54 Node `test-module-*|test-require-*` tests passing
+`█████████░░░░░░░░░░░░░░░` **40.7%** — 22 / 54 Node `test-module-*|test-require-*` tests passing
 <!-- node-module:end -->
 
 > `module` is the one module in this library that cannot reach 100%, and the

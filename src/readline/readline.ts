@@ -557,7 +557,7 @@ function __rlParseCmdTilde(cmd: string): any {
   const n = Number(cmd.length);
   // The `\d{3}~` alternative. The regex tries the other one first, but that one
   // cannot match a four-character all-digits-then-tilde string (after one or
-  // two digits the next character is neither `;` nor a final), so testing this
+  // two digits the next character is neither `;` nor a final), so testing for it
   // one first answers the same.
   if (
     n === 4 && cmd.charAt(3) === "~" &&
@@ -1284,7 +1284,7 @@ function __rlLineIterator(emitter: any): any {
   };
 
   // The four handlers name each other, and a `const` holding a function
-  // expression is not hoisted in this engine: a closure that mentions a name
+  // expression is not hoisted in the Zun engine: a closure that mentions a name
   // declared below it raises "<name> is not defined" when it runs, however late
   // that is. So each is a `let` declared up front and assigned in order.
   let removeAll: any = undefined;

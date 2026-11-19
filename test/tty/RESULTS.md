@@ -13,8 +13,8 @@ The "Why" column is the first line of the failing run's stderr, truncated.
 
 | Test | Result | Why |
 |---|---|---|
-| `test-tty-backwards-api.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
+| `test-tty-backwards-api.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: __dnsNative is not defined |
 | `test-tty-stdin-end.js` | ✅ pass | |
 | `test-tty-stdin-pipe.js` | ✅ pass | |
-| `test-ttywrap-invalid-fd.js` | ❌ runtime | zun: runtime error: unhandled exception: Object(Obj(0x…)) |
-| `test-ttywrap-stack.js` | ❌ runtime | thread '<unknown>' (35748) has overflowed its stack |
+| `test-ttywrap-invalid-fd.js` | ❌ runtime | zun: runtime error: unhandled exception: ReferenceError: __dnsNative is not defined |
+| `test-ttywrap-stack.js` | ❌ timeout |  |

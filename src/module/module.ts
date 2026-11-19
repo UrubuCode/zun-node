@@ -94,8 +94,11 @@
 //     `this` parameter, shifting every argument by one, as soon as the token
 //     `this` appears anywhere in its source span, comments included. (A new
 //     engine gap, reported with this work; the same assignment onto a plain
-//     *object* is unaffected, and a named function declaration never shifts.
-//     It is the same textual-scan family as zun#40.) The indirection is also
+//     *object* is unaffected. It is the same textual-scan family as zun#40.)
+//     The current engine shifts a *named declaration* the same way once it is
+//     called as a method (zun#167), so no function in this file may spell the
+//     word in its body either -- a comment in `__modFindPath` alone failed every
+//     absolute-path `require`. The indirection is also
 //     what Node's monkey-patching contract needs: every internal call goes
 //     through `Module.<name>(...)`, so a replacement is honoured.
 //   * `require.main` is a plain property, not an accessor:
@@ -571,7 +574,7 @@ function __modFindPath(request?: any, paths?: any, isMain?: any): any {
   let exts: any = undefined;
   const last: number = Number(text.length) - 1;
   // A request that names a *directory*: a trailing `/`, or a trailing `.` /
-  // `..` segment. Node spells this out over character codes; so does this.
+  // `..` segment. Node spells the test out over character codes, as here.
   const trailingSlash: boolean =
     Number(text.length) > 0 &&
     (cc(text, last) === 0x2f ||
@@ -827,7 +830,7 @@ function __modLoadJavaScript(module?: any, filename?: any): void {
   }
   // The file exists and is readable — `_findPath` just stat'ed it — but
   // turning its source into code is the compiler's job, and the compiler ran
-  // before this program started.
+  // before the program started.
   throw new ERR_ZUN_NO_RUNTIME_COMPILER(name);
 }
 Module._extensions[".js"] = __modLoadJavaScript;
@@ -853,7 +856,7 @@ Module._extensions[".json"] = __modLoadJSON;
 function __modLoadAddon(module?: any, filename?: any): void {
   throw new ERR_DLOPEN_FAILED(
     "Cannot load " + String(filename) + ": a Node.js addon is a V8 N-API " +
-      "shared object, and this runtime has no V8 isolate to load one into " +
+      "shared object, and the Zun runtime has no V8 isolate to load one into " +
       "(the Zun engine's own native extensions are loaded with `zun run --ext`)",
   );
 }

@@ -60,16 +60,10 @@
 //   channel has already been collected.
 //
 // Engine notes (https://github.com/UrubuCode/zun/issues):
-//   * `this` is **not** threaded into a subscriber, a traced function or a
-//     `runStores` callback. `apply`, `call` and `bind` all fail to bind a
-//     receiver on a function *value* and additionally shift the argument list
-//     (`f.apply(recv, [a, b])` arrives as `f(recv, a)`) — zun#1 — so every call
-//     here goes through `__evCall`, which is `fn(...args)`. Node's
-//     `runStores(data, fn, thisArg, ...args)` and the three `trace*` methods all
-//     promise `thisArg` as the receiver; that promise cannot be kept, and it is
-//     the single blocker behind six of Node's own tests for this module (see
-//     ../../test/diagnostics_channel/README.md). The `thisArg` parameter is
-//     still accepted and still positional, so argument forwarding is correct.
+//   * `thisArg` is the receiver of the traced function and of a `runStores`
+//     callback: `apply` threads a receiver into a function value now (zun#1 is
+//     fixed), so those calls go through `__evCallOn`. Subscribers are still
+//     called through `__evCall`, as Node calls them with no receiver.
 //   * every callable that is stored — a subscriber in the subscriber list, a
 //     `bindStore` transform in the store map, the wrapper a `trace*` method
 //     hands to `runStores` — is routed through `__evBox` first, because a bare
@@ -303,18 +297,18 @@ class Channel {
   }
 
   // `runStores(data, fn, thisArg, ...args)`: publish `data` and call `fn` with
-  // every bound store entered. `thisArg` is accepted positionally and ignored as
-  // a receiver (zun#1); the arguments after it are forwarded exactly.
+  // every bound store entered, with `thisArg` as its receiver (zun#1 is fixed,
+  // so `apply` threads it); the arguments after it are forwarded exactly.
   runStores(data: any, fn: any, thisArg?: any, ...args: any[]): any {
     const passed: any[] = __alsSpread(args);
-    if (this._stores === undefined) return __evCall(fn, passed);
+    if (this._stores === undefined) return __evCallOn(fn, thisArg, passed);
     const self: any = this;
     // The innermost run: publish inside every store, then the callback — so a
     // subscriber sees the stores already set, which is what
     // `test-diagnostics-channel-bind-store.js` asserts.
     let run: any = __evBox(function (): any {
       self.publish(data);
-      return __evCall(fn, passed);
+      return __evCallOn(fn, thisArg, passed);
     });
     for (const entry of self._stores.entries()) {
       run = __dcWrapStoreRun(entry[0], data, run, entry[1]);
@@ -475,7 +469,7 @@ class TracingChannel {
 
   traceSync(fn: any, context?: any, thisArg?: any, ...args: any[]): any {
     const passed: any[] = __alsSpread(args);
-    if (!this.hasSubscribers) return __evCall(fn, passed);
+    if (!this.hasSubscribers) return __evCallOn(fn, thisArg, passed);
     const ctx: any = __dcContext(context);
     const start: any = this.start;
     const end: any = this.end;
@@ -484,7 +478,7 @@ class TracingChannel {
       ctx,
       __evBox(function (): any {
         try {
-          const result: any = __evCall(fn, passed);
+          const result: any = __evCallOn(fn, thisArg, passed);
           ctx.result = result;
           return result;
         } catch (err) {
@@ -500,7 +494,7 @@ class TracingChannel {
 
   tracePromise(fn: any, context?: any, thisArg?: any, ...args: any[]): any {
     const passed: any[] = __alsSpread(args);
-    if (!this.hasSubscribers) return __evCall(fn, passed);
+    if (!this.hasSubscribers) return __evCallOn(fn, thisArg, passed);
     const ctx: any = __dcContext(context);
     const start: any = this.start;
     const end: any = this.end;
@@ -529,7 +523,7 @@ class TracingChannel {
       ctx,
       __evBox(function (): any {
         try {
-          let promise: any = __evCall(fn, passed);
+          let promise: any = __evCallOn(fn, thisArg, passed);
           if (!__dcIsPromise(promise)) promise = Promise.resolve(promise);
           return promise.then(onResolve, onReject);
         } catch (err) {
@@ -545,7 +539,7 @@ class TracingChannel {
 
   traceCallback(fn: any, position?: any, context?: any, thisArg?: any, ...args: any[]): any {
     const passed: any[] = __alsSpread(args);
-    if (!this.hasSubscribers) return __evCall(fn, passed);
+    if (!this.hasSubscribers) return __evCallOn(fn, thisArg, passed);
     const ctx: any = __dcContext(context);
     const start: any = this.start;
     const end: any = this.end;
@@ -593,7 +587,7 @@ class TracingChannel {
       ctx,
       __evBox(function (): any {
         try {
-          return __evCall(fn, passed);
+          return __evCallOn(fn, thisArg, passed);
         } catch (err) {
           ctx.error = err;
           error.publish(ctx);

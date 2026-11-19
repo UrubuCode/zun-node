@@ -333,7 +333,7 @@ function __domOnRemoveListener(name: any, listener: any): void {
 // ---------------------------------------------------------------------------
 
 function __domEnter(d: any): void {
-  // Note that this may be a no-op, but the frame is still pushed so that it
+  // Note that the call may be a no-op, but the frame is still pushed so that it
   // can be popped later — Node's own comment.
   __domSetActive(d);
   __domStack().push(d);
@@ -344,7 +344,7 @@ function __domExit(d: any): void {
   const stack: any = __domStack();
   const index: number = Number(stack.lastIndexOf(d));
   if (index === -1) return;
-  // Exit every domain above this one as well.
+  // Exit every domain above the one exiting as well.
   stack.splice(index);
   const length: number = Number(stack.length);
   __domSetActive(length === 0 ? undefined : stack[length - 1]);
