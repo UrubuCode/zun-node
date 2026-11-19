@@ -539,3 +539,40 @@ fn a_closed_datagram_handle_is_ebadf() {
     }
     assert!(udp::recv_datagram(id).is_err());
 }
+
+#[test]
+fn a_pipe_listener_accepts_and_carries_bytes() {
+    let mut handles = Handles(Vec::new());
+    let name = format!(r"\\.\pipe\zun-io-test-{}", std::process::id());
+    let path = if cfg!(windows) {
+        name
+    } else {
+        std::env::temp_dir().join(format!("zun-io-test-{}.sock", std::process::id())).display().to_string()
+    };
+    let server: i64 = fields(&listen_pipe_on(&path, 16))[0].parse().unwrap();
+    handles.0.push(server);
+    assert!(pipe::socket_path(&path).exists(), "the socket file is bound");
+
+    let client: i64 = fields(&connect_pipe_to(0, &path))[0].parse().unwrap();
+    handles.0.push(client);
+    assert_ne!(wait_for(server, sys::READ), 0, "the listener becomes readable");
+    let server_raw = with_table(|table| table.get(&server).unwrap().raw);
+    let (accepted_raw, _) = sys::accept(server_raw).unwrap().unwrap();
+    let accepted = publish(accepted_raw, Kind::Stream, false);
+    handles.0.push(accepted);
+
+    assert_ne!(wait_for(client, sys::WRITE), 0);
+    let client_raw = with_table(|table| table.get(&client).unwrap().raw);
+    assert_eq!(sys::send(client_raw, b"ping").unwrap(), Some(4));
+    assert_ne!(wait_for(accepted, sys::READ), 0);
+    let mut buffer = [0u8; 16];
+    assert_eq!(sys::recv(accepted_raw, &mut buffer).unwrap(), Some(4));
+    assert_eq!(&buffer[..4], b"ping");
+    pipe::unlink(&path);
+}
+
+#[test]
+fn connecting_to_a_missing_pipe_is_enoent() {
+    let payload = connect_pipe_to(0, r"\\.\pipe\zun-io-test-nobody-home");
+    assert_eq!(payload, FAILED);
+}

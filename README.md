@@ -1138,7 +1138,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-net:start -->
 ### Node.js v25 `net` compatibility
 
-`███████████░░░░░░░░░░░░░` **46.9%** — 70 / 149 Node `test-net-*` tests passing
+`████████████░░░░░░░░░░░░` **53.0%** — 79 / 149 Node `test-net-*` tests passing
 <!-- node-net:end -->
 
 > `net` is **TS over natives, and the first module here whose natives are not
@@ -1377,7 +1377,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-http:start -->
 ### Node.js v25 `http` compatibility
 
-`██████████████░░░░░░░░░░` **59.4%** — 225 / 379 Node `test-http-*` tests passing
+`██████████████░░░░░░░░░░` **61.7%** — 234 / 379 Node `test-http-*` tests passing
 <!-- node-http:end -->
 
 > `http` is **Zun TypeScript over `net`**, with no natives of its own:
@@ -1440,7 +1440,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-https:start -->
 ### Node.js v25 `https` compatibility
 
-`██████████░░░░░░░░░░░░░░` **38.7%** — 24 / 62 Node `test-https-*` tests passing
+`██████████░░░░░░░░░░░░░░` **43.5%** — 27 / 62 Node `test-https-*` tests passing
 <!-- node-https:end -->
 
 > `https` is `http` over `tls` ([`src/https/https.ts`](src/https/https.ts)),

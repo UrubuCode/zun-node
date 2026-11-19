@@ -117,9 +117,10 @@ method on it.
 
 ### Named gaps
 
-- **No pipes / Unix domain sockets.** A pipe handle is a different kernel
-  object with a different readiness story, and the loop has only the TCP half.
-  `listen(path)` and `connect(path)` raise rather than pretending.
+- **Pipes are local stream sockets.** `listen(path)` / `connect({ path })`
+  open a Unix domain socket; on Windows a named-pipe name is mapped to an
+  AF_UNIX socket file in the temp directory (`src/io/pipe.rs`), so only this
+  runtime can dial it. Measured with pipes: **79 / 149** (was 70).
 - **Name resolution blocks.** `ioLookup` is `getaddrinfo`, called
   synchronously, with the answer delivered through `process.nextTick` — the
   `dns` pattern. A `lookup` callback still runs on a later tick than its caller
