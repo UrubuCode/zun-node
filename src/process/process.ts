@@ -1548,6 +1548,8 @@ const __PROC_ALLOWED_FLAGS: string[] = [
   "--no-warnings",
   "--pending-deprecation",
   "--throw-deprecation",
+  // Read by `src/dgram/dgram.ts` (`__dgramReadNoTrySend`).
+  "--test-udp-no-try-send",
   "--title",
   "--trace-deprecation",
 ];

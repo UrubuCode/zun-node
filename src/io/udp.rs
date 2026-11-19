@@ -421,6 +421,13 @@ unsafe extern "C" fn multicast_interface(
 pub(super) fn set_multicast_interface(id: i64, iface: &str) -> Result<String, String> {
     let (raw, ipv6) = datagram(id, "setMulticastInterface")?;
     let result = if ipv6 {
+        // libuv parses the whole text with `uv_ip6_addr` and takes its scope
+        // id as the interface index, so a text that is not an IPv6 address
+        // (`''`, `'undefined'`) is EINVAL rather than "the default interface".
+        let address = iface.split('%').next().unwrap_or("");
+        if address.parse::<std::net::Ipv6Addr>().is_err() {
+            return Err(fail_code("setMulticastInterface", "EINVAL", ""));
+        }
         sys::udp_set_opt(
             raw,
             sys::IPPROTO_IPV6,

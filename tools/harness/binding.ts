@@ -52,6 +52,10 @@ const __node_internal_test_binding: any = {
     if (name === "cares_wrap") return __dnsCares;
     if (name === "uv") return __harnessUvConstants;
     if (name === "buffer") return __harnessBufferBinding;
+    if (name === "udp_wrap") {
+      const udpWrap: any = (globalThis as any).__zunNodeUdpWrap;
+      if (udpWrap !== undefined && udpWrap !== null) return udpWrap;
+    }
     throw new Error("internalBinding: " + String(name) + " is not served by the harness");
   },
   primordials: {},

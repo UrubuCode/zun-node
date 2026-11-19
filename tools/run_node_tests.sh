@@ -411,9 +411,10 @@ run_one() {
   # A `// Flags:` line is Node's per-test command line. The `zun` CLI takes no
   # Node options, so the few this library honours from `NODE_OPTIONS` are
   # forwarded that way (each job is its own subshell, so the export stays in
-  # this test). Only `--dns-result-order` so far: it seeds `dns`' default order.
+  # this test). `--dns-result-order` seeds `dns`' default order;
+  # `--test-udp-no-try-send` makes `dgram` queue every send.
   local forwarded
-  forwarded="$(grep -m1 '^// Flags:' "$src" | grep -o -- '--dns-result-order=[a-z0-9]*' | tr '\n' ' ')"
+  forwarded="$(grep -m1 '^// Flags:' "$src" | grep -o -- '--dns-result-order=[a-z0-9]*\|--test-udp-no-try-send' | tr '\n' ' ')"
   if [ -n "$forwarded" ]; then export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }$forwarded"; fi
 
   case "$KIND" in

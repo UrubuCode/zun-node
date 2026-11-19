@@ -1255,6 +1255,36 @@ fn decode_sockaddr(storage: &[u8; 128], family: u16) -> Option<SocketAddr> {
 pub(crate) fn describe(addr: &SocketAddr) -> (String, u16, &'static str) {
     match addr.ip() {
         IpAddr::V4(v4) => (v4.to_string(), addr.port(), "IPv4"),
-        IpAddr::V6(v6) => (v6.to_string(), addr.port(), "IPv6"),
+        IpAddr::V6(v6) => {
+            // Node's `AddressToJS` appends the interface to a link-local
+            // address with a scope: its index on Windows
+            // (`uv_if_indextoiid`), its name elsewhere.
+            let mut text = v6.to_string();
+            if let SocketAddr::V6(full) = addr {
+                let scope = full.scope_id();
+                if scope > 0 && (v6.segments()[0] & 0xffc0) == 0xfe80 {
+                    text.push('%');
+                    text.push_str(&interface_id(scope));
+                }
+            }
+            (text, addr.port(), "IPv6")
+        }
     }
+}
+
+#[cfg(windows)]
+fn interface_id(scope: u32) -> String {
+    scope.to_string()
+}
+
+#[cfg(unix)]
+fn interface_id(scope: u32) -> String {
+    let mut name = [0 as libc::c_char; 64];
+    // SAFETY: `name` is larger than IF_NAMESIZE, as `if_indextoname` requires.
+    let named = unsafe { libc::if_indextoname(scope, name.as_mut_ptr()) };
+    if named.is_null() {
+        return scope.to_string();
+    }
+    // SAFETY: on success `name` holds a NUL-terminated interface name.
+    unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }.to_string_lossy().into_owned()
 }
