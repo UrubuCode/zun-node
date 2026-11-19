@@ -97,7 +97,8 @@ A Node module lands here in whichever form fits what it actually does:
   (`std::process::Command`, a thread per pipe, a timeout with a chosen kill signal), while
   [`src/child_process/child_process.ts`](src/child_process/child_process.ts)
   holds the module Node exposes — the argument normalizers, the shell rules, the
-  `stdio` grammar and the result object. A spawn request cannot cross one scalar
+  `stdio` grammar, the result object, and `fork()` with its IPC channel (a
+  loopback socket the child connects back to, JSON-framed). A spawn request cannot cross one scalar
   word at a time either, so it crosses as one delimited string in the same
   grammar, with the child's output base64 for the same reason a file's bytes
   are. **`process` is the fourth, and the only module in three files**:
@@ -110,11 +111,11 @@ A Node module lands here in whichever form fits what it actually does:
   to be separable — `tools/bundle_node_test.sh` appends `native.ts` only for a
   bundle that will get an extension, and `process.ts` keeps a documented
   fallback for every native-backed value (the table is in its header). **`zlib`
-  is the fifth**: `src/zlib/*.rs` holds one `z_stream` (or Brotli
-  encoder/decoder) per handle behind a small handle table, over `libz-rs-sys`
-  and the `brotli` crate — both pure Rust, so the extension still builds with
+  is the fifth**: `src/zlib/*.rs` holds one `z_stream` (or Brotli or zstd
+  encoder/decoder) per handle behind a small handle table, over `libz-rs-sys`,
+  the `brotli` crate and `ruzstd` — all pure Rust, so the extension still builds with
   nothing but a Rust toolchain — while [`src/zlib/zlib.ts`](src/zlib/zlib.ts)
-  holds the module Node exposes: nine `Transform` classes, the `create*`
+  holds the module Node exposes: eleven `Transform` classes, the `create*`
   factories, the sync and callback convenience methods, `constants`/`codes` and
   the option validation. Compressed bytes cross base64, the same carrier `fs`
   uses and for the same reason.
@@ -688,7 +689,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-child_process:start -->
 ### Node.js v25 `child_process` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **34.8%** — 38 / 109 Node `test-child-process*` tests passing
+`███████████░░░░░░░░░░░░░` **49.5%** — 54 / 109 Node `test-child-process*` tests passing
 <!-- node-child_process:end -->
 
 > `child_process` is **TS over natives** (the `os` kind), **both halves**, the
@@ -709,9 +710,11 @@ the direct `zun run --ext <lib> <test.js>` path.
 > `'spawn'`/`'exit'`/`'close'`/`'error'` in Node's order), `spawn` with
 > `timeout`/`killSignal`/`signal`, `exec`/`execFile` built on `spawn` as
 > `lib/child_process.js` builds them, `util.promisify`, `getValidStdio`.
-> **`fork()` and the IPC channel are not done** (39 of the 109 files call
-> `fork(`), `stdio` is `'pipe'`/`'ignore'`/`'inherit'`/fd 0–2, and the stdio
-> streams are not `net.Socket`s. **47 files run `process.execPath` as a child**,
+> `fork()` and `stdio: [..., 'ipc']` run over a loopback-socket IPC channel
+> (JSON messages, `send` callbacks, `disconnect`, `process.send` in the child;
+> no `advanced` serialization or handle passing), `stdio` is otherwise
+> `'pipe'`/`'ignore'`/`'inherit'`/fd 0–2, and the stdio streams are not
+> `net.Socket`s. **47 files run `process.execPath` as a child**,
 > and `zun run` takes neither a CommonJS file nor script arguments, so
 > `process.execPath` is a *launcher* under the test runner: `zun-node-run`
 > (`src/bin/zun-node-run.rs`) speaks `node <script.js>`/`-e`/`-p`, bundles the
@@ -906,11 +909,12 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-zlib:start -->
 ### Node.js v25 `zlib` compatibility
 
-`█████████████████░░░░░░░` **71.6%** — 43 / 60 Node `test-zlib*` tests passing
+`██████████████████░░░░░░` **75.0%** — 45 / 60 Node `test-zlib*` tests passing
 <!-- node-zlib:end -->
 
-> `zlib` is implemented end to end except zstd: the nine `Transform` classes,
-> the `create*` factories, the nine `*Sync` and nine callback convenience
+> `zlib` is implemented end to end, zstd included (over `ruzstd`, one
+> compression level): the eleven `Transform` classes,
+> the `create*` factories, the eleven `*Sync` and eleven callback convenience
 > methods with `maxOutputLength` and `info`, `crc32`, the frozen
 > `constants`/`codes` tables with Node's numeric reverse mapping and the legacy
 > top-level `Z_*` aliases, `flush`/`params`/`reset`/`close`, `bytesWritten`,
@@ -935,9 +939,7 @@ target/debug/zun run /tmp/bundle.ts
 > reference Brotli encoder, dictionaries, concatenated members, `reset`,
 > `params` mid-stream, the four error classifications, the `crc32` vectors) plus
 > a differential pass in which `zlib.crc32` — which stays inside the module and
-> therefore sees real `Buffer`s — confirms every round trip. zstd is the one
-> deliberate omission: every pure-Rust zstd crate is decompression-only and a
-> C-backed one would break the no-`cc` build. Blocker table:
+> therefore sees real `Buffer`s — confirms every round trip. Blocker table:
 > [`test/zlib/README.md`](test/zlib/README.md); per-test breakdown:
 > [`test/zlib/RESULTS.md`](test/zlib/RESULTS.md).
 

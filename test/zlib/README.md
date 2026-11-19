@@ -100,49 +100,26 @@ as soon as it is buffered, skippable frames included.
 
 ## Blockers
 
-The dominant blocker is **zun#38**, and it is worth stating plainly because it
-caps this corpus rather than this module: a typed array is *opaque* through an
-`any` binding in this engine — no `length`, no indexing, no `toString`. Every
-`Buffer` this module hands back reaches a Node test through an `any` binding
-(`const out = zlib.gzipSync(x)`, a `'data'` listener's parameter), so
-`out.length` reads `undefined` and `out.toString()` throws. The compression
-itself is correct — the Rust tests and a differential pass against Node
-(`zlib.crc32` of a round trip, which stays inside the module, agrees in every
-codec and option combination tried) confirm it — but a test that *compares
-bytes* cannot see it. That is why the files passing here are the ones asserting
-on errors, constants, events and option validation.
+45 of the 60 files pass on the current engine. What is left is mostly not
+this module: test-body classes with undeclared fields (zun#38), harness gaps
+(`gc`, `crypto`, WHATWG compression streams), the `kMaxLength`-before-`require`
+trick the bundler cannot honour, and zstd's single compression level.
 
 | Test | Blocker |
 |---|---|
-| `test-zlib.js` | [zun#38](https://github.com/UrubuCode/zun/issues/38) a test-body class assigns `this.chunks` with no declaration; also needs zstd and `fixtures.readSync` |
+| `test-zlib.js` | [zun#38](https://github.com/UrubuCode/zun/issues/38): a test-body class assigns `this.chunks` / `this.length` with no declaration |
 | `test-zlib-brotli-16GB.js` | allocates 16 GB of input; times out |
-| `test-zlib-brotli-flush.js` | `fixtures.readSync` is not available in the harness (it would need `node:fs` inlined into every bundle) |
-| `test-zlib-brotli-from-brotli.js` | `fs.createReadStream` / `fs.createWriteStream` are declared gaps in `src/fs/fs.ts` |
-| `test-zlib-brotli-kmaxlength-rangeerror.js` | sets `buffer.kMaxLength = 64` *before* `require('zlib')` and relies on module caching to freeze that value; the bundler inlines `zlib` ahead of the test body, so the assignment comes too late |
-| `test-zlib-brotli.js` | `fixtures.readSync`, then [zun#38](https://github.com/UrubuCode/zun/issues/38) for `encoded.length` |
-| `test-zlib-close-in-ondata.js` | [zun#58](https://github.com/UrubuCode/zun/issues/58) `Buffer.alloc(1024 * 1024 * 20)` — a `number` cannot be a Buffer size |
-| `test-zlib-convenience-methods.js` | needs zstd; also `instanceof` against an `any`-held constructor in the test body ([zun#19](https://github.com/UrubuCode/zun/issues/19)) |
-| `test-zlib-crc32.js` | [zun#58](https://github.com/UrubuCode/zun/issues/58) `Buffer.from(data, 'utf8')` where `data` came out of an array of mixed types |
-| `test-zlib-deflate-constructors.js` | [zun#25](https://github.com/UrubuCode/zun/issues/25) `zlib.Deflate()` without `new` — a class is not callable here |
-| `test-zlib-deflate-raw-inherits.js` | [zun#25](https://github.com/UrubuCode/zun/issues/25) `Object.setPrototypeOf(NotInitialized.prototype, DeflateRaw.prototype)` — there is no function-constructor model |
-| `test-zlib-destroy-pipe.js` | [zun#58](https://github.com/UrubuCode/zun/issues/58) `Buffer.allocUnsafe(1024 * 1024 * 20)` |
-| `test-zlib-dictionary.js` | `common.getBufferSources` is not in the harness (it enumerates the typed-array family, of which this engine has one member) |
-| `test-zlib-empty-buffer.js` | needs zstd |
-| `test-zlib-flush-drain.js` | [zun#58](https://github.com/UrubuCode/zun/issues/58) `Buffer.alloc(bigValue, 'x')` — a `number` cannot be a Buffer fill byte |
-| `test-zlib-from-concatenated-gzip.js` | `fs.createReadStream` is a declared gap in `src/fs/fs.ts` (the `inflateSync` half of the test is correct — the Rust tests cover concatenated members) |
-| `test-zlib-from-gzip-with-trailing-garbage.js` | [zun#38](https://github.com/UrubuCode/zun/issues/38) `Buffer.concat` over `any`-held views in the test body |
-| `test-zlib-from-gzip.js` | `fs.createReadStream` / `createWriteStream` |
-| `test-zlib-invalid-arg-value-brotli-compress.js` | [zun#25](https://github.com/UrubuCode/zun/issues/25) `BrotliCompress(opts)` without `new` |
+| `test-zlib-brotli-kmaxlength-rangeerror.js`, `test-zlib-kmaxlength-rangeerror.js`, `test-zlib-zstd-kmaxlength-rangeerror.js` | set `buffer.kMaxLength = 64` *before* `require('zlib')` and rely on module caching to freeze that value; the bundler inlines `zlib` ahead of the test body, so the assignment comes too late |
+| `test-zlib-deflate-raw-inherits.js` | `DeflateRaw.call(this, opts)` — there is no function-constructor model ([zun#25](https://github.com/UrubuCode/zun/issues/25)) |
+| `test-zlib-from-concatenated-gzip.js` | the streamed half reads a fixture through `fs.createReadStream` and compares chunk-by-chunk output |
 | `test-zlib-invalid-input-memory.js` | needs `../common/gc` and `globalThis.gc()` |
-| `test-zlib-invalid-input.js` | [zun#25](https://github.com/UrubuCode/zun/issues/25) `zlib.Unzip()`, `zlib.Gunzip()`, … without `new`; also needs zstd |
-| `test-zlib-kmaxlength-rangeerror.js` | as the brotli variant: `buffer.kMaxLength` is mutated before `require('zlib')` |
-| `test-zlib-params.js` | `fixtures.readSync` |
+| `test-zlib-invalid-input.js` | [zun#117](https://github.com/UrubuCode/zun/issues/117): a `forEach` callback wrapped by `common.mustCall` (a function that reads `this`) gets its arguments shifted, so `uz.on` is read off the index |
+| `test-zlib-params.js` | times out on the loaded test machine (it pushes the whole `person.jpg` fixture through `params()` and a paused reader) |
 | `test-zlib-random-byte-pipes.js` | needs `node:crypto`; also assigns `this.readable` on a test-body class with no declaration |
-| `test-zlib-sync-no-event.js` | [zun#38](https://github.com/UrubuCode/zun/issues/38) `unzipped.toString()` — `_processChunk` itself is correct and answers the right bytes |
-| `test-zlib-truncated.js` | ✅ passes |
 | `test-zlib-type-error.js` | needs the WHATWG `CompressionStream`/`DecompressionStream` and `Blob#stream` |
 | `test-zlib-unused-weak.js` | needs `globalThis.gc()` and `--expose-gc` |
-| `test-zlib-zstd-*.js` (7 files) | zstd is not implemented — see above |
+| `test-zlib-unzip-one-byte-chunks.js` | one-byte writes into `Unzip` lose the second gzip member |
+| `test-zlib-zstd.js` | `ruzstd` has a single compression level, so the level-vs-size curve is flat (see above) |
 
 ## Verified outside the corpus
 

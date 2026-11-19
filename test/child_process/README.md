@@ -147,14 +147,23 @@ that cost an afternoon, so they are written down:
 | POSIX-only facts (`uid`/`gid`, `detached` groups, `SIGUSR1`, `.bat` files) | `uid-gid`, `spawn-windows-batch-file`, `silent` | Measured on Windows here. |
 | Engine failures that are not this module's | `exec-encoding` (interpreter panic at `value.rs:228`), `pipe-dataflow` (`type Boolean has no methods`), `cwd` (`a required parameter cannot follow a default parameter`), `prototype-tampering` (panic at `value.rs:197`) | Reported with the findings. |
 
-The 34 files that pass include the whole `spawnSync` validation file
+The 54 files that pass include the whole `spawnSync` validation file
 (`test-child-process-spawnsync-validation-errors.js`, 250 lines of option
 validation), `spawn-event`, `spawn-error`, `spawn-controller` (AbortSignal),
 `kill`, `env`, `stdin`, `stdio`, `constructor`, `validate-stdio`, `exit-code`,
 `stdout-flush`, `exec-std-encoding`, `execfile`, `spawnsync-env`,
-`spawnsync-timeout` — several of them through the launcher — and two `fork-*`
-files (`fork-dgram`, `fork-closed-channel-segfault`) whose bodies never reach
-`fork()` on this platform.
+`spawnsync-timeout` — several of them through the launcher — and, over the IPC
+channel, `fork`, `fork3`, `fork-and-spawn`, `fork-ref`, `fork-no-shell`,
+`fork-detached`, `fork-abort-signal`, `disconnect`, `send-cb` and others that
+exchange JSON messages with a re-executed child.
+
+Of the IPC files still failing, `fork-net*`, `fork-getconnections` and
+`send-returns-boolean` pass handles or rely on backpressure the JSON channel
+does not model; `send-utf8` times out pushing a megabyte-sized message line
+through the loop; `fork-args`, `fork-exec-argv` and `fork-stdio*` depend on
+`execArgv` / `stdio` details of a real Node child. These rows are measured
+with `--jobs 3`: at the default job count on a loaded machine several IPC
+files fail only because the re-executed child's bundling is starved.
 
 ## Direct verification
 
