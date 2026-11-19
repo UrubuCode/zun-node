@@ -4,6 +4,26 @@ The compatibility bar for `events` is **Node.js 25's own test suite**, not tests
 we write. `events` is **not finished** until it passes 100% of Node's
 `test-event-emitter-*` and `test-events-*` tests.
 
+## Re-probe on `feat/finish-core` (24 / 35)
+
+Re-measured against the current engine: 23 / 35 before, 24 / 35 after.
+
+* **Fixed here:** `test-event-emitter-method-names.js`. A function's `name` is
+  non-writable, so the old `callable.name = name` was silently dropped; the
+  prototype methods now get their `name` through `Object.defineProperty`.
+  (An object-literal method also reports `name === ""` on its own,
+  [zun#152](https://github.com/UrubuCode/zun/issues/152).)
+* `AbortError`'s default message is Node's `'The operation was aborted'`
+  (`lib/internal/errors.js`), not the DOM spelling.
+* **Still blocked:** `test-event-emitter-add-listeners.js` is now
+  [zun#153](https://github.com/UrubuCode/zun/issues/153): `ee.on` and
+  `ee.addListener` each read as a value now, but a typed read binds the class
+  method and never sees `EventEmitter.prototype.on = ...addListener`. The two
+  `*-side-effects.js` files are still zun#26, `prepend`/`subclass` zun#25,
+  `once` the typed-instance field write, `uncaught-exception-stack` zun#74,
+  `add-abort-listener.mjs` ESM (zun#4), and the three `internal/event_target`
+  files the missing harness module.
+
 ## The oracle
 
 `NODE_TESTS.txt` is the full inventory of Node 25's corpus for this module — 35

@@ -804,7 +804,7 @@ function __processReportUncaught(error: any): void {
     return;
   }
   if (Number(__processEmitter.listenerCount("uncaughtException")) > 0) {
-    __evEmit(__processEmitter, "uncaughtException", [error]);
+    __evEmit(__processEmitter, "uncaughtException", [error, "uncaughtException"]);
     return;
   }
   const worker: any = __processWorkerHook.target;

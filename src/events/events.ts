@@ -501,7 +501,7 @@ class ERR_WORKER_UNSUPPORTED_OPERATION extends NodeTypeError {
 class AbortError extends NodeError {
   cause: any;
   constructor(message?: string, options?: any) {
-    super("ABORT_ERR", message === undefined ? "This operation was aborted" : message);
+    super("ABORT_ERR", message === undefined ? "The operation was aborted" : message);
     this.cause = options === undefined || options === null ? undefined : options.cause;
   }
   get name(): string {
@@ -1532,7 +1532,9 @@ const __evProtoMethods: any = {
 // alias reports the name of the function it aliases (Node's behaviour).
 function __evInstallProtoMethod(proto: any, name: string, method: any): void {
   const callable: any = method;
-  callable.name = name;
+  // `name` is non-writable (but configurable) on a function, exactly as in
+  // JavaScript, so a plain assignment is silently dropped; define it instead.
+  Object.defineProperty(callable, "name", { value: name, configurable: true });
   proto[name] = callable;
 }
 

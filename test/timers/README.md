@@ -13,6 +13,31 @@ bash zun-node/tools/run_node_tests.sh --zun target/debug/zun --module timers
 there is no native extension and no `--ext`. Each test is bundled by
 `tools/bundle_node_test.sh` and run as `zun run <bundle.ts>`.
 
+## Re-probe on `feat/finish-core` (38 / 58)
+
+Re-measured against the current engine: 33 / 58 before, 38 / 58 after.
+
+* The tracker kind is now `zun-ts+ext`: two files build a `net` socket, which
+  is syscalls. `test-timers-unrefed-in-callback.js` passes with it.
+* **Fixed here:** callbacks run with the `Timeout` / `Immediate` as `this`
+  (`test-timers-this.js`, now that `apply` threads a receiver);
+  `[Symbol.dispose]` on both prototypes, over a `Symbol.dispose` polyfill
+  installed first in every bundle (`test-timers-dispose.js`); `Scheduler` is a
+  real class whose constructor throws `ERR_ILLEGAL_CONSTRUCTOR`
+  (`test-timers-promises-scheduler.js`, with the AbortError message fix);
+  `internal/timers` gained `setUnrefTimeout` (fixed arity, because a rest
+  parameter reached through `any` panics, zun#11); the harness serves
+  `internalBinding('timers')`; `'uncaughtException'` listeners get the
+  `origin` argument. `test-timers.js` passes on the new engine.
+* **Still blocked:** a closure that reads a `const` declared later or in its
+  own initializer (zun#147 / zun#103) — `clearImmediate`, `immediate-unref`,
+  `user-call`, `refresh`, `unref`; the engine's timers fire without waiting for
+  their delay ([zun#162](https://github.com/UrubuCode/zun/issues/162)) —
+  `ordering`; `eval('%...')` natives syntax — `now`, `fast-calls`; the
+  immediate queue's interleaving with `nextTick` after a throw —
+  `immediate-queue-throw`; the `internal/event_target` / `internal/linkedlist`
+  harness modules.
+
 ## The one thing to know before reading the table
 
 `setTimeout`, `setInterval`, `setImmediate`, `clearTimeout`, `clearInterval` and

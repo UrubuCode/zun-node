@@ -84,10 +84,10 @@
 //     turn. The VM has a single macrotask tier, so an `Immediate` is a 0-delay
 //     macrotask and the two interleave in arm order. The relative order *within*
 //     the immediate queue is FIFO, as in Node.
-//   * **`[Symbol.dispose]`.** `Symbol.dispose` does not exist in this engine
-//     (`Symbol.dispose` reads `undefined`) and a class computed key must be one
-//     of five well-known symbols, so the explicit-resource-management method
-//     cannot be declared. `close()` is the same operation and is present.
+//   * **`[Symbol.dispose]`.** A class computed key must be one of five
+//     well-known symbols, so the method cannot be *declared*; `Symbol.dispose`
+//     is polyfilled in `src/util/util.ts` and the method is installed on
+//     `Timeout.prototype` / `Immediate.prototype` below `node:timers`' object.
 //   * **`async_hooks`.** There is no async-resource tracking, so `destroy` hooks
 //     are not emitted. The id a `Timeout` coerces to is a plain counter, which is
 //     all `[Symbol.toPrimitive]`'s observable contract needs.
@@ -445,7 +445,9 @@ function __timerUnenrol(timer: any): void {
 // `__timerFire`'s re-arm step still sees a clean run. Both the domain and the
 // hook are `null` unless `src/domain/domain.ts` is in the bundle (see
 // `__domainHooks` in ../events/events.ts).
-function __timerInvoke(callback: any, args: any, domain: any): void {
+// `receiver` is the Timeout/Immediate itself: Node calls the callback with the
+// timer as `this` (test-timers-this.js).
+function __timerInvoke(callback: any, args: any, domain: any, receiver?: any): void {
   const passed: any[] = [];
   if (args !== undefined && args !== null) {
     const count: number = Number(args.length);
@@ -456,7 +458,7 @@ function __timerInvoke(callback: any, args: any, domain: any): void {
     __evCall(hook, [domain, callback, passed]);
     return;
   }
-  __evCall(callback, passed);
+  __evCallOn(callback, receiver, passed);
 }
 
 // An exception out of a timer callback. In Node it leaves `listOnTimeout`, is
@@ -503,7 +505,7 @@ function __timerFire(idArg: any): void {
   let failure: any = undefined;
   let failed: boolean = false;
   try {
-    __timerInvoke(callback, timer._timerArgs, timer._domain);
+    __timerInvoke(callback, timer._timerArgs, timer._domain, timer);
   } catch (error) {
     failed = true;
     failure = error;
@@ -545,7 +547,7 @@ function __timerFireImmediate(idArg: any): void {
   __timerClearImmediate(immediate);
   if (callback === undefined || callback === null) return;
   try {
-    __timerInvoke(callback, immediate._argv, immediate._domain);
+    __timerInvoke(callback, immediate._argv, immediate._domain, immediate);
   } catch (error) {
     __timerReportUncaught(error);
   }
@@ -1108,14 +1110,29 @@ async function* __timerPromiseInterval(after?: any, value?: any, options?: any):
 // `scheduler` — the WICG scheduling-API shape Node ships as experimental.
 // `Scheduler` itself is not constructible (`ERR_ILLEGAL_CONSTRUCTOR`); only this
 // one instance exists.
-const __timerScheduler: any = {
+class __TimerIllegalConstructor extends NodeTypeError {
+  constructor() {
+    super("ERR_ILLEGAL_CONSTRUCTOR", "Illegal constructor");
+  }
+}
+
+// Node guards the constructor with a module-private symbol; a private token
+// object does the same job.
+const __timerSchedulerToken: any = {};
+
+class Scheduler {
+  constructor(token?: any) {
+    if (token !== __timerSchedulerToken) throw new __TimerIllegalConstructor();
+  }
   wait(delay?: any, options?: any): any {
     return __timerPromiseTimeout(delay, undefined, options);
-  },
+  }
   yield(): any {
     return __timerPromiseImmediate(undefined, undefined);
-  },
-};
+  }
+}
+
+const __timerScheduler: any = new Scheduler(__timerSchedulerToken);
 
 const __node_timers_promises: any = {
   setTimeout: __timerPromiseTimeout,
@@ -1132,6 +1149,19 @@ const __node_timers_promises: any = {
 // `test-timers-api-refs.js` relies on: it deletes the globals and keeps using
 // `timers.setTimeout`. `enroll`/`unenroll`/`active` are the three legacy
 // `node:timers` exports Node deprecated in v10 (DEP0096) and still exports.
+// `Timeout.prototype[SymbolDispose]` is `clearTimeout(this)` and
+// `Immediate.prototype[SymbolDispose]` is `clearImmediate(this)` (lib/timers.js).
+{
+  const __timeoutProto: any = Timeout.prototype;
+  __timeoutProto[Symbol.dispose] = function (this: any): void {
+    __timerClearTimeout(this);
+  };
+  const __immediateProto: any = Immediate.prototype;
+  __immediateProto[Symbol.dispose] = function (this: any): void {
+    __timerClearImmediate(this);
+  };
+}
+
 const __node_timers: any = {
   setTimeout: setTimeout,
   setInterval: setInterval,
@@ -1169,6 +1199,23 @@ const __node_timers: any = {
 };
 
 // `internal/timers`, reduced to the one constant Node's own tests read from it.
+// `lib/internal/timers.js`' `setUnrefTimeout`: a Timeout that never holds the
+// loop open, created already unref'd. Node's signature is the fixed
+// `(callback, after, arg1, arg2, arg3)`, which also keeps a rest parameter off
+// a function reached through `any` (calling one panics, zun#11).
+function __timerSetUnrefTimeout(callback: any, after?: any, arg1?: any, arg2?: any, arg3?: any): any {
+  __timerValidateCallback(callback);
+  let forwarded: any = undefined;
+  if (arg3 !== undefined) forwarded = [arg1, arg2, arg3];
+  else if (arg2 !== undefined) forwarded = [arg1, arg2];
+  else if (arg1 !== undefined) forwarded = [arg1];
+  const timeout = new Timeout(callback, after, forwarded, false, false);
+  __timerEnrol(timeout);
+  __timerArm(timeout);
+  return timeout;
+}
+
 const __node_internal_timers: any = {
   TIMEOUT_MAX: __TIMEOUT_MAX,
+  setUnrefTimeout: __timerSetUnrefTimeout,
 };

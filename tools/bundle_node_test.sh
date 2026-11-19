@@ -1515,7 +1515,10 @@ trap 'rm -f "$REWRITE" "$LATE" ${ESM_SRC:+"$ESM_SRC"}' EXIT
     for alias in $aliases; do
       for canon in $(printf '%s' "$canons" | tr ',' ' '); do
         [ "$alias" != "$canon" ] || continue
-        printf "s#\\\\b%s\\.%s\\\\b#%s#g\n" "$alias" "$canon" "$canon"
+        # Not after a `.`: `'nodejs.util.inspect.custom'` (a symbol
+        # description test-console.js spells out) is not a member read of the
+        # `util` alias.
+        printf "s#\\\\(^\\\\|[^.A-Za-z0-9_\$]\\\\)%s\\.%s\\\\b#\\\\1%s#g\n" "$alias" "$canon" "$canon"
       done
     done
   done
@@ -1675,7 +1678,13 @@ $obj
   fi
   echo "// ==== test body ===="
   if [ "$WRAP_BODY" = 1 ]; then echo "function __zunTestBody(): any {"; fi
-  sed -f "$REWRITE" "$SRC" | awk "$UNPACK_MODULE_DESTRUCTURING" | LIB_MEMBERS="$LIB_MEMBERS" perl -e "$DECLARE_DERIVED_FIELDS"
+  # The `console` receiver rule above is textual, so it also fires inside a
+  # quoted string (`'Assertion failed: console.assert ...'` in
+  # test-console.js). The perl pass puts the name back inside single- and
+  # double-quoted literals; nothing a test writes spells `__zunConsole` itself.
+  sed -f "$REWRITE" "$SRC" \
+    | perl -pe 's/(\x27(?:[^\x27\\\n]|\\.)*\x27|"(?:[^"\\\n]|\\.)*")/my $t = $1; $t =~ s#__zunConsole#console#g; $t/ge' \
+    | awk "$UNPACK_MODULE_DESTRUCTURING" | LIB_MEMBERS="$LIB_MEMBERS" perl -e "$DECLARE_DERIVED_FIELDS"
   if [ "$WRAP_BODY" = 1 ]; then echo "}"; echo "__zunTestBody();"; fi
   echo "// ==== harness epilogue: settle the loop, emit 'exit', check call counts ===="
   echo "__zunHarnessFinish();"

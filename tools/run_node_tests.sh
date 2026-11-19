@@ -78,7 +78,10 @@ case "$MODULE" in
   assert) KIND="zun-ts";     PATTERNS="test-assert";                      PATTERN="test-assert";;
   events) KIND="zun-ts";     PATTERNS="test-event-emitter- test-events-"; PATTERN="test-event-emitter-*|test-events-";;
   os)     KIND="zun-ts+ext"; PATTERNS="test-os";                          PATTERN="test-os";;
-  buffer) KIND="zun-ts";     PATTERNS="test-buffer";                      PATTERN="test-buffer";;
+  # `buffer` is pure Zun TypeScript, but several files in the corpus require a
+  # module that is syscalls (`child_process`, `dns`, `fs`), so the kind is
+  # `zun-ts+ext` for the same reason `util`'s is.
+  buffer) KIND="zun-ts+ext"; PATTERNS="test-buffer";                      PATTERN="test-buffer";;
   string_decoder)
           KIND="zun-ts";     PATTERNS="test-string-decoder";              PATTERN="test-string-decoder";;
   querystring) KIND="zun-ts"; PATTERNS="test-querystring";                PATTERN="test-querystring";;
@@ -106,7 +109,8 @@ case "$MODULE" in
   # `timers`' corpus is `test-timers*`, which includes `test-timers.js` itself.
   # The module is pure Zun TypeScript: the VM already owns the event loop, so
   # there is nothing for a native extension to do (see src/timers/timers.ts).
-  timers) KIND="zun-ts";     PATTERNS="test-timers";                      PATTERN="test-timers";;
+  # The kind is nevertheless `zun-ts+ext`: two files build a `net` socket.
+  timers) KIND="zun-ts+ext"; PATTERNS="test-timers";                      PATTERN="test-timers";;
   # `child_process` is TS over natives: `std::process::Command` in
   # src/child_process/*.rs, Node's shape in src/child_process/child_process.ts.
   child_process)
