@@ -8,3 +8,5 @@ test/fixtures/child-process-stay-alive-forever.js
 test/fixtures/child-process-echo-options.js
 test/fixtures/child-process-persistent.js
 test/fixtures/parent-process-nonpersistent.js
+test/fixtures/child-process-spawn-node.js
+test/fixtures/child-process-message-and-exit.js

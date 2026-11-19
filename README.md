@@ -688,7 +688,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-child_process:start -->
 ### Node.js v25 `child_process` compatibility
 
-`███████░░░░░░░░░░░░░░░░░` **31.1%** — 34 / 109 Node `test-child-process*` tests passing
+`████████░░░░░░░░░░░░░░░░` **34.8%** — 38 / 109 Node `test-child-process*` tests passing
 <!-- node-child_process:end -->
 
 > `child_process` is **TS over natives** (the `os` kind), **both halves**, the
@@ -906,7 +906,7 @@ target/debug/zun run /tmp/bundle.ts
 <!-- node-zlib:start -->
 ### Node.js v25 `zlib` compatibility
 
-`████████░░░░░░░░░░░░░░░░` **33.3%** — 20 / 60 Node `test-zlib*` tests passing
+`█████████████████░░░░░░░` **71.6%** — 43 / 60 Node `test-zlib*` tests passing
 <!-- node-zlib:end -->
 
 > `zlib` is implemented end to end except zstd: the nine `Transform` classes,

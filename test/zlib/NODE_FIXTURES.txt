@@ -9,3 +9,4 @@ test/fixtures/pseudo-multimember-gzip.z
 test/fixtures/pss-vectors.json
 test/fixtures/elipses.txt
 test/fixtures/empty.txt
+test/fixtures/person.jpg.zst

@@ -30,10 +30,25 @@ throw), and `exec`/`execFile` are built on `spawn` the way `lib/child_process.js
 builds them (`maxBuffer`, `encoding`, the timeout kill, `Command failed:`,
 `util.promisify`'s `{ stdout, stderr }` with `promise.child`). `spawn` takes
 `timeout`, `killSignal` and an `AbortSignal`; `stdio` is `'pipe'`, `'ignore'`,
-`'inherit'`, or the parent's fd 0–2. **`fork()` and the IPC channel are not
-done** and account for most of what is left: 39 of the 109 files call `fork(`,
-and `send`/`disconnect`/`'message'`/`advanced` serialization need a duplex
-channel to a *Zun* child.
+`'inherit'`, or the parent's fd 0–2, plus one `'ipc'` entry. **`fork()` and
+the IPC channel** exist: `fork(modulePath, args, options)` is Node's
+(`execArgv`, `silent`, string `stdio` variants, `ERR_CHILD_PROCESS_IPC_REQUIRED`),
+and the channel is a loopback TCP connection — the parent listens on
+`127.0.0.1:0` and passes the port in `ZUN_NODE_IPC`, the child's
+`child_process` module connects back when it loads and installs
+`process.send`/`disconnect`/`connected`/`channel`, the same carrier a `Worker`
+uses (see "The Worker process" in `src/worker_threads/worker_threads.ts`).
+Messages are Node's `'json'` serialization, one document per line; `send`
+callbacks, `'disconnect'` on both ends, `ERR_IPC_CHANNEL_CLOSED`,
+`ERR_IPC_DISCONNECTED` and `'close'` waiting for the channel are Node's. The
+child's channel keeps it alive only while it has `'message'`/`'disconnect'`
+listeners (or `process.channel.ref()`). `tools/bundle_node_test.sh` appends
+`child_process` to a forked child's bundle even when the child script never
+requires it, and the launcher keys its cache on that; a bundle run directly
+reports the original test path as `process.argv[1]`, so `fork(process.argv[1])`
+re-executes the test rather than the bundle. **Not done:**
+`serialization: 'advanced'`, and sending handles (`send(msg, socket)` — the
+message goes, the handle is dropped).
 
 ## How the async half meets the loop
 
@@ -123,7 +138,7 @@ that cost an afternoon, so they are written down:
 
 | Cause | Files | Note |
 |---|---|---|
-| `fork()` and the IPC channel (`send`, `disconnect`, `'message'`, `advanced` serialization, `recv-handle`, handle passing) | 39 call `fork(`; others use `stdio: 'ipc'` or `.send` | Not done: it needs a duplex channel to a Zun child. The launcher would carry it as an inherited pipe pair, but `process.send` on the child side does not exist either. These fail as `ERR_METHOD_NOT_IMPLEMENTED`, the `unhandled exception` rows. |
+| IPC beyond JSON messages: `advanced` serialization, `recv-handle`, handle passing (`fork-net*`, `fork-getconnections`, `server-close`) | ~12 | The channel carries JSON only; a `net.Socket`/`Server` handle is dropped. |
 | A top-level `return` in the test body | `exec-timeout-expire`, `-kill`, `-not-expired`, `stdio-big-write-end`, `spawnsync-input`, `spawn-argv0`, `bad-stdio` | Legal in CommonJS, because Node wraps a module in a function. The bundler inlines the body into one program, where it is a parse error. Three of them also need `../common/child_process`, which is not in the harness. |
 | `"" + Buffer` and `String(Buffer)` give `[object Object]` | `can-write-to-stdout`, `spawn-shell`, `exec-encoding`, `exec-maxbuf`, `execfile-maxbuf`, `stdout-flush-exit` | The engine's prelude `Buffer` has no string coercion, so `output += data` concatenates `[object Object]` (repro in the report). A `Buffer` read through an `any` lane is also opaque ([zun#38](https://github.com/UrubuCode/zun/issues/38)). |
 | Mocking and monkey-patching: `t.mock.method(internalCp, 'spawnSync')`, `ChildProcess.prototype.spawn`, `Object.defineProperty(process, 'platform', …)` | `spawnsync-shell`, `spawnsync-kill-signal`, `windows-hide`, `bad-stdio` | A class method is not reachable as a value on its prototype ([zun#51](https://github.com/UrubuCode/zun/issues/51)), and `child_process.spawnSync` does not call through a patchable `internal/child_process` property. |

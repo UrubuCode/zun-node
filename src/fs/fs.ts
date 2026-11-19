@@ -3038,4 +3038,6 @@ process.pid = Number(__fsNative.fsPid());
 // `node:fs` and `node:fs/promises` module objects for the bundler's `require`
 // rewriting (one object per inlined module, named `__node_<module>`).
 const __node_fs: any = fs;
+// For tools/harness/common.ts' `fixtures.readSync` (see src/io/io.ts).
+__libModules.fs = __node_fs;
 const __node_fs_promises: any = __fsPromises;

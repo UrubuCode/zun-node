@@ -37,17 +37,19 @@ list because every class this module exports is a `Transform`.
 
 ## What is implemented
 
-The whole Node 25 `zlib` surface except zstd:
+The whole Node 25 `zlib` surface, zstd included:
 
 * **Streams**: `Deflate`, `Inflate`, `Gzip`, `Gunzip`, `DeflateRaw`,
   `InflateRaw`, `Unzip` (auto-detecting zlib or gzip), `BrotliCompress`,
-  `BrotliDecompress`, each a real `Transform` with `flush`, `params`, `reset`,
+  `BrotliDecompress`, `ZstdCompress`, `ZstdDecompress`, each callable with or
+  without `new` (the export is a function sharing the class prototype), each a real `Transform` with `flush`, `params`, `reset`,
   `close`, `bytesWritten`, `_closed`, `_level`, `_strategy`, `_handle` and
   `_processChunk`.
 * **Factories**: `createDeflate`, `createInflate`, `createDeflateRaw`,
   `createInflateRaw`, `createGzip`, `createGunzip`, `createUnzip`,
-  `createBrotliCompress`, `createBrotliDecompress`.
-* **Convenience methods**: the nine `*Sync` forms and the nine callback forms,
+  `createBrotliCompress`, `createBrotliDecompress`, `createZstdCompress`,
+  `createZstdDecompress`.
+* **Convenience methods**: the eleven `*Sync` forms and the eleven callback forms,
   with Node's `(buffer, opts, callback)` / `(buffer, callback)` overloads,
   `maxOutputLength` + `ERR_BUFFER_TOO_LARGE`, and `info: true` results
   (`{ buffer, engine }`).
@@ -60,6 +62,8 @@ The whole Node 25 `zlib` surface except zstd:
   `checkRangesOrGetDefault` over `chunkSize`, `flush`, `finishFlush`,
   `maxOutputLength`, `windowBits`, `level`, `memLevel`, `strategy` and
   `params()`'s two arguments; `ERR_BROTLI_INVALID_PARAM`,
+  `ERR_ZSTD_INVALID_PARAM`, `ZSTD_error_srcSize_wrong` for a wrong
+  `pledgedSrcSize`,
   `ERR_ZLIB_INITIALIZATION_FAILED`, `ERR_BUFFER_TOO_LARGE`,
   `ERR_TRAILING_JUNK_AFTER_STREAM_END`; and the compression errors themselves
   with Node's `(message, code, errno)` — `Z_DATA_ERROR` carrying zlib's own
@@ -77,16 +81,22 @@ blobs produced by the real libraries, and by the empty-input byte sequences
 (`deflate` of nothing is `78 9c 03 00 00 00 00 01`, `gzip` of nothing is 20
 bytes).
 
+**zstd** runs over `ruzstd` (pure Rust: a complete decoder and an encoder),
+in `src/zlib/zstd.rs`. `ZSTD_e_flush` emits the buffered input as raw blocks
+of an open frame behind libzstd's own streaming header (`28 b5 2f fd 00 58`),
+so a flushed chunk is byte-for-byte what Node produces
+(`test-zlib-zstd-flush.js`); `ZSTD_e_end` closes the frame, compressing it in
+one go when it was never flushed. Decompression decodes every complete frame
+as soon as it is buffered, skippable frames included.
+
 ## What is not implemented
 
-**zstd** — Node 25's `ZstdCompress`, `ZstdDecompress`, `zstdCompress*`,
-`zstdDecompress*` and `createZstd*`. Every pure-Rust zstd crate today is
-decompression-only, and a C-backed one would break this extension's "a Rust
-toolchain is the whole build" rule (see the dependency comment in
-`../../Cargo.toml`). The `ZSTD_*` constants are present, because
-`zlib.constants` is observable on its own; the classes and methods are not.
-Seven files in the corpus are zstd-only and three more use zstd alongside the
-other codecs.
+* **zstd compression levels.** `ruzstd`'s encoder implements only its
+  "fastest" level (about zstd level 1), so `ZSTD_c_compressionLevel` is
+  validated and accepted but every level produces the same output, which is
+  what `test-zlib-zstd.js` measures. zstd dictionaries are accepted and
+  ignored (frames are written without a dictionary id, so they still decode
+  with or without one).
 
 ## Blockers
 

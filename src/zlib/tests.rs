@@ -381,3 +381,53 @@ fn brotli_reset_restarts_the_stream() {
     let mut decoder = BrotliStream::open(false, &[]).unwrap();
     assert_eq!(brotli_run(&mut decoder, &compressed), b"kept");
 }
+
+/// Drive a zstd stream with one flush flag, draining through a small window.
+fn zstd_run(stream: &mut super::zstd::ZstdStream, flush: i32, input: &[u8]) -> Vec<u8> {
+    let mut collected = Vec::new();
+    let mut first = true;
+    loop {
+        let mut out = vec![0u8; 64];
+        let chunk: &[u8] = if first { input } else { &[] };
+        first = false;
+        let (produced, _) = stream.step(flush, chunk, &mut out);
+        collected.extend_from_slice(&out[..produced]);
+        if produced < out.len() {
+            break;
+        }
+    }
+    collected
+}
+
+#[test]
+fn zstd_round_trips_and_flush_matches_libzstd() {
+    use super::zstd::ZstdStream;
+    let input: Vec<u8> = b"hello zstd ".iter().cycle().take(5000).copied().collect();
+    let mut encoder = ZstdStream::open(true, None);
+    let frame = zstd_run(&mut encoder, 2, &input);
+    assert!(frame.len() < input.len());
+    let mut decoder = ZstdStream::open(false, None);
+    assert_eq!(zstd_run(&mut decoder, 2, &frame), input);
+
+    // A flushed 16-byte chunk is libzstd's streaming header plus a raw block.
+    let mut encoder = ZstdStream::open(true, None);
+    let flushed = zstd_run(&mut encoder, 1, b"0123456789abcdef");
+    assert_eq!(&flushed[..9], &[0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x58, 0x80, 0x00, 0x00]);
+    let mut tail = zstd_run(&mut encoder, 2, b"");
+    let mut whole = flushed.clone();
+    whole.append(&mut tail);
+    let mut decoder = ZstdStream::open(false, None);
+    assert_eq!(zstd_run(&mut decoder, 2, &whole), b"0123456789abcdef");
+
+    // No input is libzstd's 9-byte frame.
+    let mut encoder = ZstdStream::open(true, None);
+    assert_eq!(
+        zstd_run(&mut encoder, 2, b""),
+        [0x28, 0xb5, 0x2f, 0xfd, 0x20, 0x00, 0x01, 0x00, 0x00]
+    );
+
+    // pledgedSrcSize mismatch is an error.
+    let mut encoder = ZstdStream::open(true, Some(3));
+    zstd_run(&mut encoder, 2, b"toolong");
+    assert_eq!(encoder.error().unwrap().1, "ZSTD_error_srcSize_wrong");
+}
