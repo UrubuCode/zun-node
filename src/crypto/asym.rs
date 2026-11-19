@@ -2332,6 +2332,15 @@ native!(
                 return err("ERR_OUT_OF_RANGE", "invalid options.add");
             }
         }
+        let fast_safe = safe
+            && bits >= 32
+            && match &add {
+                None => true,
+                Some(add) => *add == BigUint::from(24u8) && rem == BigUint::from(23u8),
+            };
+        if fast_safe {
+            return ok_fields(&[b64(&safe_prime(bits).to_bytes_be())]);
+        }
         if add.is_none() && !safe {
             let prime: BigUint = OsRng.gen_prime(bits);
             return ok_fields(&[b64(&prime.to_bytes_be())]);
@@ -2356,6 +2365,66 @@ native!(
         err("ERR_OSSL_BN_NO_PRIME_CANDIDATE", "no prime candidate")
     }
 );
+
+/// A random safe prime `p = 2q + 1` of exactly `bits` bits with
+/// `p = 23 (mod 24)` -- what OpenSSL's `DH_generate_parameters` produces for
+/// generator 2. Candidates are stepped through a sieve over both `q` and `p`
+/// by small primes, so only survivors reach Miller-Rabin.
+fn safe_prime(bits: usize) -> BigUint {
+    const LIMIT: u32 = 1 << 15;
+    let mut small: Vec<u32> = Vec::new();
+    'outer: for n in (5..LIMIT).step_by(2) {
+        for &d in &small {
+            if d * d > n {
+                break;
+            }
+            if n % d == 0 {
+                continue 'outer;
+            }
+        }
+        small.push(n);
+    }
+    let one = BigUint::from(1u8);
+    let two = BigUint::from(2u8);
+    let twelve = BigUint::from(12u8);
+    loop {
+        // q has bits-1 bits and q = 11 (mod 12), so p = 2q + 1 = 23 (mod 24).
+        let mut q = OsRng.gen_biguint(bits - 1);
+        q |= &one << (bits - 2);
+        q = &q - (&q % &twelve) + BigUint::from(11u8);
+        let mut residues: Vec<u32> =
+            {
+            let bytes = q.to_bytes_be();
+            small.iter().map(|&r| bytes.iter().fold(0u32, |acc, &b| (acc * 256 + b as u32) % r)).collect()
+        };
+        for _ in 0..(1u32 << 16) {
+            let mut ok = true;
+            for (i, &r) in small.iter().enumerate() {
+                let m = residues[i];
+                if m == 0 || m == (r - 1) / 2 {
+                    ok = false;
+                    break;
+                }
+            }
+            if ok {
+                let p = (&q << 1) + &one;
+                if p.bits() != bits {
+                    break;
+                }
+                if two.modpow(&(&q - &one), &q) == one && two.modpow(&(&p - &one), &p) == one
+                    && num_bigint_dig::prime::probably_prime(&q, 20)
+                    && num_bigint_dig::prime::probably_prime(&p, 20)
+                {
+                    return p;
+                }
+            }
+            q += &twelve;
+            for (i, &r) in small.iter().enumerate() {
+                residues[i] = (residues[i] + 12) % r;
+            }
+        }
+    }
+}
 
 native!(
     /// `cryptoCheckPrime(candidate, checks)` → `+1` / `+0`.
@@ -2480,9 +2549,32 @@ native!(
     }
 );
 
+native!(
+    /// `cryptoX509(der)` with `der` base64 → `+` and the fields
+    /// [`crate::tls::x509::x509_fields`] lists, or an empty `+` when the
+    /// bytes are not a certificate.
+    x509,
+    |a| {
+        let der = a.bytes(0)?;
+        match crate::tls::x509::x509_fields(&der) {
+            Some(text) => Ok(format!("+{text}")),
+            None => Ok("+".to_owned()),
+        }
+    }
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn safe_prime_is_safe_and_23_mod_24() {
+        let p = safe_prime(256);
+        assert_eq!(p.bits(), 256);
+        assert_eq!(&p % BigUint::from(24u8), BigUint::from(23u8));
+        let q = (&p - BigUint::from(1u8)) >> 1;
+        assert!(num_bigint_dig::prime::probably_prime(&q, 20));
+    }
 
     #[test]
     fn modp2_matches_rfc2409() {

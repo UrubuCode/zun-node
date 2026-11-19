@@ -537,13 +537,13 @@ impl Cipher {
             // Decrypting nothing is only legal with padding off; OpenSSL
             // reports "wrong final block length" otherwise.
             return if self.auto_padding {
-                Err(Error::BadDecrypt)
+                Err(Error::WrongFinalBlockLength)
             } else {
                 Ok(Vec::new())
             };
         }
         if self.pending.len() != 16 {
-            return Err(Error::BadDecrypt);
+            return Err(Error::WrongFinalBlockLength);
         }
         let mut block = [0u8; 16];
         block.copy_from_slice(&self.pending);

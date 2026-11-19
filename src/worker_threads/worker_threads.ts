@@ -655,6 +655,15 @@ function __wtCloneValue(value: any, moved: any[], replacements: any[], seen: any
   const already: any = __wtCloneLookup(seen, clones, value);
   if (already !== undefined) return already;
 
+  // A host object that knows how to copy itself (Node's `kClone` protocol:
+  // `X509Certificate`, `KeyObject`) supplies its own clone.
+  if (typeof value === "object" && typeof value.__zunClone === "function") {
+    const copy: any = value.__zunClone();
+    seen.push(value);
+    clones.push(copy);
+    return copy;
+  }
+
   if (value instanceof Date) {
     const copy: any = new Date(Number(value.getTime()));
     seen.push(value);
