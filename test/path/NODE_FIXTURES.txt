@@ -1,0 +1,1 @@
+test/fixtures/path-resolve.js

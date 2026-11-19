@@ -332,23 +332,18 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-path:start -->
 ### Node.js v25 `path` compatibility
 
-`██████████████████████░░` **94.1%** — 16 / 17 Node `test-path*` tests passing
+`████████████████████████` **100.0%** — 17 / 17 Node `test-path*` tests passing
 <!-- node-path:end -->
 
-> `path` already runs the whole Node corpus, so its number is a real measurement.
-> Every test still failing is blocked in the **engine**, not in `path.ts` — the
-> blocking table is in [`test/path/README.md`](test/path/README.md), the per-test
+> `path` runs the whole Node corpus and **passes all of it**. The notes are in [`test/path/README.md`](test/path/README.md), the per-test
 > breakdown with a failure note for each in
 > [`test/path/RESULTS.md`](test/path/RESULTS.md).
 > `test-path-parse-format.js` passes now: it needed a value that is callable
 > *and* carries `strictEqual` & co., and a function can carry callable
 > properties ([zun#14](https://github.com/UrubuCode/zun/issues/14) is closed), so
-> `assert.ts` is a real function with the methods attached. The two that remain
-> are `test-path-join.js` — a function taken out of an array has no `apply` on
-> it, and `map(JSON.stringify)` aborts the VM
-> ([zun#17](https://github.com/UrubuCode/zun/issues/17); its `concat` blocker,
-> [#16](https://github.com/UrubuCode/zun/issues/16), is closed) — and
-> `test-path-resolve.js`, which adds a Windows-only `child_process.spawnSync`.
+> `assert.ts` is a real function with the methods attached. The last one,
+> `test-path-resolve.js`, re-executes a fixture through `child_process.spawnSync`
+> on Windows, so the corpus now runs with the extension.
 
 <!-- node-events:start -->
 ### Node.js v25 `events` compatibility
@@ -488,7 +483,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-string_decoder:start -->
 ### Node.js v25 `string_decoder` compatibility
 
-`░░░░░░░░░░░░░░░░░░░░░░░░` **0.0%** — 0 / 3 Node `test-string-decoder*` tests passing
+`████████░░░░░░░░░░░░░░░░` **33.3%** — 1 / 3 Node `test-string-decoder*` tests passing
 <!-- node-string_decoder:end -->
 
 > `StringDecoder` is implemented end to end over the global `Buffer` —
@@ -497,8 +492,8 @@ the direct `zun run --ext <lib> <test.js>` path.
 > pure-JavaScript decoder (there is no `internalBinding('string_decoder')` to
 > wrap), with the two places Node 25's C++ decoder diverges from it handled: one
 > U+FFFD per *maximal subpart* of an aborted sequence, and Node 25's shape for
-> the legacy `text(buf, offset)`. Since all three corpus files fail to compile,
-> it is verified the way `os` is — a **differential run against Node** over
+> the legacy `text(buf, offset)`. Beyond the corpus (`test-string-decoder-end.js`
+> passes), it is verified the way `os` is — a **differential run against Node** over
 > `test-string-decoder.js`'s own driver (33 byte sequences × every possible
 > split across successive `write()` calls × 8 encodings = **1216 cases**,
 > including every invalid-UTF-8 vector in the file and both nodejs/node#22626
@@ -508,10 +503,11 @@ the direct `zun run --ext <lib> <test.js>` path.
 > **zero divergences**. The caller-supplied buffer is validated with
 > `Buffer.isBuffer` rather than `ArrayBuffer.isView`, which removes a latent
 > crash — a `Uint16Array` or a `DataView` cannot have its bytes read in this
-> engine, and trying is an uncatchable error. The three failures are
-> `Buffer.from`/`Buffer.of` with an `any` argument, `Math.random`, and a
-> function called with one more argument than it declares — all engine gaps,
-> all three re-probed and unchanged, none of them in the decoder. Table in
+> engine, and trying is an uncatchable error. The two failures are engine
+> gaps, none of them in the decoder: the fuzz oracle `Buffer#toString('utf16le')`
+> destroys lone surrogates ([zun#57](https://github.com/UrubuCode/zun/issues/57)),
+> and a function called with one more argument than it declares is a compile
+> error ([zun#154](https://github.com/UrubuCode/zun/issues/154)). Table in
 > [`test/string_decoder/README.md`](test/string_decoder/README.md), breakdown in
 > [`test/string_decoder/RESULTS.md`](test/string_decoder/RESULTS.md).
 
@@ -570,7 +566,7 @@ the direct `zun run --ext <lib> <test.js>` path.
 <!-- node-url:start -->
 ### Node.js v25 `url` compatibility
 
-`████████████████████░░░░` **86.3%** — 38 / 44 Node `test-url*|test-whatwg-url-*` tests passing
+`█████████████████████░░░` **88.6%** — 39 / 44 Node `test-url*|test-whatwg-url-*` tests passing
 <!-- node-url:end -->
 
 > `url` is implemented end to end, on both of its halves. `src/url/url.ts` is

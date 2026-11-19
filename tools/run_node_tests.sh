@@ -66,7 +66,9 @@ fi
 # module statics). PATTERNS is therefore a space-separated list, and PATTERN is
 # the human-readable form used in the README block and the results header.
 case "$MODULE" in
-  path)   KIND="zun-ts";     PATTERNS="test-path";                        PATTERN="test-path";;
+  # `path` is pure Zun TypeScript, but `test-path-resolve.js` re-executes itself
+  # through `child_process.spawnSync`, whose syscalls live in the extension.
+  path)   KIND="zun-ts+ext";     PATTERNS="test-path";                        PATTERN="test-path";;
   # `util` is pure Zun TypeScript, but its kind is `zun-ts+ext` for the same
   # reason `readline`'s is: the harness modules several files require
   # (`internal/test/binding`, `child_process`, `fs`) are syscalls, and without
@@ -87,7 +89,10 @@ case "$MODULE" in
   # WHATWG `URL`/`URLSearchParams` surface, which `node:url` exports and
   # `src/url/whatwg.ts` implements -- so those 27 files are this module's bar
   # too, not the prelude's.
-  url)         KIND="zun-ts"; PATTERNS="test-url test-whatwg-url-";
+  # `url` is pure Zun TypeScript, but `test-url-parse-invalid-input.js` spawns a
+  # child and `test-whatwg-url-canparse.js` loads `internal/test/binding`
+  # (whose bundle pulls `dns`), both syscalls of the extension.
+  url)         KIND="zun-ts+ext"; PATTERNS="test-url test-whatwg-url-";
                PATTERN="test-url*|test-whatwg-url-";;
   # `stream`'s corpus is five prefixes, and naming each one is the point:
   # `test-stream-` is the bulk, `test-stream2-` and `test-stream3-` are the two
@@ -264,6 +269,8 @@ esac
 # A re-executed child is bundled first (about five seconds), so the
 # `child_process` corpus gets a longer default budget than the 20 s of the rest.
 if [ "$MODULE" = child_process ] && [ "$TIMEOUT" = 20 ]; then TIMEOUT=60; fi
+# `test-path-resolve.js` re-executes a fixture on Windows the same way.
+if [ "$MODULE" = path ] && [ "$TIMEOUT" = 20 ]; then TIMEOUT=60; fi
 # A worker is a child Zun process that may bundle its own script first (see
 # "The Worker process" in src/worker_threads/worker_threads.ts).
 if [ "$MODULE" = worker_threads ] && [ "$TIMEOUT" = 20 ]; then TIMEOUT=240; fi
@@ -317,7 +324,7 @@ fi
 
 LIST="$ROOT/test/$MODULE/NODE_TESTS.txt"
 # Some corpora open files from Node's `test/fixtures/` rather than only
-# computing over their paths (`fs` does; `path` does not). Those files are no
+# computing over their paths (`fs` does; `path` needs one, for its re-executed child). Those files are no
 # more vendored than the tests are: the module lists the ones it needs in
 # `test/<module>/NODE_FIXTURES.txt`, as repository-relative paths, and they are
 # downloaded next to the test file so that the harness's
