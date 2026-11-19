@@ -181,19 +181,20 @@ second; `verifyError` is 0.
 
 ## What is not implemented
 
-**The rest of the asymmetric surface**: the post-quantum families (ML-DSA,
-ML-KEM, SLH-DSA) and the KEM API. `test-crypto-key-objects-to-crypto-key.js`
-passes every block up to its ML-DSA one (the harness reports OpenSSL 3.5).
+**The rest of the asymmetric surface**: SLH-DSA. ML-DSA and ML-KEM keys
+(generate, PKCS#8 seed/expanded/both and SPKI import/export, the `AKP` JWK for
+ML-DSA, sign/verify) are `src/crypto/pqc.rs` over RustCrypto's `ml-dsa` /
+`ml-kem`; `encapsulate`/`decapsulate` cover ML-KEM, RSASVE and DHKEM
+(P-256/384/521, X25519, X448).
 
-**The symmetric gaps**: the CCM, OCB, XTS and key-wrap modes, and the legacy
+**The symmetric gaps**: the CCM, OCB and XTS modes, 3DES key wrap, and the legacy
 block ciphers (DES/3DES, Camellia, ARIA, SM4, RC4, Blowfish). `getCiphers()`
 and `getCipherInfo()` still *list* them, with OpenSSL's real NIDs and sizes,
 because those two functions describe algorithms rather than capability — which
 is also what lets `test-crypto-getcipherinfo.js` pass. `createCipheriv` of one
 answers `ERR_CRYPTO_UNSUPPORTED_OPERATION`.
 
-**The rest of WebCrypto**: AES-KW, ChaCha20-Poly1305 and KMAC as
-operations (they are accepted as algorithm names) and the full WebIDL
+**The rest of WebCrypto**: the full WebIDL
 dictionary validation. A call through `any` with seven or more arguments
 (`subtle.unwrapKey(...)`) does not compile yet
 ([zun#10](https://github.com/UrubuCode/zun/issues/10)). **FIPS**: this build is not FIPS-capable, which is the shape
@@ -352,9 +353,8 @@ longer apply.
 | `test-crypto-private-decrypt-gh32240.js` | [zun#34](https://github.com/UrubuCode/zun/issues/34): a top-level destructured `privateDecrypt` is not visible inside a function declaration |
 | `test-crypto-sign-verify.js`, `test-crypto-async-sign-verify.js`, `test-crypto-rsa-dsa.js`, `test-crypto-key-objects.js`, `test-crypto-oaep-zero-length.js`, `test-crypto-psychic-signatures.js` | `fixtures.readKey`, plus DSA, Ed448 or WebCrypto `importKey` |
 | `test-crypto-prime.js` | `checkPrime` / `generatePrime` are not implemented |
-| `test-crypto-encap-decap.js` | needs the key-encapsulation API (`encapsulate`/`decapsulate`) and top-level `await` |
 | `test-crypto-certificate.js` | needs `Certificate` (SPKAC), which is not implemented |
-| `test-crypto-aes-wrap.js`, `test-crypto-des3-wrap.js` | the AES and 3DES key-wrap modes are not implemented — `getCiphers()` lists them, `createCipheriv` answers `ERR_CRYPTO_UNSUPPORTED_OPERATION` |
+| `test-crypto-des3-wrap.js` | 3DES key wrap is not implemented (AES key wrap is) — `getCiphers()` lists it, `createCipheriv` answers `ERR_CRYPTO_UNSUPPORTED_OPERATION` |
 | `test-crypto-argon2.js` | argon2, which Node 25 added, is not implemented |
 
 ## Verified outside the corpus

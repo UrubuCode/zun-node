@@ -73,3 +73,74 @@ impl Mac {
         outer.finish(size)
     }
 }
+
+// ---------------------------------------------------------------------------
+// KMAC (NIST SP 800-185 §4), for WebCrypto's `KMAC128` / `KMAC256`.
+// ---------------------------------------------------------------------------
+
+fn left_encode(value: u64) -> Vec<u8> {
+    let bytes = value.to_be_bytes();
+    let skip = bytes.iter().position(|b| *b != 0).unwrap_or(7);
+    let mut out = vec![(8 - skip) as u8];
+    out.extend_from_slice(&bytes[skip..]);
+    out
+}
+
+fn right_encode(value: u64) -> Vec<u8> {
+    let bytes = value.to_be_bytes();
+    let skip = bytes.iter().position(|b| *b != 0).unwrap_or(7);
+    let mut out = bytes[skip..].to_vec();
+    out.push((8 - skip) as u8);
+    out
+}
+
+/// `KMAC128/256(K, X, L, S)`; `wide` selects KMAC256. `length` is in bytes.
+pub(crate) fn kmac(wide: bool, key: &[u8], data: &[u8], length: usize, custom: &[u8]) -> Vec<u8> {
+    use digest::{ExtendableOutput, Update, XofReader};
+    let rate: usize = if wide { 136 } else { 168 };
+    // bytepad(encode_string(K), rate)
+    let mut padded = left_encode(rate as u64);
+    padded.extend(left_encode((key.len() as u64) * 8));
+    padded.extend_from_slice(key);
+    while padded.len() % rate != 0 {
+        padded.push(0);
+    }
+    let tail = right_encode((length as u64) * 8);
+    let mut out = vec![0u8; length];
+    if wide {
+        let mut h = sha3::CShake256::from_core(sha3::CShake256Core::new_with_function_name(b"KMAC", custom));
+        h.update(&padded);
+        h.update(data);
+        h.update(&tail);
+        h.finalize_xof().read(&mut out);
+    } else {
+        let mut h = sha3::CShake128::from_core(sha3::CShake128Core::new_with_function_name(b"KMAC", custom));
+        h.update(&padded);
+        h.update(data);
+        h.update(&tail);
+        h.finalize_xof().read(&mut out);
+    }
+    out
+}
+
+#[cfg(test)]
+mod kmac_tests {
+    fn hex(s: &str) -> Vec<u8> {
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    }
+
+    /// NIST SP 800-185 KMAC sample #1 and #4.
+    #[test]
+    fn nist_samples() {
+        let key: Vec<u8> = (0x40u8..=0x5f).collect();
+        let data = hex("00010203");
+        assert_eq!(
+            super::kmac(false, &key, &data, 32, b""),
+            hex("e5780b0d3ea6f7d3a429c5706aa43a00fadbd7d49628839e3187243f456ee14e")
+        );
+        assert_eq!(
+            super::kmac(true, &key, &data, 64, b"My Tagged Application"),
+            hex("20c570c31346f703c9ac36c61c03cb64c3970d0cfc787e9b79599d273a68d2f7f69d4cc3de9d104a351689f27cf6f5951f0103f33f4f24871024d9c27773a8dd")
+        );
+    }
+}

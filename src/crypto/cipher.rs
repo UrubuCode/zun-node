@@ -28,7 +28,7 @@
 //!
 //! # What is not here
 //!
-//! CCM, OCB, XTS, the key-wrap modes and the legacy block ciphers (DES,
+//! CCM, OCB, XTS, 3DES key wrap and the legacy block ciphers (DES,
 //! Camellia, ARIA, SM4). `ciphers.rs` still *lists* them, because
 //! `getCiphers()`/`getCipherInfo()` describe algorithms rather than
 //! capability; `prepare` answers `Unsupported` for them and the TS layer
@@ -220,6 +220,11 @@ enum Mode {
     Gcm(Gcm),
     ChaChaPoly(ChaChaPoly),
     ChaCha20(chacha20::ChaCha20),
+    /// AES key wrap (RFC 3394) or key wrap with padding (RFC 5649). Like
+    /// OpenSSL's wrap ciphers, each `update` call wraps/unwraps its whole
+    /// input at once; `failed` records an unwrap integrity failure, which
+    /// `final()` reports.
+    Wrap { iv: Vec<u8>, pad: bool, failed: bool },
 }
 
 /// A live `Cipheriv`/`Decipheriv`.
@@ -323,6 +328,11 @@ impl Cipher {
                 Mode::ChaChaPoly(new_chacha_poly(key, iv, tag_length))
             }
             _ if spec.canonical == "chacha20" => Mode::ChaCha20(new_chacha20(key, iv)),
+            "wrap" if spec.canonical.starts_with("id-aes") => Mode::Wrap {
+                iv: iv.to_vec(),
+                pad: spec.canonical.ends_with("-pad"),
+                failed: false,
+            },
             _ => return Err(InitError::Unsupported),
         };
 
@@ -451,6 +461,23 @@ impl Cipher {
                 stream.apply_keystream(&mut out);
                 out
             }
+            Mode::Wrap { iv, pad, failed } => {
+                if data.is_empty() {
+                    return Vec::new();
+                }
+                let result = if encrypt {
+                    key_wrap(key, data, iv, *pad)
+                } else {
+                    key_unwrap(key, data, iv, *pad)
+                };
+                match result {
+                    Some(out) => out,
+                    None => {
+                        *failed = true;
+                        Vec::new()
+                    }
+                }
+            }
             Mode::Ecb | Mode::Cbc { .. } => Vec::new(),
         }
     }
@@ -508,6 +535,9 @@ impl Cipher {
         }
         if self.is_aead() {
             return self.finish_aead();
+        }
+        if let Mode::Wrap { failed: true, .. } = self.mode {
+            return Err(Error::BadDecrypt);
         }
         Ok(Vec::new())
     }
@@ -603,6 +633,115 @@ impl Cipher {
         }
         Ok(Vec::new())
     }
+}
+
+/// RFC 3394 default IV and RFC 5649 alternative IV prefix.
+const KW_IV: [u8; 8] = [0xA6; 8];
+const KWP_IV: [u8; 4] = [0xA6, 0x59, 0x59, 0xA6];
+
+/// RFC 3394 §2.2.1 over 64-bit semiblocks, starting from `a`.
+fn kw_wrap_raw(key: &BlockKey, a: [u8; 8], plain: &[u8]) -> Vec<u8> {
+    let n = plain.len() / 8;
+    let mut a = a;
+    let mut r: Vec<u8> = plain.to_vec();
+    for j in 0..6u64 {
+        for i in 0..n {
+            let mut block = [0u8; 16];
+            block[..8].copy_from_slice(&a);
+            block[8..].copy_from_slice(&r[i * 8..i * 8 + 8]);
+            key.encrypt(&mut block);
+            let t = (n as u64) * j + (i as u64) + 1;
+            a.copy_from_slice(&block[..8]);
+            for (slot, byte) in a.iter_mut().zip(t.to_be_bytes()) {
+                *slot ^= byte;
+            }
+            r[i * 8..i * 8 + 8].copy_from_slice(&block[8..]);
+        }
+    }
+    let mut out = a.to_vec();
+    out.extend_from_slice(&r);
+    out
+}
+
+/// RFC 3394 §2.2.2: the recovered `A` and plaintext.
+fn kw_unwrap_raw(key: &BlockKey, wrapped: &[u8]) -> ([u8; 8], Vec<u8>) {
+    let n = wrapped.len() / 8 - 1;
+    let mut a = [0u8; 8];
+    a.copy_from_slice(&wrapped[..8]);
+    let mut r: Vec<u8> = wrapped[8..].to_vec();
+    for j in (0..6u64).rev() {
+        for i in (0..n).rev() {
+            let t = (n as u64) * j + (i as u64) + 1;
+            let mut block = [0u8; 16];
+            block[..8].copy_from_slice(&a);
+            for (slot, byte) in block[..8].iter_mut().zip(t.to_be_bytes()) {
+                *slot ^= byte;
+            }
+            block[8..].copy_from_slice(&r[i * 8..i * 8 + 8]);
+            key.decrypt(&mut block);
+            a.copy_from_slice(&block[..8]);
+            r[i * 8..i * 8 + 8].copy_from_slice(&block[8..]);
+        }
+    }
+    (a, r)
+}
+
+/// AES key wrap; `None` for an input length the mode rejects.
+fn key_wrap(key: &BlockKey, plain: &[u8], iv: &[u8], pad: bool) -> Option<Vec<u8>> {
+    if !pad {
+        if plain.len() < 16 || plain.len() % 8 != 0 {
+            return None;
+        }
+        let mut a = KW_IV;
+        if iv.len() == 8 {
+            a.copy_from_slice(iv);
+        }
+        return Some(kw_wrap_raw(key, a, plain));
+    }
+    let mut a = [0u8; 8];
+    a[..4].copy_from_slice(if iv.len() == 4 { iv } else { &KWP_IV });
+    a[4..].copy_from_slice(&(plain.len() as u32).to_be_bytes());
+    let mut padded = plain.to_vec();
+    padded.resize(plain.len().div_ceil(8) * 8, 0);
+    if padded.len() == 8 {
+        let mut block = [0u8; 16];
+        block[..8].copy_from_slice(&a);
+        block[8..].copy_from_slice(&padded);
+        key.encrypt(&mut block);
+        return Some(block.to_vec());
+    }
+    Some(kw_wrap_raw(key, a, &padded))
+}
+
+/// AES key unwrap; `None` when the integrity check fails.
+fn key_unwrap(key: &BlockKey, wrapped: &[u8], iv: &[u8], pad: bool) -> Option<Vec<u8>> {
+    if wrapped.len() < 16 || wrapped.len() % 8 != 0 {
+        return None;
+    }
+    if !pad {
+        let (a, plain) = kw_unwrap_raw(key, wrapped);
+        let expected: &[u8] = if iv.len() == 8 { iv } else { &KW_IV };
+        return if bool::from(a[..].ct_eq(expected)) { Some(plain) } else { None };
+    }
+    let (a, plain) = if wrapped.len() == 16 {
+        let mut block = [0u8; 16];
+        block.copy_from_slice(wrapped);
+        key.decrypt(&mut block);
+        let mut a = [0u8; 8];
+        a.copy_from_slice(&block[..8]);
+        (a, block[8..].to_vec())
+    } else {
+        kw_unwrap_raw(key, wrapped)
+    };
+    let prefix: &[u8] = if iv.len() == 4 { iv } else { &KWP_IV };
+    if !bool::from(a[..4].ct_eq(prefix)) {
+        return None;
+    }
+    let length = u32::from_be_bytes([a[4], a[5], a[6], a[7]]) as usize;
+    if length > plain.len() || length + 8 <= plain.len() || plain[length..].iter().any(|b| *b != 0) {
+        return None;
+    }
+    Some(plain[..length].to_vec())
 }
 
 /// The canonical names `prepare` can actually construct. Everything else in
@@ -704,4 +843,35 @@ fn new_chacha20(key: &[u8], iv: &[u8]) -> chacha20::ChaCha20 {
         chacha20::ChaCha20::new_from_slices(key, &iv[4..16]).expect("validated key/iv");
     stream.seek(u64::from(counter) * 64);
     stream
+}
+
+#[cfg(test)]
+mod key_wrap_tests {
+    use super::*;
+
+    fn hex(s: &str) -> Vec<u8> {
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    }
+
+    #[test]
+    fn rfc3394_4_1() {
+        let key = BlockKey::new(&hex("000102030405060708090A0B0C0D0E0F")).unwrap();
+        let plain = hex("00112233445566778899AABBCCDDEEFF");
+        let wrapped = key_wrap(&key, &plain, &[], false).unwrap();
+        assert_eq!(wrapped, hex("1FA68B0A8112B447AEF34BD8FB5A7B829D3E862371D2CFE5"));
+        assert_eq!(key_unwrap(&key, &wrapped, &[], false).unwrap(), plain);
+    }
+
+    #[test]
+    fn rfc5649_6() {
+        let key = BlockKey::new(&hex("5840df6e29b02af1ab493b705bf16ea1ae8338f4dcc176a8")).unwrap();
+        let plain = hex("466f7250617369");
+        let wrapped = key_wrap(&key, &plain, &[], true).unwrap();
+        assert_eq!(wrapped, hex("afbeb0f07dfbf5419200f2ccb50bb24f"));
+        assert_eq!(key_unwrap(&key, &wrapped, &[], true).unwrap(), plain);
+        let plain = hex("c37b7e6492584340bed12207808941155068f738");
+        let wrapped = key_wrap(&key, &plain, &[], true).unwrap();
+        assert_eq!(wrapped, hex("138bdeaa9b8fa7fc61f97742e72248ee5ae6ae5360d1ae6a5f54f373fa543b6a"));
+        assert_eq!(key_unwrap(&key, &wrapped, &[], true).unwrap(), plain);
+    }
 }

@@ -25,8 +25,9 @@
 //! encryption), RSA-PSS-restricted keys, ECDSA and ECDH over `prime256v1`,
 //! `secp384r1`, `secp521r1` and `secp256k1`, Ed25519, Ed448, X25519, X448,
 //! DSA and X9.42 `dh` keys (the last three through `ff.rs`), plus the SPKAC
-//! parser behind `crypto.Certificate`. The post-quantum families are not
-//! implemented and answer `ERR_CRYPTO_UNSUPPORTED_OPERATION`-shaped errors.
+//! parser behind `crypto.Certificate`, ML-DSA / ML-KEM (through `pqc.rs`) and
+//! the KEM API (ML-KEM, RSASVE, DHKEM). SLH-DSA answers
+//! `ERR_CRYPTO_UNSUPPORTED_OPERATION`.
 //!
 //! Failure is reported in band, with the `(code, message)` convention
 //! `mod.rs` documents.
@@ -40,6 +41,7 @@ use rsa::{Oaep, Pkcs1v15Encrypt, Pkcs1v15Sign, Pss, RsaPrivateKey, RsaPublicKey}
 use zun_abi::ZunValue;
 
 use super::ff::{self, DsaParams};
+use super::pqc::{self, PqAlg, PqPrivate};
 use super::hash::Alg;
 use super::{fail, US};
 use crate::abi::{arg_bool, arg_i64, arg_str, ret_str};
@@ -426,6 +428,8 @@ enum Private {
     Dsa(Box<DsaParams>, BigUint),
     /// X9.42 / PKCS#3 `dhKeyAgreement`: `p`, `g` and `x`.
     Dh(BigUint, BigUint, BigUint),
+    /// ML-DSA / ML-KEM (see `pqc.rs`).
+    Pq(Box<PqPrivate>),
 }
 
 /// A public key, parsed from its SPKI document.
@@ -442,6 +446,8 @@ enum Public {
     Dsa(Box<DsaParams>, BigUint),
     /// `p`, `g` and `y`.
     Dh(BigUint, BigUint, BigUint),
+    /// ML-DSA / ML-KEM: the parameter set and the raw public key.
+    Pq(PqAlg, Vec<u8>),
 }
 
 /// The `RSASSA-PSS-params` restriction of an `id-RSASSA-PSS` key (RFC 4055
@@ -744,7 +750,13 @@ impl Private {
                 }
                 Ok(Private::Dh(v[0].clone(), v[1].clone(), single_int(info.private_key)?))
             }
-            _ => unsupported(),
+            _ => match PqAlg::from_oid(&oid) {
+                Some(alg) => match PqPrivate::from_inner(alg, info.private_key) {
+                    Some(key) => Ok(Private::Pq(Box::new(key))),
+                    None => invalid_key(),
+                },
+                None => unsupported(),
+            },
         }
     }
 
@@ -769,6 +781,7 @@ impl Private {
             Private::X448(raw) => Ok(okp_pkcs8_any(0x6f, raw)),
             Private::Dsa(params, x) => Ok(ff_pkcs8(ff::DSA_OID_DER, &[&params.p, &params.q, &params.g], x)),
             Private::Dh(p, g, x) => Ok(ff_pkcs8(ff::DH_OID_DER, &[p, g], x)),
+            Private::Pq(key) => Ok(key.to_pkcs8()),
         }
     }
 
@@ -789,6 +802,10 @@ impl Private {
             Private::X448(raw) => Public::X448(ff::x448_public(raw)),
             Private::Dsa(params, x) => Public::Dsa(params.clone(), ff::dsa_public(params, x)),
             Private::Dh(p, g, x) => Public::Dh(p.clone(), g.clone(), g.modpow(x, p)),
+            Private::Pq(key) => match key.public() {
+                Some(raw) => Public::Pq(key.alg, raw),
+                None => return invalid_key(),
+            },
         })
     }
 }
@@ -842,7 +859,16 @@ impl Public {
                 }
                 Ok(Public::Dh(v[0].clone(), v[1].clone(), single_int(info.subject_public_key.raw_bytes())?))
             }
-            _ => unsupported(),
+            _ => match PqAlg::from_oid(&oid) {
+                Some(alg) => {
+                    let raw = info.subject_public_key.raw_bytes();
+                    if !pqc::check_public(alg, raw) {
+                        return err("ERR_OSSL_EVP_DECODE_ERROR", "error:1E08010C:DECODER routines::unsupported");
+                    }
+                    Ok(Public::Pq(alg, raw.to_vec()))
+                }
+                None => unsupported(),
+            },
         }
     }
 
@@ -868,6 +894,7 @@ impl Public {
             Public::X448(raw) => Ok(okp_spki_any(0x6f, raw)),
             Public::Dsa(params, y) => Ok(ff_spki(ff::DSA_OID_DER, &[&params.p, &params.q, &params.g], y)),
             Public::Dh(p, g, y) => Ok(ff_spki(ff::DH_OID_DER, &[p, g], y)),
+            Public::Pq(alg, raw) => Ok(pqc::spki(*alg, raw)),
         }
     }
 }
@@ -1420,6 +1447,32 @@ native!(
                     _ => return unsupported(),
                 }
             }
+            "AKP" => {
+                let Some(alg) = PqAlg::from_name(&crv.to_lowercase()).filter(|alg| alg.is_dsa()) else {
+                    return err("ERR_CRYPTO_INVALID_JWK", "Invalid JWK data");
+                };
+                let raw_pub = b64url_decode(get(10));
+                if raw_pub.len() != alg.public_len() || !pqc::check_public(alg, &raw_pub) {
+                    return err("ERR_CRYPTO_INVALID_JWK", "Invalid JWK data");
+                }
+                if has_d {
+                    let seed = b64url_decode(get(4));
+                    let Some(expanded) = pqc::expand(alg, &seed) else {
+                        return err("ERR_CRYPTO_INVALID_JWK", "Invalid JWK data");
+                    };
+                    let key = PqPrivate { alg, seed: Some(seed), expanded };
+                    if key.public().as_deref() != Some(raw_pub.as_slice()) {
+                        return err("ERR_CRYPTO_INVALID_JWK", "Invalid JWK data");
+                    }
+                    if want_private {
+                        Imported::Private(Private::Pq(Box::new(key)))
+                    } else {
+                        Imported::Public(Public::Pq(alg, raw_pub))
+                    }
+                } else {
+                    Imported::Public(Public::Pq(alg, raw_pub))
+                }
+            }
             _ => return err("ERR_CRYPTO_INVALID_JWK", "Invalid JWK data"),
         };
         finish_import(imported, want_private)
@@ -1488,6 +1541,7 @@ native!(
                 none(),
             ],
             Public::Dh(p, _, _) => ["dh".into(), p.bits().to_string(), none(), none(), none(), none(), none()],
+            Public::Pq(alg, _) => [alg.name().into(), none(), none(), none(), none(), none(), none()],
         };
         ok_fields(&fields)
     }
@@ -1615,8 +1669,20 @@ native!(
         if matches!(public, Public::Dsa(..) | Public::Dh(..)) {
             return err("ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE", "Unsupported JWK Key Type.");
         }
+        if let Public::Pq(alg, _) = &public {
+            if !alg.is_dsa() {
+                return err("ERR_CRYPTO_JWK_UNSUPPORTED_KEY_TYPE", "Unsupported JWK Key Type.");
+            }
+        }
         match &public {
             Public::RsaPss(..) | Public::Dsa(..) | Public::Dh(..) => {}
+            // `AKP` (draft-ietf-cose-dilithium): `alg` in the crv slot, `pub`
+            // in the x slot and `priv` (the seed) in the d slot.
+            Public::Pq(alg, raw) => {
+                f[0] = "AKP".into();
+                f[1] = alg.name().to_uppercase();
+                f[10] = b64url(raw);
+            }
             Public::Ed448(raw) => {
                 f[0] = "OKP".into();
                 f[1] = "Ed448".into();
@@ -1673,6 +1739,10 @@ native!(
             Some(Private::Ed448(raw)) => f[4] = b64url(raw),
             Some(Private::X448(raw)) => f[4] = b64url(raw),
             Some(Private::Dsa(..)) | Some(Private::Dh(..)) => {}
+            Some(Private::Pq(key)) => match &key.seed {
+                Some(seed) => f[4] = b64url(seed),
+                None => return err("ERR_CRYPTO_OPERATION_FAILED", "key does not have an available seed"),
+            },
             None => {}
         }
         ok_fields(&f)
@@ -1781,7 +1851,10 @@ native!(
                 let x = ff::random_private(&(&p - BigUint::from(1u8)));
                 Private::Dh(p, g, x)
             }
-            _ => return unsupported(),
+            other => match PqAlg::from_name(other).and_then(pqc::generate) {
+                Some(key) => Private::Pq(Box::new(key)),
+                None => return unsupported(),
+            },
         };
         let spki = private.public()?.to_spki()?;
         ok_fields(&[b64(&private.to_pkcs8()?), b64(&spki)])
@@ -1945,7 +2018,14 @@ native!(
                 let hashed = alg.unwrap_or(Alg::Sha256).digest(&data);
                 ff::dsa_sign(params, x, &hashed, o.p1363)
             }
-            Private::X25519(_) | Private::X448(_) | Private::Dh(..) => {
+            Private::Pq(key) if key.alg.is_dsa() => {
+                if alg.is_some() {
+                    return err("ERR_OSSL_INVALID_DIGEST", "error:1C8000AF:Provider routines::invalid digest");
+                }
+                let Some(sig) = key.sign(&data, &o.context) else { return unsupported() };
+                sig
+            }
+            Private::X25519(_) | Private::X448(_) | Private::Dh(..) | Private::Pq(_) => {
                 return err(
                     "ERR_OSSL_EVP_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE",
                     "error:03000096:digital envelope routines::operation not supported for this keytype",
@@ -1992,7 +2072,13 @@ native!(
                 let hashed = alg.unwrap_or(Alg::Sha256).digest(&data);
                 ff::dsa_verify(params, y, &hashed, &sig, o.p1363)
             }
-            Public::X25519(_) | Public::X448(_) | Public::Dh(..) => {
+            Public::Pq(pq, raw) if pq.is_dsa() => {
+                if alg.is_some() {
+                    return err("ERR_OSSL_INVALID_DIGEST", "error:1C8000AF:Provider routines::invalid digest");
+                }
+                pqc::verify(*pq, raw, &data, &o.context, &sig)
+            }
+            Public::X25519(_) | Public::X448(_) | Public::Dh(..) | Public::Pq(..) => {
                 return err(
                     "ERR_OSSL_EVP_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE",
                     "error:03000096:digital envelope routines::operation not supported for this keytype",
@@ -2632,5 +2718,202 @@ mod tests {
         let pem = to_pem("EC PRIVATE KEY", &[], &sec1);
         let parsed = parse_pem(&pem).unwrap();
         assert_eq!(parsed.body, sec1);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Key encapsulation (`crypto.encapsulate` / `crypto.decapsulate`)
+// ---------------------------------------------------------------------------
+//
+// The OpenSSL 3 KEM set: ML-KEM (FIPS 203), RSASVE (SP 800-56B rev. 2
+// §7.2.1) and DHKEM (RFC 9180 §4.1) over P-256, P-384, P-521, X25519, X448.
+
+fn kem_failed<T>(encap: bool) -> Res<T> {
+    let what = if encap { "encapsulation" } else { "decapsulation" };
+    err("ERR_CRYPTO_OPERATION_FAILED", &format!("Failed to perform {what}"))
+}
+
+/// The DHKEM suite of a key: `(kem_id, hash)`.
+fn dhkem_suite(public: &Public) -> Option<(u16, Alg)> {
+    Some(match public {
+        Public::Ec(Crv::P256, _) => (0x0010, Alg::Sha256),
+        Public::Ec(Crv::P384, _) => (0x0011, Alg::Sha384),
+        Public::Ec(Crv::P521, _) => (0x0012, Alg::Sha512),
+        Public::X25519(_) => (0x0020, Alg::Sha256),
+        Public::X448(_) => (0x0021, Alg::Sha512),
+        _ => return None,
+    })
+}
+
+/// The serialised public key DHKEM puts in `enc` / `kem_context`.
+fn dhkem_serialize(public: &Public) -> Vec<u8> {
+    match public {
+        Public::Ec(_, point) => point.clone(),
+        Public::X25519(raw) => raw.to_vec(),
+        Public::X448(raw) => raw.to_vec(),
+        _ => Vec::new(),
+    }
+}
+
+/// `DH(sk, pk)` for the DHKEM curves; `None` on an invalid/small-order peer.
+fn dhkem_dh(private: &Private, peer: &[u8]) -> Option<Vec<u8>> {
+    let out = match private {
+        Private::Ec(crv, raw) => on_curve!(*crv, ecdh(raw, peer)).ok()?,
+        Private::X25519(raw) => {
+            let peer: [u8; 32] = peer.try_into().ok()?;
+            let secret = x25519_dalek::StaticSecret::from(*raw);
+            secret.diffie_hellman(&x25519_dalek::PublicKey::from(peer)).to_bytes().to_vec()
+        }
+        Private::X448(raw) => {
+            let peer: [u8; 56] = peer.try_into().ok()?;
+            ff::x448(raw, &peer).to_vec()
+        }
+        _ => return None,
+    };
+    if out.iter().all(|b| *b == 0) {
+        return None;
+    }
+    Some(out)
+}
+
+/// RFC 9180 `ExtractAndExpand(dh, kem_context)`.
+fn dhkem_shared(kem_id: u16, hash: Alg, dh: &[u8], kem_context: &[u8]) -> Vec<u8> {
+    let mut suite = b"KEM".to_vec();
+    suite.extend_from_slice(&kem_id.to_be_bytes());
+    let size = hash.output_size();
+    // LabeledExtract("", "eae_prk", dh)
+    let mut ikm = b"HPKE-v1".to_vec();
+    ikm.extend_from_slice(&suite);
+    ikm.extend_from_slice(b"eae_prk");
+    ikm.extend_from_slice(dh);
+    let mut extract = super::mac::Mac::new(hash, &[]);
+    extract.update(&ikm);
+    let prk = extract.finish();
+    // LabeledExpand(prk, "shared_secret", kem_context, Nsecret)
+    let mut info = (size as u16).to_be_bytes().to_vec();
+    info.extend_from_slice(b"HPKE-v1");
+    info.extend_from_slice(&suite);
+    info.extend_from_slice(b"shared_secret");
+    info.extend_from_slice(kem_context);
+    // Nsecret == Nh for every suite here, so one HKDF-Expand block is the
+    // whole output.
+    let mut mac = super::mac::Mac::new(hash, &prk);
+    mac.update(&info);
+    mac.update(&[1u8]);
+    mac.finish()
+}
+
+native!(
+    /// `cryptoEncapsulate(kind, der)` → `+<sharedKey> US <ciphertext>`.
+    encapsulate,
+    |a| {
+        let kind = a.s(0)?;
+        let der = a.bytes(1)?;
+        let public = public_of(&kind, &der)?;
+        let (shared, ct) = match &public {
+            Public::Pq(alg, raw) if !alg.is_dsa() => match pqc::encapsulate(*alg, raw) {
+                Some(pair) => pair,
+                None => return kem_failed(true),
+            },
+            Public::Rsa(key) => {
+                let n = key.n();
+                let size = n.bits().div_ceil(8);
+                let two = BigUint::from(2u8);
+                let upper = n - BigUint::from(1u8);
+                let z = OsRng.gen_biguint_range(&two, &upper);
+                let ct = pad_to(z.modpow(key.e(), n).to_bytes_be(), size);
+                (pad_to(z.to_bytes_be(), size), ct)
+            }
+            other => {
+                let Some((kem_id, hash)) = dhkem_suite(other) else { return kem_failed(true) };
+                let ephemeral = match other {
+                    Public::Ec(crv, _) => Private::Ec(*crv, on_curve!(*crv, generate())),
+                    Public::X25519(_) => Private::X25519(random32()),
+                    _ => {
+                        let mut raw = [0u8; 56];
+                        OsRng.fill_bytes(&mut raw);
+                        Private::X448(raw)
+                    }
+                };
+                let pk_r = dhkem_serialize(other);
+                let Some(dh) = dhkem_dh(&ephemeral, &pk_r) else { return kem_failed(true) };
+                let enc = dhkem_serialize(&ephemeral.public()?);
+                let mut context = enc.clone();
+                context.extend_from_slice(&pk_r);
+                (dhkem_shared(kem_id, hash, &dh, &context), enc)
+            }
+        };
+        ok_fields(&[b64(&shared), b64(&ct)])
+    }
+);
+
+native!(
+    /// `cryptoDecapsulate(kind, der, ciphertext)` → `+<sharedKey>`.
+    decapsulate,
+    |a| {
+        let kind = a.s(0)?;
+        let der = a.bytes(1)?;
+        let ct = a.bytes(2)?;
+        if kind != "private" {
+            return kem_failed(false);
+        }
+        let private = Private::from_pkcs8(&der)?;
+        let shared = match &private {
+            Private::Pq(key) if !key.alg.is_dsa() => match key.decapsulate(&ct) {
+                Some(shared) => shared,
+                None => return kem_failed(false),
+            },
+            Private::Rsa(key) => {
+                let n = key.n();
+                let size = n.bits().div_ceil(8);
+                if ct.len() != size {
+                    return kem_failed(false);
+                }
+                let c = BigUint::from_bytes_be(&ct);
+                let one = BigUint::from(1u8);
+                if c <= one || c >= n - &one {
+                    return kem_failed(false);
+                }
+                pad_to(c.modpow(key.d(), n).to_bytes_be(), size)
+            }
+            Private::Ec(..) | Private::X25519(_) | Private::X448(_) => {
+                let public = private.public()?;
+                let Some((kem_id, hash)) = dhkem_suite(&public) else { return kem_failed(false) };
+                let pk_r = dhkem_serialize(&public);
+                if ct.len() != pk_r.len() {
+                    return kem_failed(false);
+                }
+                let Some(dh) = dhkem_dh(&private, &ct) else { return kem_failed(false) };
+                let mut context = ct.clone();
+                context.extend_from_slice(&pk_r);
+                dhkem_shared(kem_id, hash, &dh, &context)
+            }
+            _ => return kem_failed(false),
+        };
+        ok_fields(&[b64(&shared)])
+    }
+);
+
+#[cfg(test)]
+mod dhkem_tests {
+    use super::*;
+
+    fn hex(s: &str) -> Vec<u8> {
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    }
+
+    /// RFC 9180 A.1.1, DHKEM(X25519, HKDF-SHA256).
+    #[test]
+    fn x25519_vector() {
+        let sk_e: [u8; 32] = hex("52c4a758a802cd8b936eceea314432798d5baf2d7e9235dc084ab1b9cfa2f736").try_into().unwrap();
+        let sk_r: [u8; 32] = hex("4612c550263fc8ad58375df3f557aac531d26850903e55a9f23f21d8534e8ac8").try_into().unwrap();
+        let pk_rm = x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(sk_r)).to_bytes();
+        let enc = x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from(sk_e)).to_bytes();
+        assert_eq!(enc.to_vec(), hex("37fda3567bdbd628e88668c3c8d7e97d1d1253b6d4ea6d44c150f741f1bf4431"));
+        let dh = dhkem_dh(&Private::X25519(sk_e), &pk_rm).unwrap();
+        let mut context = enc.to_vec();
+        context.extend_from_slice(&pk_rm);
+        let shared = dhkem_shared(0x0020, Alg::Sha256, &dh, &context);
+        assert_eq!(shared, hex("fe0e18c9f024ce43799ae393c7e8fe8fce9d218875e8227b0187c04e7d2ea1fc"));
     }
 }

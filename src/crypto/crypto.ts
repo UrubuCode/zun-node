@@ -107,9 +107,8 @@
 // encryption, ECDH and classic Diffie-Hellman, `checkPrime` /
 // `generatePrime`, `Certificate` (SPKAC) and the `subtle` operations over
 // those (see `src/crypto/asym.rs` and `src/crypto/ff.rs`). Absent:
-// `X509Certificate`, the post-quantum families (ML-DSA, ML-KEM, SLH-DSA),
-// `subtle.generateKey` / `deriveKey` / `wrapKey` / `unwrapKey`. The symmetric gaps are
-// the CCM, OCB, XTS and key-wrap modes and the legacy block ciphers (DES,
+// SLH-DSA (ML-DSA and ML-KEM are `src/crypto/pqc.rs`). The symmetric gaps are
+// the CCM, OCB and XTS modes, 3DES key wrap and the legacy block ciphers (DES,
 // Camellia, ARIA, SM4), which `getCiphers()` still lists because that function
 // describes algorithms rather than capability — see `src/crypto/ciphers.rs`.
 // A call into any of those raises `ERR_CRYPTO_UNSUPPORTED_OPERATION` rather
@@ -1228,12 +1227,40 @@ function __cJwkField(jwk: any, field: string): string {
   return text;
 }
 
+// The ML-DSA / ML-KEM `asymmetricKeyType`s (`src/crypto/pqc.rs`).
+const __C_PQC_TYPES: string[] = [
+  "ml-dsa-44", "ml-dsa-65", "ml-dsa-87", "ml-kem-512", "ml-kem-768", "ml-kem-1024",
+];
+
+// The JWK members, in the order of the native's field list. An `AKP` key
+// (draft-ietf-cose-dilithium) carries `alg`, `pub` and `priv` in the `crv`,
+// `x` and `d` slots.
+const __C_JWK_NAMES: string[] = ["kty", "crv", "n", "e", "d", "p", "q", "dp", "dq", "qi", "x", "y"];
+const __C_AKP_NAMES: string[] = ["kty", "alg", "n", "e", "priv", "p", "q", "dp", "dq", "qi", "pub", "y"];
+
 function __cImportJwk(jwk: any, wantPrivate: boolean): string[] {
   const kty: any = jwk.kty;
-  if (kty !== "RSA" && kty !== "EC" && kty !== "OKP") {
-    throw new ERR_INVALID_ARG_VALUE("key.kty", kty, "must be one of: 'RSA', 'EC', 'OKP'");
+  if (kty !== "RSA" && kty !== "EC" && kty !== "OKP" && kty !== "AKP") {
+    throw new ERR_INVALID_ARG_VALUE("key.kty", kty, "must be one of: 'RSA', 'EC', 'OKP', 'AKP'");
   }
-  const names: string[] = ["kty", "crv", "n", "e", "d", "p", "q", "dp", "dq", "qi", "x", "y"];
+  if (kty === "AKP") {
+    const alg: any = jwk.alg;
+    if (alg !== "ML-DSA-44" && alg !== "ML-DSA-65" && alg !== "ML-DSA-87") {
+      throw new ERR_INVALID_ARG_VALUE("key.alg", alg, "must be one of: 'ML-DSA-44', 'ML-DSA-65', 'ML-DSA-87'");
+    }
+    if (typeof jwk.pub !== "string") throw new ERR_INVALID_ARG_TYPE("key.pub", "string", jwk.pub);
+    if (wantPrivate && typeof jwk.priv !== "string") {
+      throw new ERR_INVALID_ARG_TYPE("key.priv", "string", jwk.priv);
+    }
+    const akp: string[] = [];
+    for (const field of __C_AKP_NAMES) {
+      const raw: string = __cJwkField(jwk, field);
+      akp.push(field === "kty" || field === "alg" ? raw : __cFromBase64Url(raw));
+    }
+    const out: string = __cPayload(__cNative.cryptoKeyImportJwk(akp.join(__C_US), wantPrivate));
+    return out.split(__C_US);
+  }
+  const names: string[] = __C_JWK_NAMES;
   const fields: string[] = [];
   for (const field of names) {
     const raw: string = __cJwkField(jwk, field);
@@ -1258,12 +1285,15 @@ function __cExportKey(key: any, options: any, name: string): any {
       __cNative.cryptoKeyJwk(kind, String(key.__cBase64)),
     );
     const f: string[] = payload.split(__C_US);
-    const names: string[] = ["kty", "crv", "n", "e", "d", "p", "q", "dp", "dq", "qi", "x", "y"];
+    const names: string[] = f[0] === "AKP" ? __C_AKP_NAMES : __C_JWK_NAMES;
     const jwk: any = {};
     for (let i: number = 0; i < names.length; i++) {
       if (f[i] !== "") jwk[names[i]] = f[i];
     }
-    if (kind === "public") delete jwk.d;
+    if (kind === "public") {
+      delete jwk.d;
+      delete jwk.priv;
+    }
     return jwk;
   }
   if (format !== "pem" && format !== "der") {
@@ -1387,7 +1417,10 @@ function __cGenerateKeyPair(type: any, options: any): any {
       error.code = "ERR_OSSL_MISSING_OID";
       throw error;
     }
-  } else if (kind === "ed25519" || kind === "x25519" || kind === "ed448" || kind === "x448") {
+  } else if (
+    kind === "ed25519" || kind === "x25519" || kind === "ed448" || kind === "x448" ||
+    __C_PQC_TYPES.indexOf(kind) >= 0
+  ) {
     // No parameters.
   } else if (kind === "dsa") {
     bits = __cValidateUint32(opts.modulusLength, "options.modulusLength");
@@ -2031,6 +2064,17 @@ function __cIsJobError(error: any): boolean {
   if (error === null || typeof error !== "object") return false;
   const code: any = error.code;
   return typeof code === "string" && code.indexOf("ERR_OSSL") === 0;
+}
+
+// The `key` argument check of `encapsulate` / `decapsulate`.
+function __cValidateKemKey(key: any): void {
+  if (key === undefined || key === null || typeof key === "number" || typeof key === "boolean") {
+    throw new ERR_INVALID_ARG_TYPE(
+      "key",
+      ["string", "ArrayBuffer", "Buffer", "TypedArray", "DataView", "KeyObject", "CryptoKey"],
+      key,
+    );
+  }
 }
 
 // `crypto.diffieHellman({ privateKey, publicKey })`.
@@ -3165,6 +3209,24 @@ function __cSignHash(alg: any, key: any): any {
   return __cNodeHash(String(key.algorithm.hash.name));
 }
 
+// KMAC128 / KMAC256 (NIST SP 800-185): `algorithm.length` is the output
+// length in bits, `algorithm.customization` the optional `S` string.
+function __cWebKmac(alg: any, key: any, bytes: Buffer): Buffer {
+  const name: string = String(key.algorithm.name);
+  const bits: number = alg.length === undefined ? (name === "KMAC128" ? 256 : 512) : Number(alg.length);
+  if (bits % 8 !== 0) throw __cDomError("NotSupportedError", "Unsupported KMAC length");
+  const custom: Buffer = alg.customization === undefined
+    ? Buffer.alloc(0)
+    : __cSourceBuffer(alg.customization, "algorithm.customization");
+  const raw: Buffer = key.__cKeyObject.export();
+  return Buffer.from(
+    __cPayload(__cNative.cryptoKmac(
+      name === "KMAC256", raw.toString("base64"), bytes.toString("base64"), bits / 8, custom.toString("base64"),
+    )),
+    "base64",
+  );
+}
+
 function __cWebSign(algorithm: any, key: any, data: any): any {
   const alg: any = __cAlgorithm(algorithm);
   __cCheckUsage(key, "sign");
@@ -3173,6 +3235,7 @@ function __cWebSign(algorithm: any, key: any, data: any): any {
     const mac: any = __node_crypto.createHmac(__cNodeHash(String(key.algorithm.hash.name)), key.__cKeyObject);
     return __cToArrayBuffer(mac.update(bytes).digest());
   }
+  if (String(key.algorithm.name).indexOf("KMAC") === 0) return __cToArrayBuffer(__cWebKmac(alg, key, bytes));
   return __cToArrayBuffer(__node_crypto.sign(__cSignHash(alg, key), bytes, __cSignOpts(alg, key)));
 }
 
@@ -3185,6 +3248,11 @@ function __cWebVerify(algorithm: any, key: any, signature: any, data: any): any 
     const mac: any = __node_crypto.createHmac(__cNodeHash(String(key.algorithm.hash.name)), key.__cKeyObject);
     const expected: Buffer = mac.update(bytes).digest();
     return expected.toString("hex") === sig.toString("hex");
+  }
+  if (String(key.algorithm.name).indexOf("KMAC") === 0) {
+    const expected: Buffer = __cWebKmac(alg, key, bytes);
+    if (Number(expected.length) !== Number(sig.length)) return false;
+    return __node_crypto.timingSafeEqual(expected, sig);
   }
   if (String(key.algorithm.name) === "ECDSA") {
     // A P1363 signature of the wrong length is simply invalid in WebCrypto.
@@ -3253,6 +3321,50 @@ function __cWebCrypt(encrypt: boolean, algorithm: any, key: any, data: any): any
       const head: Buffer = decipher.update(body);
       const tail: Buffer = decipher.final();
       plain = Buffer.concat([head, tail]);
+    } catch (error) {
+      throw __cOperationError();
+    }
+    return __cToArrayBuffer(plain);
+  }
+  if (name === "AES-KW") {
+    // RFC 3394 with the default IV, through the `id-aesN-wrap` cipher.
+    const bits: number = Number(key.__cKeyObject.symmetricKeySize) * 8;
+    const iv: Buffer = Buffer.from("a6a6a6a6a6a6a6a6", "hex");
+    if (Number(bytes.length) % 8 !== 0) throw __cOperationError();
+    const c: any = encrypt
+      ? __node_crypto.createCipheriv("id-aes" + bits + "-wrap", key.__cKeyObject, iv)
+      : __node_crypto.createDecipheriv("id-aes" + bits + "-wrap", key.__cKeyObject, iv);
+    let out: any = undefined;
+    try {
+      out = Buffer.concat([c.update(bytes), c.final()]);
+    } catch (error) {
+      throw __cOperationError();
+    }
+    return __cToArrayBuffer(out);
+  }
+  if (name === "ChaCha20-Poly1305") {
+    const iv: Buffer = __cSourceBuffer(alg.iv, "algorithm.iv");
+    if (Number(iv.length) !== 12) throw __cDomError("OperationError", "algorithm.iv must contain exactly 12 bytes");
+    if (alg.tagLength !== undefined && Number(alg.tagLength) !== 128) {
+      throw __cDomError("OperationError", alg.tagLength + " is not a valid ChaCha20-Poly1305 tag length");
+    }
+    const options: any = { authTagLength: 16 };
+    if (encrypt) {
+      const cipher: any = __node_crypto.createCipheriv("chacha20-poly1305", key.__cKeyObject, iv, options);
+      if (alg.additionalData !== undefined) cipher.setAAD(__cSourceBuffer(alg.additionalData, "algorithm.additionalData"));
+      const head: Buffer = cipher.update(bytes);
+      const tail: Buffer = cipher.final();
+      return __cToArrayBuffer(Buffer.concat([head, tail, cipher.getAuthTag()]));
+    }
+    if (Number(bytes.length) < 16) throw __cDomError("OperationError", "The provided data is too small.");
+    const body: Buffer = bytes.subarray(0, Number(bytes.length) - 16);
+    const tag: Buffer = bytes.subarray(Number(bytes.length) - 16);
+    const decipher: any = __node_crypto.createDecipheriv("chacha20-poly1305", key.__cKeyObject, iv, options);
+    if (alg.additionalData !== undefined) decipher.setAAD(__cSourceBuffer(alg.additionalData, "algorithm.additionalData"));
+    decipher.setAuthTag(tag);
+    let plain: any = undefined;
+    try {
+      plain = Buffer.concat([decipher.update(body), decipher.final()]);
     } catch (error) {
       throw __cOperationError();
     }
@@ -3362,9 +3474,13 @@ function __cWebGenerateKey(algorithm: any, extractable: any, usages: any): any {
   const alg: any = __cAlgorithm(algorithm);
   const name: string = __cAlgorithmName(alg);
   const list: any[] = usages === undefined ? [] : usages;
-  if (name === "HMAC" || name.indexOf("AES-") === 0) {
+  if (name === "HMAC" || name.indexOf("AES-") === 0 || name === "ChaCha20-Poly1305" || name.indexOf("KMAC") === 0) {
     let length: number = 0;
-    if (name === "HMAC") {
+    if (name === "ChaCha20-Poly1305") {
+      length = 256;
+    } else if (name.indexOf("KMAC") === 0) {
+      length = alg.length === undefined ? (name === "KMAC128" ? 128 : 256) : Number(alg.length);
+    } else if (name === "HMAC") {
       const hash: string = __cHashName(alg.hash);
       length = alg.length === undefined ? (hash === "SHA-384" || hash === "SHA-512" ? 1024 : 512) : Number(alg.length);
     } else {
@@ -3873,6 +3989,49 @@ const __node_crypto: any = {
   },
   getDiffieHellman(name: any): any {
     return new DiffieHellmanGroup(name);
+  },
+  // `crypto.encapsulate(key[, callback])` / `crypto.decapsulate(key,
+  // ciphertext[, callback])`: ML-KEM, RSASVE and DHKEM (see asym.rs).
+  encapsulate(key: any, callback?: any): any {
+    __cValidateKemKey(key);
+    if (callback !== undefined) __cValidateFunction(callback, "callback");
+    const parts: string[] = __cImportKey(key, false, "key");
+    let result: any = undefined;
+    try {
+      const fields: string[] = __cPayload(__cNative.cryptoEncapsulate(parts[0], parts[1])).split(__C_US);
+      result = {
+        sharedKey: Buffer.from(fields[0], "base64"),
+        ciphertext: Buffer.from(fields[1], "base64"),
+      };
+    } catch (error) {
+      if (callback === undefined) throw error;
+      __cTick(callback, error);
+      return undefined;
+    }
+    if (callback === undefined) return result;
+    __cTick(callback, null, result);
+    return undefined;
+  },
+  decapsulate(key: any, ciphertext: any, callback?: any): any {
+    __cValidateKemKey(key);
+    if (callback !== undefined) __cValidateFunction(callback, "callback");
+    const parts: string[] = __cImportKey(key, true, "key");
+    const ct: Buffer = __cSourceBuffer(ciphertext, "ciphertext");
+    let shared: any = undefined;
+    try {
+      shared = Buffer.from(
+        __cPayload(__cNative.cryptoDecapsulate(parts[0], parts[1], ct.toString("base64"))),
+        "base64",
+      );
+    } catch (error) {
+      if (callback === undefined) throw error;
+      // The async job reports Node's generic job failure.
+      __cTick(callback, new NodeError("ERR_CRYPTO_OPERATION_FAILED", "Deriving bits failed"));
+      return undefined;
+    }
+    if (callback === undefined) return shared;
+    __cTick(callback, null, shared);
+    return undefined;
   },
   diffieHellman(options: any, callback?: any): any {
     if (callback !== undefined) {
