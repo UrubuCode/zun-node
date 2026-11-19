@@ -1075,6 +1075,17 @@ class KeyObject {
     return __cExportKey(this, opts, "options");
   }
 
+  // The structured clone `MessagePort.postMessage` takes.
+  __zunClone(): any {
+    return __cNewKeyObject(String(this.type), this.__cBase64);
+  }
+
+  // `keyObject.toCryptoKey(algorithm, extractable, keyUsages)`.
+  toCryptoKey(algorithm: any, extractable: any, keyUsages: any): any {
+    const alg: any = __cAlgorithm(algorithm);
+    return __cMakeCryptoKey(this, alg, __cAlgorithmName(alg), Boolean(extractable), keyUsages);
+  }
+
   equals(other: any): boolean {
     if (!__cIsKeyObject(other)) {
       throw new ERR_INVALID_ARG_TYPE("otherKeyObject", "KeyObject", other);
@@ -1822,6 +1833,9 @@ class __CryptoDhBase {
   }
   computeSecret(key: any, inputEncoding?: any, outputEncoding?: any): any {
     const peer: string = __cToBase64(key, inputEncoding, "key");
+    // OpenSSL's `DH_check_pub_key`: a peer key of 0 or 1 is rejected.
+    const peerHex: string = Buffer.from(peer, "base64").toString("hex").replace(/^(00)+/, "");
+    if (peerHex === "" || peerHex === "01") throw new Error("Supplied key is too small");
     const secret: string = __cPayload(
       __cNative.cryptoModPow(peer, this.__cPrivate, this.__cPrime),
     );
@@ -1875,14 +1889,15 @@ class DiffieHellman extends __CryptoDhBase {
           "modulus too small",
         );
       }
-      this.__cPrime = __cPayload(__cNative.cryptoGeneratePrime(bits));
+      this.__cPrime = __cPayload(__cNative.cryptoGeneratePrimeEx(bits, true, "", ""));
     } else {
       this.__cPrime = __cToBase64(sizeOrKey, keyEnc, "sizeOrKey");
     }
     if (gen === undefined || gen === null) {
       this.__cGenerator = __cIntBytes(2);
     } else if (typeof gen === "number") {
-      const g: number = __cValidateInt32(gen, "generator");
+      // Through a fluke of history, a generator of 0 means DH_GENERATOR (2).
+      const g: number = Number(gen) === 0 ? 2 : __cValidateInt32(gen, "generator");
       if (g < 2) {
         throw new __CryptoOsslError(
           "ERR_OSSL_DH_BAD_GENERATOR",
@@ -2526,6 +2541,397 @@ function Certificate(this: any): any {
 };
 
 // ---------------------------------------------------------------------------
+// X509Certificate (`lib/internal/crypto/x509.js`)
+// ---------------------------------------------------------------------------
+//
+// The certificate is parsed once, natively (`cryptoX509`, see
+// `src/tls/x509.rs`'s `x509_fields` for the field order), and every getter
+// reads the resulting record. Signature checks go through `crypto.verify`
+// over the TBS bytes, and the public key through `createPublicKey`, so they
+// share the key code everything else uses.
+
+const __C_X509_ABSENT: string = "\u0001";
+
+function __cX509Der(buffer: any): Buffer {
+  let bytes: Buffer;
+  if (typeof buffer === "string") bytes = Buffer.from(String(buffer), "utf8");
+  else bytes = Buffer.from(__cAsBuffer(buffer));
+  const text: string = bytes.toString("latin1");
+  const begin: number = Number(text.indexOf("-----BEGIN CERTIFICATE-----"));
+  if (begin === -1) return bytes;
+  const bodyStart: number = begin + 27;
+  const end: number = Number(text.indexOf("-----END CERTIFICATE-----", bodyStart));
+  if (end === -1) return Buffer.alloc(0);
+  const body: string = text.slice(bodyStart, end).replace(/[^A-Za-z0-9+\/=]/g, "");
+  return Buffer.from(body, "base64");
+}
+
+function __cX509NameObject(lines: string): any {
+  const out: any = Object.create(null);
+  if (lines === "") return out;
+  for (const line of lines.split("\n")) {
+    const eq: number = Number(line.indexOf("="));
+    if (eq === -1) continue;
+    const key: string = line.slice(0, eq);
+    const value: string = line.slice(eq + 1);
+    const prev: any = out[key];
+    if (prev === undefined) out[key] = value;
+    else if (Array.isArray(prev)) prev.push(value);
+    else out[key] = [prev, value];
+  }
+  return out;
+}
+
+function __cX509Opt(text: string): any {
+  return text === __C_X509_ABSENT ? undefined : text;
+}
+
+function __cX509HasNul(text: string): boolean {
+  return text.indexOf("\u0000") !== -1;
+}
+
+// The `subjectAltName` entries of one kind (`DNS`, `email`, `IP Address`).
+function __cX509AltNames(san: string, kind: string): string[] {
+  const out: string[] = [];
+  if (san === __C_X509_ABSENT || san === "") return out;
+  for (const part of san.split(", ")) {
+    if (part.startsWith(kind + ":")) out.push(part.slice(Number(kind.length) + 1));
+  }
+  return out;
+}
+
+function __cX509SubjectValues(lines: string, key: string): string[] {
+  const out: string[] = [];
+  if (lines === "") return out;
+  for (const line of lines.split("\n")) {
+    if (line.startsWith(key + "=")) out.push(line.slice(Number(key.length) + 1));
+  }
+  return out;
+}
+
+function __cX509CheckOptions(options: any): any {
+  if (options === undefined) return {};
+  if (options === null || typeof options !== "object") {
+    throw new ERR_INVALID_ARG_TYPE("options", "object", options);
+  }
+  if (options.subject !== undefined) {
+    const subject: any = options.subject;
+    if (typeof subject !== "string") throw new ERR_INVALID_ARG_TYPE("options.subject", "string", subject);
+    if (subject !== "default" && subject !== "always" && subject !== "never") {
+      throw new ERR_INVALID_ARG_VALUE("options.subject", subject, "is invalid");
+    }
+  }
+  for (const key of ["wildcards", "partialWildcards", "multiLabelWildcards", "singleLabelSubdomains"]) {
+    const value: any = options[key];
+    if (value !== undefined && typeof value !== "boolean") {
+      throw new ERR_INVALID_ARG_TYPE("options." + key, "boolean", value);
+    }
+  }
+  return options;
+}
+
+function __cX509HostMatches(host: string, pattern: string, wildcards: boolean): boolean {
+  const h: string[] = host.toLowerCase().split(".");
+  const p: string[] = pattern.toLowerCase().split(".");
+  if (Number(h.length) !== Number(p.length)) return false;
+  let i: number = Number(h.length) - 1;
+  while (i > 0) {
+    if (h[i] !== p[i]) return false;
+    i = i - 1;
+  }
+  if (h[0] === p[0]) return true;
+  if (!wildcards || p[0] !== "*" || Number(p.length) < 3) return false;
+  return h[0] !== "";
+}
+
+function __cX509IsIP(text: string): boolean {
+  if (/^(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])){3}$/.test(text)) return true;
+  if (!/^[0-9A-Fa-f:.]+$/.test(text) || text.indexOf(":") === -1) return false;
+  return __cX509ExpandV6(text) !== "";
+}
+
+// OpenSSL's spelling of an IPv6 address: every group, upper case, no
+// leading zeros, no `::` compression. Empty when `text` is not an address.
+function __cX509ExpandV6(text: string): string {
+  const halves: string[] = text.split("::");
+  if (Number(halves.length) > 2) return "";
+  const head: string[] = halves[0] === "" ? [] : halves[0].split(":");
+  const tail: string[] = Number(halves.length) === 2 && halves[1] !== "" ? halves[1].split(":") : [];
+  const groups: string[] = [];
+  for (const g of head) groups.push(g);
+  if (Number(halves.length) === 2) {
+    let missing: number = 8 - Number(head.length) - Number(tail.length);
+    if (missing < 1) return "";
+    while (missing > 0) {
+      groups.push("0");
+      missing = missing - 1;
+    }
+  }
+  for (const g of tail) groups.push(g);
+  if (Number(groups.length) !== 8) return "";
+  const out: string[] = [];
+  for (const g of groups) {
+    if (!/^[0-9A-Fa-f]{1,4}$/.test(g)) return "";
+    out.push(parseInt(g, 16).toString(16).toUpperCase());
+  }
+  return out.join(":");
+}
+
+class X509Certificate {
+  __cFields: any = undefined;
+  __cDer: any = undefined;
+  __cKey: any = undefined;
+
+  constructor(buffer: any) {
+    if (typeof buffer !== "string" && !__cIsByteView(buffer)) {
+      throw new ERR_INVALID_ARG_TYPE("buffer", ["string", "Buffer", "TypedArray", "DataView"], buffer);
+    }
+    const der: Buffer = __cX509Der(buffer);
+    const payload: string = __cPayload(__cNative.cryptoX509(der.toString("base64")));
+    if (payload === "") {
+      const error: any = new Error("error:0680007B:asn1 encoding routines::header too long");
+      error.code = "ERR_OSSL_ASN1_HEADER_TOO_LONG";
+      throw error;
+    }
+    this.__cFields = payload.split(__C_US);
+    this.__cDer = der;
+  }
+
+  __zunClone(): any {
+    return new X509Certificate(Buffer.from(this.__cDer));
+  }
+
+  get subject(): any {
+    return this.__cFields[0];
+  }
+  get issuer(): any {
+    return this.__cFields[1];
+  }
+  get subjectAltName(): any {
+    return __cX509Opt(this.__cFields[10]);
+  }
+  get infoAccess(): any {
+    return __cX509Opt(this.__cFields[11]);
+  }
+  get validFrom(): any {
+    return this.__cFields[2];
+  }
+  get validTo(): any {
+    return this.__cFields[3];
+  }
+  get validFromDate(): any {
+    return new Date(Number(this.__cFields[4]) * 1000);
+  }
+  get validToDate(): any {
+    return new Date(Number(this.__cFields[5]) * 1000);
+  }
+  get fingerprint(): any {
+    return this.__cFields[7];
+  }
+  get fingerprint256(): any {
+    return this.__cFields[8];
+  }
+  get fingerprint512(): any {
+    return this.__cFields[9];
+  }
+  get keyUsage(): any {
+    const eku: string = this.__cFields[13];
+    if (eku === __C_X509_ABSENT) return undefined;
+    return eku === "" ? [] : eku.split(",");
+  }
+  get serialNumber(): any {
+    return this.__cFields[6];
+  }
+  get signatureAlgorithm(): any {
+    const name: string = this.__cFields[15];
+    return name === "" ? undefined : name;
+  }
+  get signatureAlgorithmOid(): any {
+    return this.__cFields[14];
+  }
+  get raw(): any {
+    return Buffer.from(this.__cDer);
+  }
+  // OpenSSL's `X509_check_ca`: a CA basic constraint only counts when a
+  // keyUsage extension, if present, allows certificate signing.
+  get ca(): any {
+    const usage: number = Number(this.__cFields[22]);
+    return this.__cFields[12] === "1" && (usage === -1 || (usage & 4) !== 0);
+  }
+  get issuerCertificate(): any {
+    return undefined;
+  }
+  get publicKey(): any {
+    if (this.__cKey !== undefined) return this.__cKey;
+    let key: any = undefined;
+    try {
+      key = __node_crypto.createPublicKey({
+        key: Buffer.from(String(this.__cFields[19]), "base64"),
+        format: "der",
+        type: "spki",
+      });
+    } catch (cause) {
+      const error: any = new Error("error:05800088:x509 certificate routines::decode error");
+      error.code = "ERR_OSSL_X509_DECODE_ERROR";
+      throw error;
+    }
+    this.__cKey = key;
+    return key;
+  }
+
+  checkHost(name: any, options?: any): any {
+    __cValidateString(name, "name");
+    const host: string = String(name);
+    if (__cX509HasNul(host)) throw new ERR_INVALID_ARG_VALUE("name", name, "must not contain null bytes");
+    const opts: any = __cX509CheckOptions(options);
+    const wildcards: boolean = opts.wildcards !== false;
+    const dns: string[] = __cX509AltNames(String(this.__cFields[10]), "DNS");
+    for (const pattern of dns) if (__cX509HostMatches(host, pattern, wildcards)) return pattern;
+    const mode: any = opts.subject === undefined ? "default" : opts.subject;
+    if (mode === "never" || (mode === "default" && Number(dns.length) > 0)) return undefined;
+    for (const cn of __cX509SubjectValues(String(this.__cFields[0]), "CN")) {
+      if (__cX509HostMatches(host, cn, wildcards)) return cn;
+    }
+    return undefined;
+  }
+
+  checkEmail(email: any, options?: any): any {
+    __cValidateString(email, "email");
+    const text: string = String(email);
+    if (__cX509HasNul(text)) throw new ERR_INVALID_ARG_VALUE("email", email, "must not contain null bytes");
+    const opts: any = __cX509CheckOptions(options);
+    const lower: string = text.toLowerCase();
+    const emails: string[] = __cX509AltNames(String(this.__cFields[10]), "email");
+    for (const e of emails) if (e.toLowerCase() === lower) return e;
+    const mode: any = opts.subject === undefined ? "default" : opts.subject;
+    if (mode === "never" || (mode === "default" && Number(emails.length) > 0)) return undefined;
+    for (const e of __cX509SubjectValues(String(this.__cFields[0]), "emailAddress")) {
+      if (e.toLowerCase() === lower) return e;
+    }
+    return undefined;
+  }
+
+  checkIP(ip: any): any {
+    __cValidateString(ip, "ip");
+    const text: string = String(ip);
+    if (!__cX509IsIP(text)) throw new ERR_INVALID_ARG_VALUE("ip", ip, "is not a valid IP address");
+    const want: string = text.indexOf(":") === -1 ? text : __cX509ExpandV6(text);
+    for (const entry of __cX509AltNames(String(this.__cFields[10]), "IP Address")) {
+      if (entry === want) return text;
+    }
+    return undefined;
+  }
+
+  checkIssued(otherCert: any): any {
+    if (!(otherCert instanceof X509Certificate)) {
+      throw new ERR_INVALID_ARG_TYPE("otherCert", "X509Certificate", otherCert);
+    }
+    const other: any = otherCert;
+    if (other.__cFields[21] !== this.__cFields[20]) return false;
+    const usage: number = Number(other.__cFields[22]);
+    if (usage !== -1 && (usage & 4) === 0) return false;
+    const akid: string = this.__cFields[24];
+    const skid: string = other.__cFields[23];
+    if (akid !== "" && skid !== "" && akid !== skid) return false;
+    return true;
+  }
+
+  checkPrivateKey(pkey: any): any {
+    if (!(pkey instanceof KeyObject)) throw new ERR_INVALID_ARG_TYPE("pkey", "KeyObject", pkey);
+    const key: any = pkey;
+    if (String(key.type) !== "private") throw new ERR_INVALID_ARG_VALUE("pkey", pkey, "is invalid");
+    try {
+      const spki: any = __node_crypto.createPublicKey(key).export({ format: "der", type: "spki" });
+      return spki.toString("base64") === String(this.__cFields[19]);
+    } catch (error) {
+      return false;
+    }
+  }
+
+  verify(pkey: any): any {
+    if (!(pkey instanceof KeyObject)) throw new ERR_INVALID_ARG_TYPE("pkey", "KeyObject", pkey);
+    const key: any = pkey;
+    if (String(key.type) !== "public") throw new ERR_INVALID_ARG_VALUE("pkey", pkey, "is invalid");
+    const digest: string = this.__cFields[16];
+    try {
+      return __node_crypto.verify(
+        digest === "" ? null : digest,
+        Buffer.from(String(this.__cFields[17]), "base64"),
+        key,
+        Buffer.from(String(this.__cFields[18]), "base64"),
+      ) === true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  toString(): string {
+    const b64: string = this.__cDer.toString("base64");
+    let out: string = "-----BEGIN CERTIFICATE-----\n";
+    let i = 0;
+    const n: number = Number(b64.length);
+    while (i < n) {
+      out = out + b64.slice(i, i + 64) + "\n";
+      i = i + 64;
+    }
+    return out + "-----END CERTIFICATE-----\n";
+  }
+
+  toJSON(): any {
+    return this.toString();
+  }
+
+  toLegacyObject(): any {
+    const f: any = this.__cFields;
+    const cert: any = {};
+    cert.subject = __cX509NameObject(f[0]);
+    cert.issuer = __cX509NameObject(f[1]);
+    if (f[10] !== __C_X509_ABSENT) cert.subjectaltname = f[10];
+    if (f[11] !== __C_X509_ABSENT) {
+      const info: any = Object.create(null);
+      for (const line of String(f[11]).split("\n")) {
+        const colon: number = Number(line.indexOf(":"));
+        if (colon === -1) continue;
+        const key: string = line.slice(0, colon);
+        const value: string = line.slice(colon + 1);
+        if (info[key] === undefined) info[key] = [value];
+        else info[key].push(value);
+      }
+      cert.infoAccess = info;
+    }
+    cert.ca = f[12] === "1";
+    if (f[26] !== "") {
+      cert.modulus = f[26];
+      cert.bits = Number(f[25]);
+      cert.exponent = f[27];
+    } else if (f[25] !== "") {
+      cert.bits = Number(f[25]);
+      if (f[28] !== "") cert.asn1Curve = f[28];
+      if (f[29] !== "") cert.nistCurve = f[29];
+    }
+    cert.pubkey = Buffer.from(String(f[19]), "base64");
+    cert.valid_from = f[2];
+    cert.valid_to = f[3];
+    cert.fingerprint = f[7];
+    cert.fingerprint256 = f[8];
+    cert.fingerprint512 = f[9];
+    if (f[13] !== __C_X509_ABSENT) cert.ext_key_usage = f[13] === "" ? [] : String(f[13]).split(",");
+    cert.serialNumber = f[6];
+    cert.raw = Buffer.from(this.__cDer);
+    return cert;
+  }
+}
+
+function __cIsX509Certificate(value: any): boolean {
+  return value instanceof X509Certificate;
+}
+
+const __node_internal_crypto_x509: any = {
+  X509Certificate: X509Certificate,
+  isX509Certificate: __cIsX509Certificate,
+};
+
+// ---------------------------------------------------------------------------
 // WebCrypto
 // ---------------------------------------------------------------------------
 //
@@ -2536,7 +2942,7 @@ function Certificate(this: any): any {
 // `createCipheriv`/`hkdfSync`/`pbkdf2Sync`/`diffieHellman`. The algorithms
 // are RSASSA-PKCS1-v1_5, RSA-PSS, RSA-OAEP, ECDSA, ECDH, Ed25519, Ed448,
 // X25519, X448, HMAC, AES-CBC/CTR/GCM, HKDF and PBKDF2; `generateKey`,
-// `deriveKey`, `wrapKey` and `unwrapKey` still reject. Every result is
+// `deriveKey`, `wrapKey` and `unwrapKey` compose those. Every result is
 // computed synchronously and delivered as a settled promise.
 
 class CryptoKey {
@@ -2551,6 +2957,9 @@ class CryptoKey {
     this.algorithm = algorithm;
     this.extractable = extractable;
     this.usages = usages;
+  }
+  __zunClone(): any {
+    return new CryptoKey(this.__cKeyObject.__zunClone(), this.algorithm, this.extractable, this.usages);
   }
 }
 
@@ -2588,6 +2997,7 @@ function __cAlgorithm(algorithm: any): any {
 const __C_WEB_ALGORITHMS: string[] = [
   "RSASSA-PKCS1-v1_5", "RSA-PSS", "RSA-OAEP", "ECDSA", "ECDH", "Ed25519", "Ed448",
   "X25519", "X448", "HMAC", "AES-CBC", "AES-CTR", "AES-GCM", "AES-KW", "HKDF", "PBKDF2",
+  "ChaCha20-Poly1305", "KMAC128", "KMAC256",
 ];
 
 function __cAlgorithmName(algorithm: any): string {
@@ -2643,7 +3053,10 @@ function __cImportCryptoKey(format: any, keyData: any, algorithm: any, extractab
   const name: string = __cAlgorithmName(alg);
   const fmt: string = String(format);
   let keyObject: any = undefined;
-  if (name === "HMAC" || name.indexOf("AES-") === 0 || name === "HKDF" || name === "PBKDF2") {
+  if (
+    name === "HMAC" || name.indexOf("AES-") === 0 || name === "HKDF" || name === "PBKDF2" ||
+    name === "ChaCha20-Poly1305" || name === "KMAC128" || name === "KMAC256"
+  ) {
     if (fmt === "raw") {
       keyObject = __node_crypto.createSecretKey(__cSourceBuffer(keyData, "keyData"));
     } else if (fmt === "jwk") {
@@ -2670,25 +3083,65 @@ function __cImportCryptoKey(format: any, keyData: any, algorithm: any, extractab
   } else {
     throw __cDomError("NotSupportedError", "Unable to import " + name + " key with format " + fmt);
   }
+  return __cMakeCryptoKey(keyObject, alg, name, extractable, usages);
+}
+
+const __C_EC_WEB_CURVE: any = { prime256v1: "P-256", secp384r1: "P-384", secp521r1: "P-521" };
+
+// The `CryptoKey` over `keyObject` for the normalised algorithm, with the
+// WebCrypto import checks (`lib/internal/crypto/keys.js`'s `toCryptoKey`).
+function __cMakeCryptoKey(keyObject: any, alg: any, name: string, extractable: any, usages: any): any {
+  const list: any[] = usages === undefined ? [] : usages;
   const out: any = { name: name };
-  if (name === "HMAC") {
-    out.hash = { name: __cHashName(alg.hash) };
-    out.length = Number(keyObject.symmetricKeySize) * 8;
-  } else if (name.indexOf("AES-") === 0) {
-    out.length = Number(keyObject.symmetricKeySize) * 8;
-  } else if (name.indexOf("RSA") === 0) {
-    const details: any = keyObject.asymmetricKeyDetails;
-    out.modulusLength = details.modulusLength;
-    out.publicExponent = new Uint8Array([1, 0, 1]);
-    out.hash = { name: __cHashName(alg.hash) };
-  } else if (name === "ECDSA" || name === "ECDH") {
-    const curve: any = alg.namedCurve;
-    if (__C_WEB_CURVES.indexOf(String(curve)) < 0) {
-      throw __cDomError("NotSupportedError", "Unrecognized namedCurve");
+  const type: string = String(keyObject.type);
+  if (type === "secret") {
+    const bits: number = Number(keyObject.symmetricKeySize) * 8;
+    if (name === "HKDF" || name === "PBKDF2") {
+      if (extractable) throw __cDomError("SyntaxError", name + " keys are not extractable");
+      for (const usage of list) {
+        if (usage !== "deriveBits" && usage !== "deriveKey") {
+          throw __cDomError("SyntaxError", "Unsupported key usage for a " + name + " key");
+        }
+      }
+    } else if (Number(list.length) === 0) {
+      throw __cDomError("SyntaxError", "Usages cannot be empty when importing a secret key.");
     }
-    out.namedCurve = curve;
+    if (name === "HMAC" || name === "KMAC128" || name === "KMAC256") {
+      if (bits === 0) throw __cDomError("DataError", "Zero-length key is not supported");
+      if (alg.length !== undefined && Number(alg.length) === 0) {
+        throw __cDomError("DataError", (name === "HMAC" ? "Hmac" : "Kmac") + "ImportParams.length cannot be 0");
+      }
+      if (name === "HMAC") out.hash = { name: __cHashName(alg.hash) };
+      out.length = alg.length === undefined ? bits : Number(alg.length);
+    } else if (name.indexOf("AES-") === 0) {
+      out.length = bits;
+    }
+  } else {
+    if (type === "private" && Number(list.length) === 0) {
+      throw __cDomError("SyntaxError", "Usages cannot be empty when importing a private key.");
+    }
+    const keyType: string = String(keyObject.asymmetricKeyType);
+    if (name === "Ed25519" || name === "Ed448" || name === "X25519" || name === "X448") {
+      if (keyType !== name.toLowerCase()) throw __cDomError("DataError", "Invalid key type");
+    } else if (name.indexOf("RSA") === 0) {
+      if (keyType !== "rsa" && keyType !== "rsa-pss") throw __cDomError("DataError", "Invalid key type");
+      const details: any = keyObject.asymmetricKeyDetails;
+      out.modulusLength = details.modulusLength;
+      out.publicExponent = new Uint8Array([1, 0, 1]);
+      out.hash = { name: __cHashName(alg.hash) };
+    } else if (name === "ECDSA" || name === "ECDH") {
+      const curve: any = alg.namedCurve;
+      if (__C_WEB_CURVES.indexOf(String(curve)) < 0) {
+        throw __cDomError("NotSupportedError", "Unrecognized namedCurve");
+      }
+      if (keyType !== "ec") throw __cDomError("DataError", "Invalid key type");
+      const details: any = keyObject.asymmetricKeyDetails;
+      const own: any = __C_EC_WEB_CURVE[String(details.namedCurve)];
+      if (own !== undefined && own !== curve) throw __cDomError("DataError", "Named curve mismatch");
+      out.namedCurve = curve;
+    }
   }
-  return new CryptoKey(keyObject, out, Boolean(extractable), usages === undefined ? [] : usages);
+  return new CryptoKey(keyObject, out, Boolean(extractable), list);
 }
 
 function __cSignOpts(alg: any, key: any): any {
@@ -2891,6 +3344,75 @@ function __cWebExportKey(format: any, key: any): any {
   throw __cDomError("NotSupportedError", "Unable to export a key with format " + fmt);
 }
 
+// A copy of `key` that also allows `usage`: `deriveKey`, `wrapKey` and
+// `unwrapKey` run the `deriveBits`/`encrypt`/`decrypt` step over the key the
+// caller authorised for the composite operation.
+function __cWithUsage(key: any, usage: string): any {
+  const held: any = key;
+  const list: any[] = held.usages.slice();
+  if (list.indexOf(usage) < 0) list.push(usage);
+  return new CryptoKey(held.__cKeyObject, held.algorithm, held.extractable, list);
+}
+
+// `subtle.generateKey`: the Node generators, wrapped. A key pair resolves
+// `{ publicKey, privateKey }`, each half holding the usages that apply to it.
+const __C_PUBLIC_USAGES: string[] = ["encrypt", "verify", "wrapKey"];
+
+function __cWebGenerateKey(algorithm: any, extractable: any, usages: any): any {
+  const alg: any = __cAlgorithm(algorithm);
+  const name: string = __cAlgorithmName(alg);
+  const list: any[] = usages === undefined ? [] : usages;
+  if (name === "HMAC" || name.indexOf("AES-") === 0) {
+    let length: number = 0;
+    if (name === "HMAC") {
+      const hash: string = __cHashName(alg.hash);
+      length = alg.length === undefined ? (hash === "SHA-384" || hash === "SHA-512" ? 1024 : 512) : Number(alg.length);
+    } else {
+      length = Number(alg.length);
+      if (length !== 128 && length !== 192 && length !== 256) {
+        throw __cDomError("OperationError", "AES key length must be 128, 192, or 256 bits");
+      }
+    }
+    if (Number(list.length) === 0) {
+      throw __cDomError("SyntaxError", "Usages cannot be empty when creating a key.");
+    }
+    const secret: any = __node_crypto.createSecretKey(__node_crypto.randomBytes(Math.ceil(length / 8)));
+    return __cMakeCryptoKey(secret, alg, name, extractable, list);
+  }
+  let pair: any = undefined;
+  if (name.indexOf("RSA") === 0) {
+    const exponentBytes: any = alg.publicExponent === undefined ? new Uint8Array([1, 0, 1]) : alg.publicExponent;
+    let exponent: number = 0;
+    for (let i = 0; i < Number(exponentBytes.length); i++) exponent = exponent * 256 + Number(exponentBytes[i]);
+    pair = __node_crypto.generateKeyPairSync(name === "RSA-PSS" ? "rsa-pss" : "rsa", {
+      modulusLength: Number(alg.modulusLength),
+      publicExponent: exponent,
+    });
+  } else if (name === "ECDSA" || name === "ECDH") {
+    if (__C_WEB_CURVES.indexOf(String(alg.namedCurve)) < 0) {
+      throw __cDomError("NotSupportedError", "Unrecognized namedCurve");
+    }
+    pair = __node_crypto.generateKeyPairSync("ec", { namedCurve: String(alg.namedCurve) });
+  } else if (name === "Ed25519" || name === "Ed448" || name === "X25519" || name === "X448") {
+    pair = __node_crypto.generateKeyPairSync(name.toLowerCase());
+  } else {
+    throw __cDomError("NotSupportedError", "Unrecognized algorithm name");
+  }
+  const publicUsages: any[] = [];
+  const privateUsages: any[] = [];
+  for (const usage of list) {
+    if (__C_PUBLIC_USAGES.indexOf(String(usage)) >= 0) publicUsages.push(usage);
+    else privateUsages.push(usage);
+  }
+  if (Number(privateUsages.length) === 0) {
+    throw __cDomError("SyntaxError", "Usages cannot be empty when creating a key.");
+  }
+  return {
+    publicKey: __cMakeCryptoKey(pair.publicKey, alg, name, true, publicUsages),
+    privateKey: __cMakeCryptoKey(pair.privateKey, alg, name, extractable, privateUsages),
+  };
+}
+
 const __cSubtle: any = {
   digest(algorithm: any, data: any): any {
     let name: any = algorithm;
@@ -2936,17 +3458,49 @@ const __cSubtle: any = {
       return __cWebDeriveBits(algorithm, baseKey, length);
     });
   },
-  generateKey(): any {
-    return Promise.reject(new ERR_CRYPTO_UNSUPPORTED_OPERATION());
+  generateKey(algorithm: any, extractable: any, usages: any): any {
+    return __cWebPromise(function (): any {
+      return __cWebGenerateKey(algorithm, extractable, usages);
+    });
   },
-  deriveKey(): any {
-    return Promise.reject(new ERR_CRYPTO_UNSUPPORTED_OPERATION());
+  deriveKey(algorithm: any, baseKey: any, derivedKeyAlgorithm: any, extractable: any, usages: any): any {
+    return __cWebPromise(function (): any {
+      __cCheckUsage(baseKey, "deriveKey");
+      const target: any = __cAlgorithm(derivedKeyAlgorithm);
+      const targetName: string = __cAlgorithmName(target);
+      let length: any = target.length;
+      if (targetName === "HMAC" && length === undefined) {
+        const hash: string = __cHashName(target.hash);
+        length = hash === "SHA-384" || hash === "SHA-512" ? 1024 : 512;
+      }
+      if (length === undefined && (targetName === "HKDF" || targetName === "PBKDF2")) length = null;
+      return __cImportCryptoKey("raw", __cWebDeriveBits(algorithm, __cWithUsage(baseKey, "deriveBits"), length), target, extractable, usages);
+    });
   },
-  wrapKey(): any {
-    return Promise.reject(new ERR_CRYPTO_UNSUPPORTED_OPERATION());
+  wrapKey(format: any, key: any, wrappingKey: any, wrapAlgorithm: any): any {
+    return __cWebPromise(function (): any {
+      __cCheckUsage(wrappingKey, "wrapKey");
+      const exported: any = __cWebExportKey(format, key);
+      const bytes: any = String(format) === "jwk" ? Buffer.from(JSON.stringify(exported), "utf8") : exported;
+      return __cWebCrypt(true, wrapAlgorithm, __cWithUsage(wrappingKey, "encrypt"), bytes);
+    });
   },
-  unwrapKey(): any {
-    return Promise.reject(new ERR_CRYPTO_UNSUPPORTED_OPERATION());
+  unwrapKey(
+    format: any,
+    wrappedKey: any,
+    unwrappingKey: any,
+    unwrapAlgorithm: any,
+    unwrappedKeyAlgorithm: any,
+    extractable: any,
+    usages: any,
+  ): any {
+    return __cWebPromise(function (): any {
+      __cCheckUsage(unwrappingKey, "unwrapKey");
+      const plain: any = __cWebCrypt(false, unwrapAlgorithm, __cWithUsage(unwrappingKey, "decrypt"), wrappedKey);
+      let keyData: any = plain;
+      if (String(format) === "jwk") keyData = JSON.parse(Buffer.from(plain).toString("utf8"));
+      return __cImportCryptoKey(format, keyData, unwrappedKeyAlgorithm, extractable, usages);
+    });
   },
 };
 
@@ -3207,6 +3761,7 @@ const __node_crypto: any = {
   // The asymmetric surface
   // ---------------------------------------------------------------------
   Certificate: Certificate,
+  X509Certificate: X509Certificate,
   CryptoKey: CryptoKey,
   Sign: Sign,
   Verify: Verify,
@@ -3422,3 +3977,17 @@ Object.defineProperty(__node_crypto, "constants", {
 // this second name, which the checker has no opinion about, leaving every
 // other use of the word alone. It denotes the same object.
 const __zunCrypto: any = __node_crypto;
+
+// `globalThis.crypto.subtle` is this module's `SubtleCrypto`. The engine's
+// prelude `crypto` object does not take a new `subtle` property, so the
+// global is replaced by one that forwards the WinterCG pair to the prelude.
+const __cPreludeCrypto: any = (globalThis as any).crypto;
+(globalThis as any).crypto = {
+  subtle: __cSubtle,
+  getRandomValues(view: any): any {
+    return __cPreludeCrypto.getRandomValues(view);
+  },
+  randomUUID(): any {
+    return __cPreludeCrypto.randomUUID();
+  },
+};

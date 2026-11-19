@@ -260,6 +260,7 @@ internal/util/inspect __node_internal_util_inspect -
 vm __node_vm Script,compileFunction,createContext,SourceTextModule,SyntheticModule
 crypto __node_crypto Hash,Hmac,Cipheriv,Decipheriv,KeyObject,Sign,Verify,ECDH,DiffieHellman,DiffieHellmanGroup
 [.][.]/common/crypto __node_harness_crypto -
+internal/crypto/x509 __node_internal_crypto_x509 -
 test __node_test test
 test/reporters __node_test_reporters -
 internal/test_runner/utils __node_internal_test_runner_utils -
@@ -441,6 +442,10 @@ crypto src/buffer/buffer.ts
 crypto src/string_decoder/string_decoder.ts
 crypto src/stream/stream.ts
 crypto src/crypto/crypto.ts
+internal/crypto/x509 src/buffer/buffer.ts
+internal/crypto/x509 src/string_decoder/string_decoder.ts
+internal/crypto/x509 src/stream/stream.ts
+internal/crypto/x509 src/crypto/crypto.ts
 [.][.]/common/crypto src/buffer/buffer.ts
 [.][.]/common/crypto src/string_decoder/string_decoder.ts
 [.][.]/common/crypto src/stream/stream.ts

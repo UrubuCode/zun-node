@@ -1182,6 +1182,12 @@ pub(crate) const DESCRIPTORS: &[Descriptor] = &[
         invoke: asym::spkac,
     },
     Descriptor {
+        key: b"cryptoX509\0",
+        params: &[Str],
+        ret: Str,
+        invoke: asym::x509,
+    },
+    Descriptor {
         key: b"cryptoKeyImport\0",
         params: &[Str, Str, Str, Str, Bool, Bool],
         ret: Str,
