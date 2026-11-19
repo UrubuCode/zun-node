@@ -94,6 +94,7 @@ pub(crate) mod ff;
 pub(crate) mod hash;
 pub(crate) mod kdf;
 pub(crate) mod mac;
+pub(crate) mod pqc;
 pub(crate) mod random;
 
 #[cfg(test)]
@@ -587,6 +588,25 @@ pub(crate) unsafe extern "C" fn hkdf(
         },
     };
     unsafe { ret_str(out, &payload) }
+}
+
+/// `cryptoKmac(wide, key, data, length, customization)` → `+<base64>`.
+pub(crate) unsafe extern "C" fn kmac(
+    args: *const ZunValue,
+    n: usize,
+    out: *mut ZunValue,
+) -> i32 {
+    let wide = unsafe { crate::abi::arg_bool(args, n, 0) };
+    let mut parts: Vec<Vec<u8>> = Vec::new();
+    for i in [1usize, 2, 4] {
+        match unsafe { arg_str(args, n, i) } {
+            Ok(text) => parts.push(base64::decode(text)),
+            Err(status) => return status,
+        }
+    }
+    let length = unsafe { arg_i64(args, n, 3) }.max(0) as usize;
+    let mac = mac::kmac(wide, &parts[0], &parts[1], length, &parts[2]);
+    unsafe { ret_str(out, &ok_one(&base64::encode(&mac))) }
 }
 
 /// `cryptoTimingSafeEqual(a, b)` → whether the two base64 payloads are equal,
@@ -1085,6 +1105,12 @@ pub(crate) const DESCRIPTORS: &[Descriptor] = &[
         invoke: hkdf,
     },
     Descriptor {
+        key: b"cryptoKmac\0",
+        params: &[Bool, Str, Str, I64, Str],
+        ret: Str,
+        invoke: kmac,
+    },
+    Descriptor {
         key: b"cryptoTimingSafeEqual\0",
         params: &[Str, Str],
         ret: Bool,
@@ -1270,6 +1296,18 @@ pub(crate) const DESCRIPTORS: &[Descriptor] = &[
         params: &[Str, Str],
         ret: Str,
         invoke: asym::diffie_hellman_keys,
+    },
+    Descriptor {
+        key: b"cryptoEncapsulate\0",
+        params: &[Str, Str],
+        ret: Str,
+        invoke: asym::encapsulate,
+    },
+    Descriptor {
+        key: b"cryptoDecapsulate\0",
+        params: &[Str, Str, Str],
+        ret: Str,
+        invoke: asym::decapsulate,
     },
     Descriptor {
         key: b"cryptoDhGroup\0",

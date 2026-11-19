@@ -81,7 +81,14 @@ zun_abi = { path = "../crates/zun_abi" }
 #     `uv_random`/OpenSSL's `RAND_bytes` draw from and the only acceptable one
 #     for `randomBytes`/`randomUUID`/`getRandomValues`.
 #
-# Not here, and absent from the module: X.509, DSA, the CCM/OCB/XTS/key-wrap modes and the legacy block
+#   * `ml-dsa`, `ml-kem` -- FIPS 204 / FIPS 203, the post-quantum key
+#     families (src/crypto/pqc.rs). They pull their own newer `sha3`/`hybrid-array`
+#     copies; both are pure Rust.
+#
+# AES key wrap (RFC 3394/5649) and KMAC (SP 800-185, over `sha3`'s cSHAKE)
+# are a few lines each in cipher.rs / mac.rs.
+#
+# Not here, and absent from the module: the CCM/OCB/XTS modes, 3DES key wrap and the legacy block
 # ciphers (DES, Camellia, ARIA, SM4). See test/crypto/README.md.
 digest = { version = "0.10", features = ["std", "mac"] }
 md-5 = { version = "0.10", default-features = false }
@@ -142,6 +149,8 @@ rustls = { version = "0.23", default-features = false, features = ["std", "tls12
 rustls-rustcrypto = { version = "0.1.0-pre.0", default-features = false, features = ["std", "tls12"] }
 x509-cert = { version = "0.2", default-features = false, features = ["std"] }
 der = { version = "0.7", default-features = false, features = ["std", "oid"] }
+ml-dsa = { version = "0.1.2", default-features = false, features = ["alloc"] }
+ml-kem = { version = "0.3.4", default-features = false }
 
 
 # ---------------------------------------------------------------------------
