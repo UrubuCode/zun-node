@@ -924,7 +924,9 @@ esac
 # `common.spawnPromisified` (tools/harness/common.ts) spawns through
 # `child_process`, which a test calling only that helper never requires: the
 # module is appended for any test that names it, with the append-once rule.
-case "$SRC_TEXT" in *spawnPromisified*)
+# `common.childShouldThrowAndAbort` (the `…-abort-on-uncaught-*` corpus) execs
+# the test again the same way.
+case "$SRC_TEXT" in *spawnPromisified*|*childShouldThrowAndAbort*)
   for required in src/buffer/buffer.ts src/string_decoder/string_decoder.ts src/stream/stream.ts \
       src/child_process/child_process.ts; do
     case "

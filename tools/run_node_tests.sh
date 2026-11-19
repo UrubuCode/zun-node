@@ -118,8 +118,14 @@ case "$MODULE" in
   # `diagnostics_channel` and `console` are both pure Zun TypeScript: a channel
   # is a map and a list, and a console is formatting plus a `write` call, so
   # neither has a syscall of its own to put behind the ABI.
+  #
+  # The `diagnostics_channel` kind is nevertheless `zun-ts+ext`, as `domain`'s
+  # is: the built-in-channel tests (`-net`, `-http`, `-udp`, `-process`,
+  # `-worker-threads`) require modules that *are* syscalls, and without `--ext`
+  # they die on "needs the zun-node native extension" instead of on what they
+  # actually check about the channels.
   diagnostics_channel)
-          KIND="zun-ts";     PATTERNS="test-diagnostics-channel";         PATTERN="test-diagnostics-channel";;
+          KIND="zun-ts+ext";     PATTERNS="test-diagnostics-channel";         PATTERN="test-diagnostics-channel";;
   console) KIND="zun-ts";    PATTERNS="test-console";                     PATTERN="test-console";;
   # `domain` is pure Zun TypeScript: it is bookkeeping over `events`,
   # `process.nextTick` and `timers`, and the one capability Node's version
@@ -175,7 +181,9 @@ case "$MODULE" in
   # `node:v8` gives about a heap belongs to a V8 isolate that does not exist
   # here -- so there is no syscall for a native to make. See the resolution
   # table in src/v8/v8.ts.
-  v8)     KIND="zun-ts";     PATTERNS="test-v8-";                          PATTERN="test-v8-";;
+  # Its kind is `zun-ts+ext` all the same: the coverage tests read their
+  # output through `fs`, which is syscalls.
+  v8)     KIND="zun-ts+ext";   PATTERNS="test-v8-";                          PATTERN="test-v8-";;
   # `vm` is Zun TypeScript over the engine's own run-time compile path: the
   # checker lowers `new Function(...)` to the `functionConstruct` intrinsic and
   # the driver's `EvalHost` answers it with the project's compiler, so no
@@ -187,7 +195,7 @@ case "$MODULE" in
   # colour-depth table is `process.env` arithmetic and the two terminal streams
   # are `Duplex`es -- over the one predicate src/process/process.ts already
   # answers, `isatty(fd)`.
-  tty)    KIND="zun-ts";     PATTERNS="test-tty- test-ttywrap";
+  tty)    KIND="zun-ts";        PATTERNS="test-tty- test-ttywrap";
           PATTERN="test-tty-*|test-ttywrap";;
   # `dns` is TS over natives: src/dns/*.rs holds the system resolver
   # (`getaddrinfo`/`getnameinfo`), the machine's resolver configuration and a

@@ -620,6 +620,40 @@ const common: any = {
   // spread into `spawnSync(...common.pwdCommand, { cwd })`.
   pwdCommand: process.platform === "win32" ? ["cmd.exe", ["/d", "/c", "cd"]] : ["pwd", []],
 
+  // `test/common/index.js`' `nodeProcessAborted(exitCode, signal)`: did a child
+  // die the way `--abort-on-uncaught-exception` makes it die? On Windows that
+  // is the breakpoint status 0x80000003 or `_exit(134)`; elsewhere 132/133/134
+  // or one of SIGILL/SIGTRAP/SIGABRT.
+  nodeProcessAborted(exitCode: any, signal: any): boolean {
+    const codes: number[] = process.platform === "win32" ? [0x80000003, 134] : [132, 133, 134];
+    const signals: string[] = ["SIGILL", "SIGTRAP", "SIGABRT"];
+    if (signal !== null && signal !== undefined) return signals.indexOf(String(signal)) >= 0;
+    return codes.indexOf(Number(exitCode)) >= 0;
+  },
+
+  // `test/common/index.js`' `childShouldThrowAndAbort()`: run this test again as
+  // `<execPath> --abort-on-uncaught-exception <script> child` and assert that
+  // the child aborted. `child_process` is reached through `__libModules`, which
+  // the bundler fills for any test naming this helper.
+  childShouldThrowAndAbort(): void {
+    const cp: any = __libModules.child_process;
+    if (cp === undefined || cp === null) {
+      throw new Error("common.childShouldThrowAndAbort: child_process is not in this bundle");
+    }
+    const command: string =
+      '"' + String(process.argv[0]) + '" --abort-on-uncaught-exception "' + String(process.argv[1]) + '" child';
+    const child: any = cp.exec(command);
+    const self: any = common;
+    child.on("exit", (exitCode: any, signal: any) => {
+      const message: string =
+        "Test should have aborted but instead exited with exit code " + String(exitCode) +
+        " and signal " + String(signal);
+      if (self.nodeProcessAborted(exitCode, signal) !== true) {
+        __harnessFail(message);
+      }
+    });
+  },
+
   // `test/common/index.js`' `escapePOSIXShell`, a tagged template that builds a
   // `[command, options]` pair safe to hand to a shell. On Windows the
   // substitutions go in literally (a Windows path cannot contain a `"`); on
@@ -670,6 +704,13 @@ const common: any = {
   // `common.skipIf32Bits()`. Every target the engine builds for is 64-bit, so
   // this never skips.
   skipIf32Bits(): void {},
+
+  // `common.skipIfInspectorDisabled()`. There is no inspector in this runtime
+  // (`process.features.inspector` is false), so the test takes its skip, as it
+  // does on a Node built `--without-inspector`.
+  skipIfInspectorDisabled(): void {
+    common.skip("V8 inspector is disabled");
+  },
 
   // `common.runWithInvalidFD(func)`. Node probes downward from `1 << 30` with
   // `fs.fstatSync` for a descriptor that is not open; this harness cannot name

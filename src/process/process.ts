@@ -826,6 +826,14 @@ function __processReportUncaught(error: any): void {
     text = "Uncaught exception";
   }
   host.stderrWrite(text + "\n");
+  // `--abort-on-uncaught-exception` turns an unhandled exception into an
+  // abort, with no 'exit' event. Node's Windows build ends with `_exit(134)` in
+  // place of SIGABRT, and 134 is a status `common.nodeProcessAborted` accepts
+  // on every platform, so that is the status used here.
+  if (__processArgvSplit.execArgv.indexOf("--abort-on-uncaught-exception") >= 0) {
+    host.exitProcess(134);
+    return;
+  }
   process.exit(1);
 }
 
